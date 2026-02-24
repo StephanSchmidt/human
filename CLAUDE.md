@@ -23,6 +23,10 @@ Use 'sd' instead of 'sed'
 Is it about interacting with YAML or XML? use 'yq'
 For accessing Github **ALWAYS** use 'gh'
 
+# Commit
+
+When asked to commit, go through changes and create atomar commits that have one connected change each.
+
 # Code
 
 **ALWAYS** use WithDetails for error creation.
