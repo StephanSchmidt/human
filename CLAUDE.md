@@ -7,11 +7,11 @@ Phase 1: Interact with issue trackers with product management issues and create 
 # Project Structure
 
 - `cmd/human/` — CLI entry point
+- `internal/tracker/` — Provider-agnostic issue tracker interfaces (Lister, Getter, Creator, etc.)
 - `internal/jira/` — Jira API client and types
-- `tracker/` — Provider-agnostic issue tracker interfaces (Lister, Getter, Creator, etc.)
 - `errors/` — Custom error handling (WithDetails)
 
-tracker/ is an abstraction layer for issue trackers. **ALWAYS** define new tracker operations as interfaces in `tracker/`. **NEVER** add provider-specific types or logic to `tracker/`. Concrete implementations (JIRA, Linear, Github, etc.) go under `internal/<provider>/` and **MUST** implement the `tracker/` interfaces.
+internal/tracker/ is an abstraction layer for issue trackers. **ALWAYS** define new tracker operations as interfaces in `internal/tracker/`. **NEVER** add provider-specific types or logic to `internal/tracker/`. Concrete implementations (JIRA, Linear, Github, etc.) go under `internal/<provider>/` and **MUST** implement the `internal/tracker/` interfaces.
 
 # Tools
 

@@ -12,7 +12,7 @@ import (
 
 	"human/errors"
 	"human/internal/jira"
-	"human/tracker"
+	"human/internal/tracker"
 )
 
 // CLI is the top-level Kong struct with global flags.

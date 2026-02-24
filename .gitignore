@@ -1,3 +1,4 @@
 bin/
 /human
 .env
+coverage.out

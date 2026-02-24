@@ -9,7 +9,7 @@ import (
 
 	"human/errors"
 	"human/internal/jira/adf"
-	"human/tracker"
+	"human/internal/tracker"
 )
 
 // Client is a Jira REST API client that implements tracker.Lister and tracker.Getter.
