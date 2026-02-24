@@ -23,35 +23,12 @@ Required environment variables:
 make build
 ```
 
-## CLI usage
-
-Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.env` — and you can mix all three. Flags override env vars.
-
-With everything in `.env` (simplest):
-
-```bash
-human issues list --project=KAN
-human issue get KAN-1
-```
-
-With explicit flags:
-
-```bash
-human --jira-url=https://yourorg.atlassian.net --jira-user=you@example.com --jira-key=YOUR_TOKEN issues list --project=KAN
-```
-
-Mixed (e.g. URL and user from `.env`, token from a secret manager):
-
-```bash
-human --jira-key=$(op item get "Jira API Key" --fields notesPlain) issue get KAN-1 | llm 'summarize this'
-```
-
 ## Claude Code usage
 
 Install the Claude Code skills and agents into your project:
 
 ```bash
-human install claude
+human install --agent claude
 ```
 
 This writes skill and agent files to `.claude/` in the current directory. Re-run after upgrading `human` to pick up changes.
@@ -77,3 +54,26 @@ The `/human-plan` skill fetches a ticket, explores the codebase, and produces a 
 ```
 
 The plan is written to `.human/plans/kan-1.md`.
+
+## CLI usage
+
+Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.env` — and you can mix all three. Flags override env vars.
+
+With everything in `.env` (simplest):
+
+```bash
+human issues list --project=KAN
+human issue get KAN-1
+```
+
+With explicit flags:
+
+```bash
+human --jira-url=https://yourorg.atlassian.net --jira-user=you@example.com --jira-key=YOUR_TOKEN issues list --project=KAN
+```
+
+Mixed (e.g. URL and user from `.env`, token from a secret manager):
+
+```bash
+human --jira-key=$(op item get "Jira API Key" --fields notesPlain) issue get KAN-1 | llm 'summarize this'
+```
