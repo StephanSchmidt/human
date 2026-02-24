@@ -24,28 +24,27 @@ type CLI struct {
 	JiraUser string     `kong:"env='JIRA_USER',help='Jira user email'"`
 	Issues   IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
 	Issue    IssueCmd   `kong:"cmd,help='Single issue operations'"`
-	Install  InstallCmd `kong:"cmd,help='Install integrations'"`
+	Install  InstallCmd `kong:"cmd,help='Install agent integrations'"`
 }
 
-// --- install claude ---
+// --- install ---
 
-// InstallCmd is the parent command for install subcommands.
+// InstallCmd installs agent integrations.
 type InstallCmd struct {
-	Claude ClaudeInstallCmd `kong:"cmd,help='Install Claude Code skill and agent'"`
+	Agent    string `kong:"required,enum='claude',help='Agent to install (claude)'"`
+	Personal bool   `kong:"help='Install to ~/.claude/ (personal) instead of .claude/ (project)'"`
 }
 
-// ClaudeInstallCmd installs the Claude Code skill and agent files.
-type ClaudeInstallCmd struct {
-	Personal bool `kong:"help='Install to ~/.claude/ (personal) instead of .claude/ (project)'"`
-}
-
-// Run executes the install claude command.
-func (cmd *ClaudeInstallCmd) Run() error {
-	fmt.Println("Installing Claude Code files...")
-	if err := claude.Install(os.Stdout, claude.OSFileWriter{}, cmd.Personal); err != nil {
-		return err
+// Run executes the install command.
+func (cmd *InstallCmd) Run() error {
+	switch cmd.Agent {
+	case "claude":
+		fmt.Println("Installing Claude Code files...")
+		if err := claude.Install(os.Stdout, claude.OSFileWriter{}, cmd.Personal); err != nil {
+			return err
+		}
+		fmt.Println("Done. Skill: /human-plan <ticket-key>")
 	}
-	fmt.Println("Done. Skill: /human-plan <ticket-key>")
 	return nil
 }
 
@@ -139,7 +138,7 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, "  human --jira-url=$JIRA_URL --jira-user=$JIRA_USER --jira-key=$JIRA_KEY issue get KAN-1 | llm 'summarize this'")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent (no Jira credentials needed)")
-	_, _ = fmt.Fprintln(w, "  human install claude")
+	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 
 	return nil
 }
