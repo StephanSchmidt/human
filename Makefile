@@ -1,0 +1,33 @@
+-include .env
+export
+
+.PHONY: all build test lint sec check clean
+
+build:
+	go build -o bin/human ./cmd/human
+
+test:
+	go test ./...
+
+lint:
+	go vet ./...
+	go tool staticcheck ./...
+	go tool golangci-lint run ./...
+	go tool nilaway ./...
+
+sec:
+	go tool gosec -exclude=G704 ./...
+	go tool govulncheck ./...
+
+check: lint sec
+
+clean:
+	go clean -cache -i
+
+all: lint sec build
+
+jira-list: build
+	./bin/human --jira-key=$$($(OP) item get "Jira API Key" --fields notesPlain) issues list --project KAN
+
+jira-get: build
+	./bin/human --jira-key=$$($(OP) item get "Jira API Key" --fields notesPlain) issue get $(ISSUE)
