@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/alecthomas/kong"
@@ -11,17 +12,41 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"human/errors"
+	"human/internal/claude"
 	"human/internal/jira"
 	"human/internal/tracker"
 )
 
 // CLI is the top-level Kong struct with global flags.
 type CLI struct {
-	JiraKey  string    `kong:"required,env='JIRA_KEY',help='Jira API token'"`
-	JiraURL  string    `kong:"required,env='JIRA_URL',help='Jira base URL'"`
-	JiraUser string    `kong:"required,env='JIRA_USER',help='Jira user email'"`
-	Issues   IssuesCmd `kong:"cmd,help='Bulk issue operations'"`
-	Issue    IssueCmd  `kong:"cmd,help='Single issue operations'"`
+	JiraKey  string     `kong:"env='JIRA_KEY',help='Jira API token'"`
+	JiraURL  string     `kong:"env='JIRA_URL',help='Jira base URL'"`
+	JiraUser string     `kong:"env='JIRA_USER',help='Jira user email'"`
+	Issues   IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
+	Issue    IssueCmd   `kong:"cmd,help='Single issue operations'"`
+	Install  InstallCmd `kong:"cmd,help='Install integrations'"`
+}
+
+// --- install claude ---
+
+// InstallCmd is the parent command for install subcommands.
+type InstallCmd struct {
+	Claude ClaudeInstallCmd `kong:"cmd,help='Install Claude Code skill and agent'"`
+}
+
+// ClaudeInstallCmd installs the Claude Code skill and agent files.
+type ClaudeInstallCmd struct {
+	Personal bool `kong:"help='Install to ~/.claude/ (personal) instead of .claude/ (project)'"`
+}
+
+// Run executes the install claude command.
+func (cmd *ClaudeInstallCmd) Run() error {
+	fmt.Println("Installing Claude Code files...")
+	if err := claude.Install(os.Stdout, claude.OSFileWriter{}, cmd.Personal); err != nil {
+		return err
+	}
+	fmt.Println("Done. Skill: /human-plan <ticket-key>")
+	return nil
 }
 
 // --- issues list ---
@@ -112,6 +137,9 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Pipe issue details to another tool")
 	_, _ = fmt.Fprintln(w, "  human --jira-url=$JIRA_URL --jira-user=$JIRA_USER --jira-key=$JIRA_KEY issue get KAN-1 | llm 'summarize this'")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent (no Jira credentials needed)")
+	_, _ = fmt.Fprintln(w, "  human install claude")
 
 	return nil
 }
@@ -134,9 +162,15 @@ func main() {
 		kong.UsageOnError(),
 	)
 
-	client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
-	ctx.BindTo(client, (*tracker.Lister)(nil))
-	ctx.BindTo(client, (*tracker.Getter)(nil))
+	if !strings.HasPrefix(ctx.Command(), "install") {
+		if cli.JiraURL == "" || cli.JiraUser == "" || cli.JiraKey == "" {
+			fmt.Fprintln(os.Stderr, "error: missing required Jira config (--jira-url, --jira-user, --jira-key or env vars)")
+			os.Exit(1)
+		}
+		client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
+		ctx.BindTo(client, (*tracker.Lister)(nil))
+		ctx.BindTo(client, (*tracker.Getter)(nil))
+	}
 
 	if err := ctx.Run(); err != nil {
 		errors.LogError(err).Msg("command failed")

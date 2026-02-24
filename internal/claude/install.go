@@ -1,0 +1,99 @@
+package claude
+
+import (
+	_ "embed"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"human/errors"
+)
+
+//go:embed embed/human-plan-skill.md
+var skillContent []byte
+
+//go:embed embed/human-planner-agent.md
+var agentContent []byte
+
+//go:embed embed/human-triage-skill.md
+var triageSkillContent []byte
+
+//go:embed embed/human-triage-agent.md
+var triageAgentContent []byte
+
+// FileWriter abstracts filesystem operations for testability.
+type FileWriter interface {
+	MkdirAll(path string, perm os.FileMode) error
+	WriteFile(name string, data []byte, perm os.FileMode) error
+	ReadFile(name string) ([]byte, error)
+}
+
+// OSFileWriter implements FileWriter using the os package.
+type OSFileWriter struct{}
+
+func (OSFileWriter) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+func (OSFileWriter) WriteFile(name string, data []byte, perm os.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+
+func (OSFileWriter) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(name)
+}
+
+type embeddedFile struct {
+	content []byte
+	relPath string
+}
+
+// Install writes the Claude Code skill and agent files to disk.
+// When personal is true, files are written under ~/.claude/ instead of .claude/.
+func Install(w io.Writer, fw FileWriter, personal bool) error {
+	baseDir := ".claude"
+	if personal {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return errors.WrapWithDetails(err, "resolving home directory")
+		}
+		baseDir = filepath.Join(home, ".claude")
+	}
+
+	files := []embeddedFile{
+		{content: skillContent, relPath: filepath.Join("skills", "human-plan", "SKILL.md")},
+		{content: agentContent, relPath: filepath.Join("agents", "human-planner.md")},
+		{content: triageSkillContent, relPath: filepath.Join("skills", "human-triage", "SKILL.md")},
+		{content: triageAgentContent, relPath: filepath.Join("agents", "human-triage.md")},
+	}
+
+	for _, f := range files {
+		dest := filepath.Join(baseDir, f.relPath)
+
+		if err := fw.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			return errors.WrapWithDetails(err, "creating directory",
+				"path", filepath.Dir(dest))
+		}
+
+		existing, err := fw.ReadFile(dest)
+		if err == nil && string(existing) == string(f.content) {
+			_, _ = fmt.Fprintf(w, "  unchanged %s\n", dest)
+			continue
+		}
+
+		action := "created"
+		if err == nil {
+			action = "updated"
+		}
+
+		if err := fw.WriteFile(dest, f.content, 0o644); err != nil {
+			return errors.WrapWithDetails(err, "writing file",
+				"path", dest)
+		}
+
+		_, _ = fmt.Fprintf(w, "  %s %s\n", action, dest)
+	}
+
+	return nil
+}
