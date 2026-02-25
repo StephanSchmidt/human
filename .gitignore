@@ -2,3 +2,4 @@ bin/
 /human
 .humanconfig
 coverage.out
+test.sh
