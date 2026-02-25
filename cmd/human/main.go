@@ -20,9 +20,16 @@ import (
 	"github.com/stephanschmidt/human/internal/tracker"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 // CLI is the top-level Kong struct with global flags.
 type CLI struct {
-	TrackerName string     `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
+	Version     kong.VersionFlag `kong:"help='Print version information'"`
+	TrackerName string           `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
 	JiraKey     string     `kong:"env='JIRA_KEY',help='Jira API token'"`
 	JiraURL     string     `kong:"env='JIRA_URL',help='Jira base URL'"`
 	JiraUser    string     `kong:"env='JIRA_USER',help='Jira user email'"`
@@ -423,6 +430,7 @@ func main() {
 		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, and Linear. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
+		kong.Vars{"version": version + " (" + commit + ") " + date},
 	)
 
 	if needsTrackerClient(ctx.Command()) {

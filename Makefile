@@ -1,7 +1,9 @@
-.PHONY: all build install test coverage lint sec secrets check clean upgrade-deps
+.PHONY: all build install test coverage lint sec secrets check clean upgrade-deps release
+
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
 build:
-	go build -o bin/human ./cmd/human
+	go build -ldflags "-X main.version=dev -X main.commit=$$(git rev-parse --short HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o bin/human ./cmd/human
 
 install:
 	go install ./cmd/human
@@ -37,3 +39,10 @@ upgrade-deps:
 	go get -u ./...
 	go mod tidy
 	go tool gotestsum ./...
+
+release:
+	@test -z "$$(git status --porcelain)" || (echo "error: working tree is dirty" && exit 1)
+	@echo "Tagging $(VERSION)..."
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	git push origin $(VERSION)
+	go tool goreleaser release --clean
