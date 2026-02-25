@@ -3,10 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,115 +16,150 @@ func unsetEnv(t *testing.T, key string) {
 	require.NoError(t, os.Unsetenv(key))
 }
 
-func TestSetEnvFromConfig(t *testing.T) {
+// writeConfig writes a .humanconfig.yaml file in dir with the given content.
+func writeConfig(t *testing.T, dir, content string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(content), 0o644))
+}
+
+func TestLoadJiraConfigs(t *testing.T) {
 	tests := []struct {
-		name      string
-		yaml      string
-		mapping   map[string]string
-		presetEnv map[string]string
-		wantEnv   map[string]string
+		name    string
+		yaml    string
+		want    []JiraConfig
+		wantErr string
 	}{
 		{
-			name: "sets env when absent",
-			yaml: "jira:\n  url: https://example.atlassian.net",
-			mapping: map[string]string{
-				"jira.url": "TEST_JIRA_URL",
-			},
-			wantEnv: map[string]string{
-				"TEST_JIRA_URL": "https://example.atlassian.net",
+			name: "single entry",
+			yaml: "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n",
+			want: []JiraConfig{
+				{Name: "work", URL: "https://work.atlassian.net", User: "me@work.com", Key: "tok1"},
 			},
 		},
 		{
-			name: "skips when env already set",
-			yaml: "jira:\n  url: https://from-config.atlassian.net",
-			mapping: map[string]string{
-				"jira.url": "TEST_JIRA_URL",
-			},
-			presetEnv: map[string]string{
-				"TEST_JIRA_URL": "https://from-env.atlassian.net",
-			},
-			wantEnv: map[string]string{
-				"TEST_JIRA_URL": "https://from-env.atlassian.net",
+			name: "multiple entries",
+			yaml: "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n  - name: personal\n    url: https://personal.atlassian.net\n    user: me@personal.com\n    key: tok2\n",
+			want: []JiraConfig{
+				{Name: "work", URL: "https://work.atlassian.net", User: "me@work.com", Key: "tok1"},
+				{Name: "personal", URL: "https://personal.atlassian.net", User: "me@personal.com", Key: "tok2"},
 			},
 		},
 		{
-			name: "skips empty values",
-			yaml: "jira:\n  url: \"\"",
-			mapping: map[string]string{
-				"jira.url": "TEST_JIRA_URL",
-			},
-			wantEnv: map[string]string{
-				"TEST_JIRA_URL": "",
-			},
+			name: "empty list",
+			yaml: "jiras: []\n",
+			want: []JiraConfig{},
 		},
 		{
-			name: "handles multiple keys",
-			yaml: "jira:\n  url: https://example.atlassian.net\n  user: me@example.com",
-			mapping: map[string]string{
-				"jira.url":  "TEST_JIRA_URL",
-				"jira.user": "TEST_JIRA_USER",
-			},
-			wantEnv: map[string]string{
-				"TEST_JIRA_URL":  "https://example.atlassian.net",
-				"TEST_JIRA_USER": "me@example.com",
-			},
+			name:    "invalid YAML",
+			yaml:    ":\n  :\n  invalid: [unterminated",
+			wantErr: "parsing config file",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up env vars used in this test.
-			for _, envVar := range tt.mapping {
-				unsetEnv(t, envVar)
+			dir := t.TempDir()
+			writeConfig(t, dir, tt.yaml)
+
+			got, err := LoadJiraConfigs(dir)
+
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
 			}
 
-			for k, v := range tt.presetEnv {
-				t.Setenv(k, v)
-			}
-
-			v := viper.New()
-			v.SetConfigType("yaml")
-			require.NoError(t, v.ReadConfig(strings.NewReader(tt.yaml)))
-
-			require.NoError(t, setEnvFromConfig(v, tt.mapping))
-
-			for envVar, wantVal := range tt.wantEnv {
-				got, exists := os.LookupEnv(envVar)
-				if wantVal == "" && !exists {
-					continue // empty value means unset is fine
-				}
-				assert.Equal(t, wantVal, got, "env var %s", envVar)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestLoadConfig_missingFile(t *testing.T) {
+func TestLoadJiraConfigs_missingFile(t *testing.T) {
 	dir := t.TempDir()
-	err := LoadConfig(dir)
-	assert.NoError(t, err)
+	got, err := LoadJiraConfigs(dir)
+	require.NoError(t, err)
+	assert.Nil(t, got)
 }
 
-func TestLoadConfig_validFile(t *testing.T) {
+func TestLoadJiraConfigs_extensionlessFallback(t *testing.T) {
 	dir := t.TempDir()
-	configContent := "jira:\n  url: https://test.atlassian.net\n  user: test@example.com\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(configContent), 0o644))
+	content := "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig"), []byte(content), 0o644))
+
+	got, err := LoadJiraConfigs(dir)
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "work", got[0].Name)
+}
+
+func TestLoadConfig_defaultsToFirst(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: first\n    url: https://first.atlassian.net\n    user: first@example.com\n    key: tok1\n  - name: second\n    url: https://second.atlassian.net\n    user: second@example.com\n    key: tok2\n")
 
 	unsetEnv(t, "JIRA_URL")
 	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
 
-	err := LoadConfig(dir)
+	err := LoadConfig(dir, "")
 	require.NoError(t, err)
 
-	assert.Equal(t, "https://test.atlassian.net", os.Getenv("JIRA_URL"))
-	assert.Equal(t, "test@example.com", os.Getenv("JIRA_USER"))
+	assert.Equal(t, "https://first.atlassian.net", os.Getenv("JIRA_URL"))
+	assert.Equal(t, "first@example.com", os.Getenv("JIRA_USER"))
+	assert.Equal(t, "tok1", os.Getenv("JIRA_KEY"))
 }
 
-func TestLoadConfig_invalidYAML(t *testing.T) {
+func TestLoadConfig_selectsByName(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(":\n  :\n  invalid: [unterminated"), 0o644))
+	writeConfig(t, dir, "jiras:\n  - name: first\n    url: https://first.atlassian.net\n    user: first@example.com\n    key: tok1\n  - name: second\n    url: https://second.atlassian.net\n    user: second@example.com\n    key: tok2\n")
 
-	err := LoadConfig(dir)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "parsing config file")
+	unsetEnv(t, "JIRA_URL")
+	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
+
+	err := LoadConfig(dir, "second")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://second.atlassian.net", os.Getenv("JIRA_URL"))
+	assert.Equal(t, "second@example.com", os.Getenv("JIRA_USER"))
+	assert.Equal(t, "tok2", os.Getenv("JIRA_KEY"))
+}
+
+func TestLoadConfig_unknownName(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
+
+	err := LoadConfig(dir, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown jira config")
+}
+
+func TestLoadConfig_envOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
+
+	t.Setenv("JIRA_URL", "https://from-env.atlassian.net")
+	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
+
+	err := LoadConfig(dir, "")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://from-env.atlassian.net", os.Getenv("JIRA_URL"))
+	assert.Equal(t, "me@work.com", os.Getenv("JIRA_USER"))
+	assert.Equal(t, "tok1", os.Getenv("JIRA_KEY"))
+}
+
+func TestLoadConfig_missingFile(t *testing.T) {
+	dir := t.TempDir()
+	err := LoadConfig(dir, "")
+	assert.NoError(t, err)
+}
+
+func TestLoadConfig_emptyList(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras: []\n")
+
+	err := LoadConfig(dir, "")
+	assert.NoError(t, err)
 }
