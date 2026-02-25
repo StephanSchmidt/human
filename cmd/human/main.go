@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -20,12 +21,77 @@ import (
 
 // CLI is the top-level Kong struct with global flags.
 type CLI struct {
+	Jira     string     `kong:"help='Named Jira config from .humanconfig (uses first entry when omitted)'"`
 	JiraKey  string     `kong:"env='JIRA_KEY',help='Jira API token'"`
 	JiraURL  string     `kong:"env='JIRA_URL',help='Jira base URL'"`
 	JiraUser string     `kong:"env='JIRA_USER',help='Jira user email'"`
 	Issues   IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
 	Issue    IssueCmd   `kong:"cmd,help='Single issue operations'"`
-	Install  InstallCmd `kong:"cmd,help='Install agent integrations'"`
+	Install  InstallCmd  `kong:"cmd,help='Install agent integrations'"`
+	Tracker  TrackerCmd  `kong:"cmd,help='Manage tracker connections'"`
+}
+
+// --- tracker list ---
+
+// TrackerCmd groups tracker subcommands.
+type TrackerCmd struct {
+	List TrackerListCmd `kong:"cmd,help='List configured tracker instances (JSON)'"`
+}
+
+// trackerEntry is the JSON output structure for a single tracker instance.
+type trackerEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+	User string `json:"user"`
+}
+
+// TrackerListCmd prints all configured tracker instances.
+type TrackerListCmd struct {
+	Table bool `kong:"help='Output as human-readable table instead of JSON'"`
+}
+
+// Run lists configured tracker instances.
+func (cmd *TrackerListCmd) Run() error {
+	configs, err := config.LoadJiraConfigs(".")
+	if err != nil {
+		return err
+	}
+
+	entries := make([]trackerEntry, len(configs))
+	for i, c := range configs {
+		entries[i] = trackerEntry{
+			Name: c.Name,
+			Type: "jira",
+			URL:  c.URL,
+			User: c.User,
+		}
+	}
+
+	if cmd.Table {
+		return printTrackerTable(entries)
+	}
+	return printTrackerJSON(entries)
+}
+
+func printTrackerJSON(entries []trackerEntry) error {
+	fmt.Println("// Configured issue trackers. Use --jira=<name> to select one.")
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(entries)
+}
+
+func printTrackerTable(entries []trackerEntry) error {
+	if len(entries) == 0 {
+		fmt.Println("No trackers configured in .humanconfig")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER")
+	for _, e := range entries {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User)
+	}
+	return w.Flush()
 }
 
 // --- install ---
@@ -165,10 +231,28 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, "  # Create a new issue in a project")
 	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # List configured trackers (JSON)")
+	_, _ = fmt.Fprintln(w, "  human tracker list")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Use a specific Jira config by name")
+	_, _ = fmt.Fprintln(w, "  human --jira=work issues list --project=KAN")
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent (no Jira credentials needed)")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 
 	return nil
+}
+
+// needsJiraClient returns true for commands that require Jira credentials.
+func needsJiraClient(command string) bool {
+	switch {
+	case strings.HasPrefix(command, "install"):
+		return false
+	case strings.HasPrefix(command, "tracker"):
+		return false
+	default:
+		return true
+	}
 }
 
 // --- main ---
@@ -176,14 +260,9 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
-	// Load .humanconfig if present (fills env gaps not covered by shell).
-	if err := config.LoadConfig("."); err != nil {
-		log.Warn().Err(err).Msg("failed to parse .humanconfig")
-	}
-
-	// Show help when invoked without arguments.
+	// Show tracker list when invoked without arguments.
 	if len(os.Args) < 2 {
-		os.Args = append(os.Args, "--help")
+		os.Args = append(os.Args, "tracker", "list")
 	}
 
 	var cli CLI
@@ -194,7 +273,24 @@ func main() {
 		kong.UsageOnError(),
 	)
 
-	if !strings.HasPrefix(ctx.Command(), "install") {
+	// Load .humanconfig after parsing so --jira flag is available.
+	// Config values fill env gaps not covered by flags or shell env.
+	if err := config.LoadConfig(".", cli.Jira); err != nil {
+		log.Warn().Err(err).Msg("failed to parse .humanconfig")
+	}
+
+	// Backfill CLI fields from env vars that LoadConfig may have set.
+	if cli.JiraURL == "" {
+		cli.JiraURL = os.Getenv("JIRA_URL")
+	}
+	if cli.JiraUser == "" {
+		cli.JiraUser = os.Getenv("JIRA_USER")
+	}
+	if cli.JiraKey == "" {
+		cli.JiraKey = os.Getenv("JIRA_KEY")
+	}
+
+	if needsJiraClient(ctx.Command()) {
 		if cli.JiraURL == "" || cli.JiraUser == "" || cli.JiraKey == "" {
 			fmt.Fprintln(os.Stderr, "error: missing required Jira config (--jira-url, --jira-user, --jira-key or env vars)")
 			os.Exit(1)
