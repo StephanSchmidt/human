@@ -14,7 +14,6 @@ import (
 
 	"human/errors"
 	"human/internal/claude"
-	"human/internal/config"
 	"human/internal/github"
 	"human/internal/jira"
 	"human/internal/tracker"
@@ -56,31 +55,14 @@ type TrackerListCmd struct {
 
 // Run lists configured tracker instances.
 func (cmd *TrackerListCmd) Run() error {
-	var entries []trackerEntry
-
-	jiraConfigs, err := config.LoadJiraConfigs(".")
+	instances, err := loadAllInstances(".")
 	if err != nil {
 		return err
 	}
-	for _, c := range jiraConfigs {
-		entries = append(entries, trackerEntry{
-			Name: c.Name,
-			Type: "jira",
-			URL:  c.URL,
-			User: c.User,
-		})
-	}
 
-	ghConfigs, err := config.LoadGitHubConfigs(".")
-	if err != nil {
-		return err
-	}
-	for _, c := range ghConfigs {
-		entries = append(entries, trackerEntry{
-			Name: c.Name,
-			Type: "github",
-			URL:  c.URL,
-		})
+	entries := make([]trackerEntry, len(instances))
+	for i, inst := range instances {
+		entries[i] = trackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User}
 	}
 
 	if cmd.Table {
@@ -137,12 +119,13 @@ type IssuesCmd struct {
 }
 
 type ListCmd struct {
-	Project string `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
-	Table   bool   `kong:"help='Output as human-readable table instead of JSON'"`
+	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
+	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
+	Provider tracker.Provider `kong:"-"`
 }
 
-func (cmd *ListCmd) Run(l tracker.Lister) error {
-	issues, err := l.ListIssues(context.TODO(), tracker.ListOptions{
+func (cmd *ListCmd) Run() error {
+	issues, err := cmd.Provider.ListIssues(context.TODO(), tracker.ListOptions{
 		Project:    cmd.Project,
 		MaxResults: 50,
 	})
@@ -179,11 +162,12 @@ type IssueCmd struct {
 }
 
 type GetCmd struct {
-	Key string `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123)'"`
+	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123)'"`
+	Provider tracker.Provider `kong:"-"`
 }
 
-func (cmd *GetCmd) Run(g tracker.Getter) error {
-	issue, err := g.GetIssue(context.TODO(), cmd.Key)
+func (cmd *GetCmd) Run() error {
+	issue, err := cmd.Provider.GetIssue(context.TODO(), cmd.Key)
 	if err != nil {
 		return err
 	}
@@ -213,14 +197,15 @@ func (cmd *GetCmd) Run(g tracker.Getter) error {
 // --- issue create ---
 
 type CreateCmd struct {
-	Project     string `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
-	Type        string `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
-	Summary     string `kong:"arg,required,help='Issue summary'"`
-	Description string `kong:"help='Issue description (markdown)'"`
+	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
+	Type        string           `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
+	Summary     string           `kong:"arg,required,help='Issue summary'"`
+	Description string           `kong:"help='Issue description (markdown)'"`
+	Provider    tracker.Provider `kong:"-"`
 }
 
-func (cmd *CreateCmd) Run(c tracker.Creator) error {
-	issue, err := c.CreateIssue(context.TODO(), &tracker.Issue{
+func (cmd *CreateCmd) Run() error {
+	issue, err := cmd.Provider.CreateIssue(context.TODO(), &tracker.Issue{
 		Project:     cmd.Project,
 		Type:        cmd.Type,
 		Summary:     cmd.Summary,
@@ -287,6 +272,55 @@ func needsTrackerClient(command string) bool {
 	}
 }
 
+// loadAllInstances collects tracker instances from all provider configs.
+func loadAllInstances(dir string) ([]tracker.Instance, error) {
+	var all []tracker.Instance
+
+	ji, err := jira.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, ji...)
+
+	gi, err := github.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(all, gi...), nil
+}
+
+// instanceFromCLI builds a tracker instance from CLI flags, returning nil
+// when insufficient flags are provided.
+func instanceFromCLI(cli *CLI) *tracker.Instance {
+	if cli.JiraURL != "" && cli.JiraUser != "" && cli.JiraKey != "" {
+		return &tracker.Instance{
+			Kind:     "jira",
+			URL:      cli.JiraURL,
+			User:     cli.JiraUser,
+			Provider: jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey),
+		}
+	}
+	if cli.GitHubToken != "" {
+		url := cli.GitHubURL
+		if url == "" {
+			url = "https://api.github.com"
+		}
+		return &tracker.Instance{
+			Kind:     "github",
+			URL:      url,
+			Provider: github.New(url, cli.GitHubToken),
+		}
+	}
+	return nil
+}
+
+// setProvider sets the Provider field on all commands that need it.
+func setProvider(cli *CLI, p tracker.Provider) {
+	cli.Issues.List.Provider = p
+	cli.Issue.Get.Provider = p
+	cli.Issue.Create.Provider = p
+}
+
 // --- main ---
 
 func main() {
@@ -306,64 +340,27 @@ func main() {
 	)
 
 	if needsTrackerClient(ctx.Command()) {
-		kind, err := config.ResolveTracker(".", cli.TrackerName)
+		instances, err := loadAllInstances(".")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
 
-		backfillJiraEnv(&cli)
-		backfillGitHubEnv(&cli)
-
-		switch kind {
-		case config.TrackerJira:
-			if cli.JiraURL == "" || cli.JiraUser == "" || cli.JiraKey == "" {
-				fmt.Fprintln(os.Stderr, "error: missing required Jira config (--jira-url, --jira-user, --jira-key or env vars)")
-				os.Exit(1)
-			}
-			client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
-			ctx.BindTo(client, (*tracker.Lister)(nil))
-			ctx.BindTo(client, (*tracker.Getter)(nil))
-			ctx.BindTo(client, (*tracker.Creator)(nil))
-
-		case config.TrackerGitHub:
-			if cli.GitHubToken == "" {
-				fmt.Fprintln(os.Stderr, "error: missing required GitHub config (--github-token or GITHUB_TOKEN env var)")
-				os.Exit(1)
-			}
-			if cli.GitHubURL == "" {
-				cli.GitHubURL = "https://api.github.com"
-			}
-			client := github.New(cli.GitHubURL, cli.GitHubToken)
-			ctx.BindTo(client, (*tracker.Lister)(nil))
-			ctx.BindTo(client, (*tracker.Getter)(nil))
-			ctx.BindTo(client, (*tracker.Creator)(nil))
+		if inst := instanceFromCLI(&cli); inst != nil {
+			instances = append(instances, *inst)
 		}
+
+		instance, err := tracker.Resolve(cli.TrackerName, instances)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+
+		setProvider(&cli, instance.Provider)
 	}
 
 	if err := ctx.Run(); err != nil {
 		errors.LogError(err).Msg("command failed")
 		os.Exit(1)
-	}
-}
-
-func backfillJiraEnv(cli *CLI) {
-	if cli.JiraURL == "" {
-		cli.JiraURL = os.Getenv("JIRA_URL")
-	}
-	if cli.JiraUser == "" {
-		cli.JiraUser = os.Getenv("JIRA_USER")
-	}
-	if cli.JiraKey == "" {
-		cli.JiraKey = os.Getenv("JIRA_KEY")
-	}
-}
-
-func backfillGitHubEnv(cli *CLI) {
-	if cli.GitHubURL == "" {
-		cli.GitHubURL = os.Getenv("GITHUB_URL")
-	}
-	if cli.GitHubToken == "" {
-		cli.GitHubToken = os.Getenv("GITHUB_TOKEN")
 	}
 }
