@@ -1,6 +1,6 @@
 # human
 
-AI-powered issue tracker CLI. Reads and manages Jira issues with output as plain text tables and markdown.
+AI-powered issue tracker CLI. Reads and manages Jira issues with output as JSON and markdown.
 
 ## Setup
 
@@ -40,8 +40,9 @@ human tracker list
 Settings are resolved in priority order (highest wins):
 
 1. **CLI flags** (`--jira-url`, `--jira-user`, `--jira-key`)
-2. **Shell environment variables** (`export JIRA_URL=...`)
-3. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+2. **Global environment variables** (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`)
+3. **Per-instance environment variables** (`JIRA_<NAME>_URL`, `JIRA_<NAME>_USER`, `JIRA_<NAME>_KEY` — name is uppercased, e.g. `JIRA_WORK_KEY`)
+4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
 
 ## Build
 
@@ -85,10 +86,16 @@ The plan is written to `.human/plans/kan-1.md`.
 
 Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.humanconfig.yaml` — and you can mix all three. Flags override env vars.
 
-With everything in `.humanconfig.yaml` (simplest):
+Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output.
 
 ```bash
+# JSON output (default, for AI/scripts)
 human issues list --project=KAN
+
+# Human-readable table
+human issues list --project=KAN --table
+
+# Get a single issue as markdown
 human issue get KAN-1
 ```
 
