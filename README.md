@@ -5,34 +5,43 @@ AI-powered issue tracker CLI. Reads and manages Jira issues with output as plain
 ## Setup
 
 ```bash
-cp .humanconfig.example .humanconfig
-# edit .humanconfig with your Jira URL, user email, and API token
+cp .humanconfig.example .humanconfig.yaml
+# edit .humanconfig.yaml with your Jira instances
 ```
 
-Required configuration:
-
-| Variable | Description |
-|----------|-------------|
-| `JIRA_URL` | Jira base URL (e.g. `https://yourorg.atlassian.net`) |
-| `JIRA_USER` | Jira user email |
-| `JIRA_KEY` | Jira API token |
-
 ## Configuration
+
+`.humanconfig.yaml` holds a list of named Jira instances:
+
+```yaml
+jiras:
+  - name: work
+    url: https://work.atlassian.net
+    user: me@work.com
+    key: work-api-token
+  - name: personal
+    url: https://personal.atlassian.net
+    user: me@personal.com
+    key: personal-api-token
+```
+
+By default the first entry is used. Select a specific instance with `--jira`:
+
+```bash
+human --jira=personal issues list --project=KAN
+```
+
+List all configured trackers (JSON output, also the default when run without arguments):
+
+```bash
+human tracker list
+```
 
 Settings are resolved in priority order (highest wins):
 
 1. **CLI flags** (`--jira-url`, `--jira-user`, `--jira-key`)
 2. **Shell environment variables** (`export JIRA_URL=...`)
-3. **`.humanconfig` file** — YAML config, fills remaining gaps
-
-Example `.humanconfig`:
-
-```yaml
-jira:
-  url: https://yourorg.atlassian.net
-  user: you@example.com
-  key: your-api-token
-```
+3. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
 
 ## Build
 
@@ -74,13 +83,19 @@ The plan is written to `.human/plans/kan-1.md`.
 
 ## CLI usage
 
-Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.humanconfig` — and you can mix all three. Flags override env vars.
+Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.humanconfig.yaml` — and you can mix all three. Flags override env vars.
 
-With everything in `.humanconfig` (simplest):
+With everything in `.humanconfig.yaml` (simplest):
 
 ```bash
 human issues list --project=KAN
 human issue get KAN-1
+```
+
+With a named Jira instance:
+
+```bash
+human --jira=work issues list --project=KAN
 ```
 
 With explicit flags:
@@ -89,7 +104,7 @@ With explicit flags:
 human --jira-url=https://yourorg.atlassian.net --jira-user=you@example.com --jira-key=YOUR_TOKEN issues list --project=KAN
 ```
 
-Mixed (e.g. URL and user from `.humanconfig`, token from a flag):
+Mixed (e.g. URL and user from `.humanconfig.yaml`, token from a flag):
 
 ```bash
 human --jira-key=YOUR_TOKEN issue get KAN-1 | llm 'summarize this'
