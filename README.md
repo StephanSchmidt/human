@@ -2,7 +2,7 @@
 
 # human
 
-AI-powered issue tracker CLI. Reads and manages issues across Jira, GitHub, and Linear with output as JSON and markdown.
+Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, and Linear with output as JSON and markdown.
 
 - **One CLI for Jira, GitHub, and Linear** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
