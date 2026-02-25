@@ -1,4 +1,4 @@
-.PHONY: all build install test coverage lint sec check clean upgrade-deps
+.PHONY: all build install test coverage lint sec secrets check clean upgrade-deps
 
 build:
 	go build -o bin/human ./cmd/human
@@ -23,7 +23,10 @@ sec:
 	go tool gosec -exclude=G704 ./...
 	go tool govulncheck ./...
 
-check: lint sec
+secrets:
+	go tool gitleaks git -v
+
+check: lint sec secrets
 
 clean:
 	go clean -cache -i
