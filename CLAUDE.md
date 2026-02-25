@@ -37,7 +37,7 @@ Use todo list as much as possible.
 
 # Verification
  
-Run 'make test' before and after changes. Run 'make lint' after changes.
+Run 'make test' before and after changes. Run 'make lint' after changes. **ALWAYS** run 'make check' before pushing.
 
 Treat tests as a second source of truth. **ALWAYS** check for failing tests if the code is wrong or the test is wrong. Fix accordingly.
 
