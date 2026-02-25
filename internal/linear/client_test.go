@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/stephan-schmidt/human/internal/tracker"
+	"github.com/stephanschmidt/human/internal/tracker"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

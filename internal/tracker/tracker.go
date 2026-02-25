@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephanschmidt/human/errors"
 )
 
 // Issue is a provider-agnostic issue representation.

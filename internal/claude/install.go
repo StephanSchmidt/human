@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephanschmidt/human/errors"
 )
 
 //go:embed embed/human-plan-skill.md

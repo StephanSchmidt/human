@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephanschmidt/human/errors"
 )
 
 type mockFileWriter struct {

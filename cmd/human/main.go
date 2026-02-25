@@ -12,12 +12,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"github.com/stephan-schmidt/human/errors"
-	"github.com/stephan-schmidt/human/internal/claude"
-	"github.com/stephan-schmidt/human/internal/github"
-	"github.com/stephan-schmidt/human/internal/jira"
-	"github.com/stephan-schmidt/human/internal/linear"
-	"github.com/stephan-schmidt/human/internal/tracker"
+	"github.com/stephanschmidt/human/errors"
+	"github.com/stephanschmidt/human/internal/claude"
+	"github.com/stephanschmidt/human/internal/github"
+	"github.com/stephanschmidt/human/internal/jira"
+	"github.com/stephanschmidt/human/internal/linear"
+	"github.com/stephanschmidt/human/internal/tracker"
 )
 
 // CLI is the top-level Kong struct with global flags.

@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/stephan-schmidt/human/errors"
-	"github.com/stephan-schmidt/human/internal/tracker"
+	"github.com/stephanschmidt/human/errors"
+	"github.com/stephanschmidt/human/internal/tracker"
 )
 
 var _ tracker.Provider = (*Client)(nil)
