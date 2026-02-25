@@ -4,10 +4,10 @@
 
 AI-powered issue tracker CLI. Reads and manages issues across Jira, GitHub, and Linear with output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, and Linear** — no tool-switching
-- **JSON and markdown output** — pipe directly into LLMs and scripts
+- **One CLI for Jira, GitHub, and Linear** — no tool-switching for the AI
+- **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
 - **Claude Code skills** turn PM tickets into implementation plans
-- **Definition of Ready checks** catch incomplete tickets before coding starts
+- **Definition of Ready checks** AI catches incomplete tickets before coding starts
 
 ## Claude Code usage
 
@@ -83,6 +83,25 @@ human --tracker=personal issues list --project=octocat/hello-world
 human --github-token=ghp_xxx issues list --project=octocat/hello-world
 ```
 
+### Linear examples
+
+```bash
+# List team issues
+human issues list --project=ENG
+
+# Get a single issue as markdown
+human issue get ENG-123
+
+# Create a new issue
+human issue create --project=ENG "Implement feature"
+
+# With a named Linear instance
+human --tracker=work issues list --project=ENG
+
+# With explicit flags
+human --linear-token=lin_xxx issues list --project=ENG
+```
+
 ## Setup
 
 ```bash
@@ -126,6 +145,15 @@ githubs:
     token: ghp_yyy
 ```
 
+### Linear
+
+```yaml
+linears:
+  - name: work
+    # url: https://api.linear.app  # optional, this is the default
+    token: lin_xxx
+```
+
 By default the first entry is used. Select a specific instance with `--tracker`:
 
 ```bash
@@ -133,7 +161,7 @@ human --tracker=personal issues list --project=KAN
 human --tracker=work issues list --project=octocat/hello-world
 ```
 
-When only one tracker type is configured, it is auto-detected. When both Jira and GitHub are configured, specify which one with `--tracker=<name>`.
+When only one tracker type is configured, it is auto-detected. When multiple tracker types are configured, specify which one with `--tracker=<name>`.
 
 List all configured trackers (JSON output, also the default when run without arguments):
 
@@ -158,3 +186,12 @@ Settings are resolved in priority order (highest wins):
 4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
 
 The GitHub API URL defaults to `https://api.github.com` when not set.
+
+### Linear settings resolution
+
+1. **CLI flags** (`--linear-url`, `--linear-token`)
+2. **Global environment variables** (`LINEAR_URL`, `LINEAR_TOKEN`)
+3. **Per-instance environment variables** (`LINEAR_<NAME>_URL`, `LINEAR_<NAME>_TOKEN` — name is uppercased, e.g. `LINEAR_WORK_TOKEN`)
+4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+
+The Linear API URL defaults to `https://api.linear.app` when not set.
