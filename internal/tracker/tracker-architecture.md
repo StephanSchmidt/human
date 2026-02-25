@@ -8,6 +8,8 @@ main.go ──→ jira     ──→ tracker  (Instance)
                      ──→ config   (UnmarshalSection)
 main.go ──→ github   ──→ tracker  (Instance)
                      ──→ config   (UnmarshalSection)
+main.go ──→ linear   ──→ tracker  (Instance)
+                     ──→ config   (UnmarshalSection)
 ```
 
 `config` is a leaf package — no tracker types, no provider knowledge.

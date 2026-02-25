@@ -8,3 +8,8 @@ githubs:
   - name: personal
     # url: https://api.github.com  # optional, this is the default
     # token comes from env: export GITHUB_PERSONAL_TOKEN=ghp_xxx
+
+linears:
+  - name: work
+    # url: https://api.linear.app  # optional, this is the default
+    # token comes from env: export LINEAR_WORK_TOKEN=lin_xxx

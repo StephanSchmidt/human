@@ -16,6 +16,7 @@ import (
 	"human/internal/claude"
 	"human/internal/github"
 	"human/internal/jira"
+	"human/internal/linear"
 	"human/internal/tracker"
 )
 
@@ -27,6 +28,8 @@ type CLI struct {
 	JiraUser    string     `kong:"env='JIRA_USER',help='Jira user email'"`
 	GitHubToken string     `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
 	GitHubURL   string     `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
+	LinearToken string     `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
+	LinearURL   string     `kong:"env='LINEAR_URL',help='Linear API base URL'"`
 	Issues      IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
 	Issue       IssueCmd   `kong:"cmd,help='Single issue operations'"`
 	Install     InstallCmd `kong:"cmd,help='Install agent integrations'"`
@@ -119,7 +122,7 @@ type IssuesCmd struct {
 }
 
 type ListCmd struct {
-	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
+	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, Linear: ENG)'"`
 	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
 	Provider tracker.Provider `kong:"-"`
 }
@@ -162,7 +165,7 @@ type IssueCmd struct {
 }
 
 type GetCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123)'"`
+	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, Linear: ENG-123)'"`
 	Provider tracker.Provider `kong:"-"`
 }
 
@@ -197,7 +200,7 @@ func (cmd *GetCmd) Run() error {
 // --- issue create ---
 
 type CreateCmd struct {
-	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
+	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, Linear: ENG)'"`
 	Type        string           `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
 	Summary     string           `kong:"arg,required,help='Issue summary'"`
 	Description string           `kong:"help='Issue description (markdown)'"`
@@ -247,6 +250,15 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
 	_, _ = fmt.Fprintln(w, `  human issue create --project=octocat/hello-world "Fix bug"`)
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # List Linear issues (JSON)")
+	_, _ = fmt.Fprintln(w, "  human issues list --project=ENG")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Get a Linear issue as markdown")
+	_, _ = fmt.Fprintln(w, "  human issue get ENG-123")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Create a Linear issue")
+	_, _ = fmt.Fprintln(w, `  human issue create --project=ENG "Implement feature"`)
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # List configured trackers (JSON)")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w)
@@ -286,7 +298,13 @@ func loadAllInstances(dir string) ([]tracker.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(all, gi...), nil
+	all = append(all, gi...)
+
+	li, err := linear.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(all, li...), nil
 }
 
 // instanceFromCLI builds a tracker instance from CLI flags, returning nil
@@ -309,6 +327,17 @@ func instanceFromCLI(cli *CLI) *tracker.Instance {
 			Kind:     "github",
 			URL:      url,
 			Provider: github.New(url, cli.GitHubToken),
+		}
+	}
+	if cli.LinearToken != "" {
+		url := cli.LinearURL
+		if url == "" {
+			url = "https://api.linear.app"
+		}
+		return &tracker.Instance{
+			Kind:     "linear",
+			URL:      url,
+			Provider: linear.New(url, cli.LinearToken),
 		}
 	}
 	return nil
@@ -334,7 +363,7 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira and GitHub. Output is JSON and markdown."),
+		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, and Linear. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
 	)

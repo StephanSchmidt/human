@@ -56,7 +56,7 @@ type Provider interface {
 // Instance represents a configured tracker backend ready for use.
 type Instance struct {
 	Name     string   // config entry name ("work", "personal"), empty for CLI-flag instances
-	Kind     string   // "jira", "github"
+	Kind     string   // "jira", "github", "linear"
 	URL      string   // display URL
 	User     string   // display user (Jira only)
 	Provider Provider
@@ -114,7 +114,7 @@ func resolveByName(name string, instances []Instance) (*Instance, error) {
 // kinds exist an error is returned asking the user to specify --tracker.
 func resolveAutoDetect(instances []Instance) (*Instance, error) {
 	if len(instances) == 0 {
-		return nil, errors.WithDetails("no tracker configured, add jiras: or githubs: to .humanconfig.yaml")
+		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, or linears: to .humanconfig.yaml")
 	}
 
 	kinds := make(map[string]bool)
