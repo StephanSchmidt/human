@@ -31,6 +31,10 @@ When asked to commit, go through changes and create atomar commits that have one
 
 **ALWAYS** use WithDetails for error creation.
 
+# Process
+
+Use todo list as much as possible.
+
 # Verification
  
 Run 'make test' before and after changes. Run 'make lint' after changes.
@@ -38,7 +42,7 @@ Run 'make test' before and after changes. Run 'make lint' after changes.
 Treat tests as a second source of truth. **ALWAYS** check for failing tests if the code is wrong or the test is wrong. Fix accordingly.
 
 Apply these refactorings after changes to keep code testable:
-- 'Extract Interface': Accept interfaces instead of concrete types for external dependencies (HTTP clients, APIs, databases).
+- 'Extract Interface': Accept interfaces instead of concrete types if possible.
 - 'Inject Dependencies': Pass dependencies as function/constructor parameters instead of creating them internally.
 - 'Extract Function': Pull out logic that is hard to reach via the outer function's inputs into its own function.
 - 'Decompose Conditional': Replace IF conditionals and nested IFs with clear, named conditions or early returns.
