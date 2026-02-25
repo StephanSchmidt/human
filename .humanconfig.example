@@ -3,3 +3,8 @@ jiras:
     url: https://yourorg.atlassian.net
     user: you@example.com
     # key comes from env: export JIRA_MYORG_KEY=your-api-token
+
+githubs:
+  - name: personal
+    # url: https://api.github.com  # optional, this is the default
+    # token comes from env: export GITHUB_PERSONAL_TOKEN=ghp_xxx
