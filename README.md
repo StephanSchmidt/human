@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="h-l1.svg" width="80" alt="human logo">
+</p>
+
 # human
 
 AI-powered issue tracker CLI. Reads and manages issues across Jira and GitHub with output as JSON and markdown.
