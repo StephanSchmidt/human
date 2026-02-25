@@ -308,6 +308,25 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	return nil
 }
 
+// keyHint returns the first issue-key or project-key visible on the CLI so
+// that Resolve can auto-detect the tracker kind from the key format.
+func keyHint(cli *CLI) string {
+	switch {
+	case cli.Issue.Get.Key != "":
+		return cli.Issue.Get.Key
+	case cli.Issue.Create.Project != "":
+		return cli.Issue.Create.Project
+	case cli.Issues.List.Project != "":
+		return cli.Issues.List.Project
+	case cli.Issue.Comment.Add.Key != "":
+		return cli.Issue.Comment.Add.Key
+	case cli.Issue.Comment.List.Key != "":
+		return cli.Issue.Comment.List.Key
+	default:
+		return ""
+	}
+}
+
 // needsTrackerClient returns true for commands that require a tracker client.
 func needsTrackerClient(command string) bool {
 	switch {
@@ -417,7 +436,7 @@ func main() {
 			instances = append(instances, *inst)
 		}
 
-		instance, err := tracker.Resolve(cli.TrackerName, instances)
+		instance, err := tracker.Resolve(cli.TrackerName, instances, keyHint(&cli))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)

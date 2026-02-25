@@ -2,10 +2,30 @@ package tracker
 
 import (
 	"context"
+	"regexp"
 	"time"
 
 	"github.com/stephanschmidt/human/errors"
 )
+
+// githubIssueRe matches GitHub issue keys like "owner/repo#123".
+var githubIssueRe = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+$`)
+
+// githubRepoRe matches GitHub project keys like "owner/repo".
+var githubRepoRe = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// DetectKind returns the tracker kind that can be unambiguously inferred from
+// the key format. Currently only "github" is detectable (owner/repo#N or
+// owner/repo). Returns "" when the kind cannot be determined.
+func DetectKind(key string) string {
+	if key == "" {
+		return ""
+	}
+	if githubIssueRe.MatchString(key) || githubRepoRe.MatchString(key) {
+		return "github"
+	}
+	return ""
+}
 
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
@@ -84,13 +104,14 @@ type Transitioner interface {
 // Resolve determines which tracker instance to use.
 //
 // When name is provided it finds the single instance whose Name matches.
-// When name is empty it auto-detects: if all instances share one Kind it
+// When name is empty it auto-detects: if keyHint allows inferring the tracker
+// kind it filters to that kind; otherwise if all instances share one Kind it
 // returns the first; if multiple kinds exist it returns an error.
-func Resolve(name string, instances []Instance) (*Instance, error) {
+func Resolve(name string, instances []Instance, keyHint string) (*Instance, error) {
 	if name != "" {
 		return resolveByName(name, instances)
 	}
-	return resolveAutoDetect(instances)
+	return resolveAutoDetect(instances, keyHint)
 }
 
 // resolveByName finds exactly one instance with the given name.
@@ -111,11 +132,26 @@ func resolveByName(name string, instances []Instance) (*Instance, error) {
 	return matches[0], nil
 }
 
-// resolveAutoDetect picks the sole kind of configured instances. If multiple
-// kinds exist an error is returned asking the user to specify --tracker.
-func resolveAutoDetect(instances []Instance) (*Instance, error) {
+// resolveAutoDetect picks the sole kind of configured instances. When keyHint
+// allows detecting a specific kind, instances are filtered to that kind first.
+// If multiple kinds remain an error is returned asking the user to specify --tracker.
+func resolveAutoDetect(instances []Instance, keyHint string) (*Instance, error) {
 	if len(instances) == 0 {
 		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, or linears: to .humanconfig.yaml")
+	}
+
+	// Try to narrow by key format.
+	if kind := DetectKind(keyHint); kind != "" {
+		var filtered []Instance
+		for _, inst := range instances {
+			if inst.Kind == kind {
+				filtered = append(filtered, inst)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, errors.WithDetails("no tracker of detected kind configured", "kind", kind, "key", keyHint)
+		}
+		return &filtered[0], nil
 	}
 
 	kinds := make(map[string]bool)
