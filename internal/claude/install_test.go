@@ -66,13 +66,13 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 
 	skillPath := filepath.Join(".claude", "skills", "human-plan", "SKILL.md")
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
-	triageSkillPath := filepath.Join(".claude", "skills", "human-triage", "SKILL.md")
-	triageAgentPath := filepath.Join(".claude", "agents", "human-triage.md")
+	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
+	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
 
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 	assert.Equal(t, string(agentContent), string(fw.files[agentPath]))
-	assert.Equal(t, string(triageSkillContent), string(fw.files[triageSkillPath]))
-	assert.Equal(t, string(triageAgentContent), string(fw.files[triageAgentPath]))
+	assert.Equal(t, string(readySkillContent), string(fw.files[readySkillPath]))
+	assert.Equal(t, string(readyAgentContent), string(fw.files[readyAgentPath]))
 }
 
 func TestInstall_SkipsUnchangedFiles(t *testing.T) {
@@ -80,12 +80,12 @@ func TestInstall_SkipsUnchangedFiles(t *testing.T) {
 
 	skillPath := filepath.Join(".claude", "skills", "human-plan", "SKILL.md")
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
-	triageSkillPath := filepath.Join(".claude", "skills", "human-triage", "SKILL.md")
-	triageAgentPath := filepath.Join(".claude", "agents", "human-triage.md")
+	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
+	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
 	fw.files[skillPath] = skillContent
 	fw.files[agentPath] = agentContent
-	fw.files[triageSkillPath] = triageSkillContent
-	fw.files[triageAgentPath] = triageAgentContent
+	fw.files[readySkillPath] = readySkillContent
+	fw.files[readyAgentPath] = readyAgentContent
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
@@ -119,10 +119,10 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	require.NoError(t, err)
 
 	skillDir := filepath.Join(".claude", "skills", "human-plan")
-	triageSkillDir := filepath.Join(".claude", "skills", "human-triage")
+	readySkillDir := filepath.Join(".claude", "skills", "human-ready")
 	agentDir := filepath.Join(".claude", "agents")
 	assert.True(t, fw.dirs[skillDir], "expected plan skill parent directory to be created")
-	assert.True(t, fw.dirs[triageSkillDir], "expected triage skill parent directory to be created")
+	assert.True(t, fw.dirs[readySkillDir], "expected ready skill parent directory to be created")
 	assert.True(t, fw.dirs[agentDir], "expected agent parent directory to be created")
 }
 

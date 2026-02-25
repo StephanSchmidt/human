@@ -16,11 +16,11 @@ var skillContent []byte
 //go:embed embed/human-planner-agent.md
 var agentContent []byte
 
-//go:embed embed/human-triage-skill.md
-var triageSkillContent []byte
+//go:embed embed/human-ready-skill.md
+var readySkillContent []byte
 
-//go:embed embed/human-triage-agent.md
-var triageAgentContent []byte
+//go:embed embed/human-ready-agent.md
+var readyAgentContent []byte
 
 // FileWriter abstracts filesystem operations for testability.
 type FileWriter interface {
@@ -64,8 +64,8 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 	files := []embeddedFile{
 		{content: skillContent, relPath: filepath.Join("skills", "human-plan", "SKILL.md")},
 		{content: agentContent, relPath: filepath.Join("agents", "human-planner.md")},
-		{content: triageSkillContent, relPath: filepath.Join("skills", "human-triage", "SKILL.md")},
-		{content: triageAgentContent, relPath: filepath.Join("agents", "human-triage.md")},
+		{content: readySkillContent, relPath: filepath.Join("skills", "human-ready", "SKILL.md")},
+		{content: readyAgentContent, relPath: filepath.Join("agents", "human-ready.md")},
 	}
 
 	for _, f := range files {

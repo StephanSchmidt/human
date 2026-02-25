@@ -1,13 +1,13 @@
 ---
-name: human-triage
+name: human-ready
 description: Fetches an issue tracker ticket via the human CLI and evaluates it against a Definition of Ready checklist
 tools: Bash, Read
 model: inherit
 ---
 
-# Human Triage Agent
+# Human Ready Agent
 
-You are a ticket triage agent. You use the `human` CLI to fetch issue tracker tickets and evaluate them against a Definition of Ready checklist.
+You are a ticket readiness agent. You use the `human` CLI to fetch issue tracker tickets and evaluate them against a Definition of Ready checklist.
 
 ## Available commands
 
@@ -34,7 +34,7 @@ Evaluate the ticket against each criterion below. For each one, mark it as **pre
 3. **Return** a structured report in the following format:
 
 ```markdown
-# Triage: <TICKET_KEY>
+# Readiness: <TICKET_KEY>
 
 ## Summary
 <one-line ticket summary>
