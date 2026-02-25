@@ -3,6 +3,8 @@ package tracker
 import (
 	"context"
 	"time"
+
+	"human/errors"
 )
 
 // Issue is a provider-agnostic issue representation.
@@ -44,6 +46,22 @@ type Getter interface {
 	GetIssue(ctx context.Context, key string) (*Issue, error)
 }
 
+// Provider combines all tracker operations into a single interface.
+type Provider interface {
+	Lister
+	Getter
+	Creator
+}
+
+// Instance represents a configured tracker backend ready for use.
+type Instance struct {
+	Name     string   // config entry name ("work", "personal"), empty for CLI-flag instances
+	Kind     string   // "jira", "github"
+	URL      string   // display URL
+	User     string   // display user (Jira only)
+	Provider Provider
+}
+
 // Write interfaces (future — not implemented yet).
 
 // Creator creates new issues.
@@ -60,4 +78,53 @@ type Commenter interface {
 // Transitioner moves an issue to a new status.
 type Transitioner interface {
 	TransitionIssue(ctx context.Context, key string, targetStatus string) error
+}
+
+// Resolve determines which tracker instance to use.
+//
+// When name is provided it finds the single instance whose Name matches.
+// When name is empty it auto-detects: if all instances share one Kind it
+// returns the first; if multiple kinds exist it returns an error.
+func Resolve(name string, instances []Instance) (*Instance, error) {
+	if name != "" {
+		return resolveByName(name, instances)
+	}
+	return resolveAutoDetect(instances)
+}
+
+// resolveByName finds exactly one instance with the given name.
+func resolveByName(name string, instances []Instance) (*Instance, error) {
+	var matches []*Instance
+	for i := range instances {
+		if instances[i].Name == name {
+			matches = append(matches, &instances[i])
+		}
+	}
+
+	if len(matches) == 0 {
+		return nil, errors.WithDetails("tracker name not found in .humanconfig", "name", name)
+	}
+	if len(matches) > 1 {
+		return nil, errors.WithDetails("ambiguous tracker name found in multiple provider sections", "name", name)
+	}
+	return matches[0], nil
+}
+
+// resolveAutoDetect picks the sole kind of configured instances. If multiple
+// kinds exist an error is returned asking the user to specify --tracker.
+func resolveAutoDetect(instances []Instance) (*Instance, error) {
+	if len(instances) == 0 {
+		return nil, errors.WithDetails("no tracker configured, add jiras: or githubs: to .humanconfig.yaml")
+	}
+
+	kinds := make(map[string]bool)
+	for _, inst := range instances {
+		kinds[inst.Kind] = true
+	}
+
+	if len(kinds) > 1 {
+		return nil, errors.WithDetails("multiple tracker types configured, specify --tracker=<name>")
+	}
+
+	return &instances[0], nil
 }

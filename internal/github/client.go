@@ -15,6 +15,8 @@ import (
 	"human/internal/tracker"
 )
 
+var _ tracker.Provider = (*Client)(nil)
+
 // Client is a GitHub REST API client that implements tracker.Lister,
 // tracker.Getter, and tracker.Creator.
 type Client struct {

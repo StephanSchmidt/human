@@ -14,6 +14,8 @@ import (
 	"human/internal/tracker"
 )
 
+var _ tracker.Provider = (*Client)(nil)
+
 // Client is a Jira REST API client that implements tracker.Lister and tracker.Getter.
 type Client struct {
 	baseURL string
