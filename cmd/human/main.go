@@ -13,6 +13,7 @@ import (
 
 	"human/errors"
 	"human/internal/claude"
+	"human/internal/config"
 	"human/internal/jira"
 	"human/internal/tracker"
 )
@@ -78,7 +79,8 @@ func (cmd *ListCmd) Run(l tracker.Lister) error {
 // --- issue get ---
 
 type IssueCmd struct {
-	Get GetCmd `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
+	Get    GetCmd    `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
+	Create CreateCmd `kong:"cmd,help='Create a new issue in a project'"`
 }
 
 type GetCmd struct {
@@ -113,6 +115,29 @@ func (cmd *GetCmd) Run(g tracker.Getter) error {
 	return nil
 }
 
+// --- issue create ---
+
+type CreateCmd struct {
+	Project     string `kong:"required,help='Project key (e.g. KAN)'"`
+	Type        string `kong:"default='Task',help='Issue type (e.g. Task, Bug, Story)'"`
+	Summary     string `kong:"arg,required,help='Issue summary'"`
+	Description string `kong:"help='Issue description (plain text)'"`
+}
+
+func (cmd *CreateCmd) Run(c tracker.Creator) error {
+	issue, err := c.CreateIssue(context.TODO(), &tracker.Issue{
+		Project:     cmd.Project,
+		Type:        cmd.Type,
+		Summary:     cmd.Summary,
+		Description: cmd.Description,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s\t%s\n", issue.Key, issue.Summary)
+	return nil
+}
+
 // --- help ---
 
 func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
@@ -129,13 +154,16 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Examples:")
 	_, _ = fmt.Fprintln(w, "  # List all issues in a project (outputs tab-separated table)")
-	_, _ = fmt.Fprintln(w, "  human --jira-url=$JIRA_URL --jira-user=$JIRA_USER --jira-key=$JIRA_KEY issues list --project=KAN")
+	_, _ = fmt.Fprintln(w, "  human issues list --project=KAN")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Get a single issue as markdown")
-	_, _ = fmt.Fprintln(w, "  human --jira-url=$JIRA_URL --jira-user=$JIRA_USER --jira-key=$JIRA_KEY issue get KAN-1")
+	_, _ = fmt.Fprintln(w, "  human issue get KAN-1")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Pipe issue details to another tool")
-	_, _ = fmt.Fprintln(w, "  human --jira-url=$JIRA_URL --jira-user=$JIRA_USER --jira-key=$JIRA_KEY issue get KAN-1 | llm 'summarize this'")
+	_, _ = fmt.Fprintln(w, "  human issue get KAN-1 | llm 'summarize this'")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Create a new issue in a project")
+	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent (no Jira credentials needed)")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
@@ -147,6 +175,11 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
+
+	// Load .humanconfig if present (fills env gaps not covered by shell).
+	if err := config.LoadConfig("."); err != nil {
+		log.Warn().Err(err).Msg("failed to parse .humanconfig")
+	}
 
 	// Show help when invoked without arguments.
 	if len(os.Args) < 2 {
@@ -169,6 +202,7 @@ func main() {
 		client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
 		ctx.BindTo(client, (*tracker.Lister)(nil))
 		ctx.BindTo(client, (*tracker.Getter)(nil))
+		ctx.BindTo(client, (*tracker.Creator)(nil))
 	}
 
 	if err := ctx.Run(); err != nil {

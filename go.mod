@@ -5,7 +5,9 @@ go 1.25.6
 require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/rs/zerolog v1.34.0
+	github.com/spf13/viper v1.12.0
 	github.com/stretchr/testify v1.11.1
+	github.com/yuin/goldmark v1.7.16
 	gitlab.com/tozd/go/errors v0.10.0
 )
 
@@ -195,7 +197,6 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/spf13/viper v1.12.0 // indirect
 	github.com/ssgreg/nlreturn/v2 v2.2.1 // indirect
 	github.com/stbenjam/no-sprintf-host-port v0.3.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect

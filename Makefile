@@ -1,10 +1,10 @@
--include .env
-export
-
-.PHONY: all build test coverage lint sec check clean upgrade-deps
+.PHONY: all build install test coverage lint sec check clean upgrade-deps
 
 build:
 	go build -o bin/human ./cmd/human
+
+install:
+	go install ./cmd/human
 
 test:
 	go test ./...
@@ -36,7 +36,10 @@ upgrade-deps:
 	go tool gotestsum ./...
 
 jira-list: build
-	./bin/human --jira-key=$$($(OP) item get "Jira API Key" --fields notesPlain) issues list --project KAN
+	./bin/human issues list --project HUM
 
 jira-get: build
-	./bin/human --jira-key=$$($(OP) item get "Jira API Key" --fields notesPlain) issue get $(ISSUE)
+	./bin/human issue get $(ISSUE)
+
+jira-create: build
+	./bin/human issue create --project=$(PROJECT) "$(SUMMARY)"
