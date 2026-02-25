@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"human/errors"
-	"human/internal/tracker"
+	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephan-schmidt/human/internal/tracker"
 )
 
 var _ tracker.Provider = (*Client)(nil)

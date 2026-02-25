@@ -4,9 +4,9 @@ import (
 	"os"
 	"strings"
 
-	"human/errors"
-	"human/internal/config"
-	"human/internal/tracker"
+	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephan-schmidt/human/internal/config"
+	"github.com/stephan-schmidt/human/internal/tracker"
 )
 
 // Config holds the configuration for a single GitHub instance.

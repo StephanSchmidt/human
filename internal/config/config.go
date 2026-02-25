@@ -3,7 +3,7 @@ package config
 import (
 	"github.com/spf13/viper"
 
-	"human/errors"
+	"github.com/stephan-schmidt/human/errors"
 )
 
 // UnmarshalSection reads a .humanconfig YAML file from dir and unmarshals

@@ -23,7 +23,7 @@ main.go ──→ linear   ──→ tracker  (Instance)
 ```go
 package linear
 
-import "human/internal/tracker"
+import "github.com/stephan-schmidt/human/internal/tracker"
 
 var _ tracker.Provider = (*Client)(nil)
 

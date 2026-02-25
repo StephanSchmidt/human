@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"human/errors"
-	"human/internal/jira/adf"
-	"human/internal/tracker"
+	"github.com/stephan-schmidt/human/errors"
+	"github.com/stephan-schmidt/human/internal/jira/adf"
+	"github.com/stephan-schmidt/human/internal/tracker"
 )
 
 var _ tracker.Provider = (*Client)(nil)
