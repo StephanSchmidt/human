@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="h-l1.svg" width="80" alt="human logo">
-</p>
+<img src="h-l1.svg" width="80" alt="human logo">
 
 # human
 
