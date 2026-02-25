@@ -1,17 +1,19 @@
 # human
 
-AI-powered issue tracker CLI. Reads and manages Jira issues with output as JSON and markdown.
+AI-powered issue tracker CLI. Reads and manages issues across Jira and GitHub with output as JSON and markdown.
 
 ## Setup
 
 ```bash
 cp .humanconfig.example .humanconfig.yaml
-# edit .humanconfig.yaml with your Jira instances
+# edit .humanconfig.yaml with your tracker instances
 ```
 
 ## Configuration
 
-`.humanconfig.yaml` holds a list of named Jira instances:
+`.humanconfig.yaml` holds named tracker instances:
+
+### Jira
 
 ```yaml
 jiras:
@@ -25,11 +27,26 @@ jiras:
     key: personal-api-token
 ```
 
-By default the first entry is used. Select a specific instance with `--jira`:
+### GitHub
+
+```yaml
+githubs:
+  - name: personal
+    # url: https://api.github.com  # optional, this is the default
+    token: ghp_xxx
+  - name: work
+    url: https://github.example.com/api/v3
+    token: ghp_yyy
+```
+
+By default the first entry is used. Select a specific instance with `--tracker`:
 
 ```bash
-human --jira=personal issues list --project=KAN
+human --tracker=personal issues list --project=KAN
+human --tracker=work issues list --project=octocat/hello-world
 ```
+
+When only one tracker type is configured, it is auto-detected. When both Jira and GitHub are configured, specify which one with `--tracker=<name>`.
 
 List all configured trackers (JSON output, also the default when run without arguments):
 
@@ -37,12 +54,23 @@ List all configured trackers (JSON output, also the default when run without arg
 human tracker list
 ```
 
+### Jira settings resolution
+
 Settings are resolved in priority order (highest wins):
 
 1. **CLI flags** (`--jira-url`, `--jira-user`, `--jira-key`)
 2. **Global environment variables** (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`)
 3. **Per-instance environment variables** (`JIRA_<NAME>_URL`, `JIRA_<NAME>_USER`, `JIRA_<NAME>_KEY` — name is uppercased, e.g. `JIRA_WORK_KEY`)
 4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+
+### GitHub settings resolution
+
+1. **CLI flags** (`--github-url`, `--github-token`)
+2. **Global environment variables** (`GITHUB_URL`, `GITHUB_TOKEN`)
+3. **Per-instance environment variables** (`GITHUB_<NAME>_URL`, `GITHUB_<NAME>_TOKEN` — name is uppercased, e.g. `GITHUB_PERSONAL_TOKEN`)
+4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+
+The GitHub API URL defaults to `https://api.github.com` when not set.
 
 ## Build
 
@@ -84,12 +112,12 @@ The plan is written to `.human/plans/kan-1.md`.
 
 ## CLI usage
 
-Each required value (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`) can be provided as a CLI flag, an environment variable, or via `.humanconfig.yaml` — and you can mix all three. Flags override env vars.
-
 Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output.
 
+### Jira examples
+
 ```bash
-# JSON output (default, for AI/scripts)
+# JSON output (default)
 human issues list --project=KAN
 
 # Human-readable table
@@ -97,22 +125,29 @@ human issues list --project=KAN --table
 
 # Get a single issue as markdown
 human issue get KAN-1
-```
 
-With a named Jira instance:
+# With a named Jira instance
+human --tracker=work issues list --project=KAN
 
-```bash
-human --jira=work issues list --project=KAN
-```
-
-With explicit flags:
-
-```bash
+# With explicit flags
 human --jira-url=https://yourorg.atlassian.net --jira-user=you@example.com --jira-key=YOUR_TOKEN issues list --project=KAN
 ```
 
-Mixed (e.g. URL and user from `.humanconfig.yaml`, token from a flag):
+### GitHub examples
 
 ```bash
-human --jira-key=YOUR_TOKEN issue get KAN-1 | llm 'summarize this'
+# List open issues
+human issues list --project=octocat/hello-world
+
+# Get a single issue as markdown
+human issue get octocat/hello-world#42
+
+# Create a new issue
+human issue create --project=octocat/hello-world "Fix the bug"
+
+# With a named GitHub instance
+human --tracker=personal issues list --project=octocat/hello-world
+
+# With explicit flags
+human --github-token=ghp_xxx issues list --project=octocat/hello-world
 ```
