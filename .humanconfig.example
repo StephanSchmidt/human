@@ -1,0 +1,4 @@
+jira:
+  url: https://yourorg.atlassian.net
+  user: you@example.com
+  key: your-api-token
