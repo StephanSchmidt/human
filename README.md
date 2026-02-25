@@ -2,7 +2,12 @@
 
 # human
 
-AI-powered issue tracker CLI. Reads and manages issues across Jira and GitHub with output as JSON and markdown.
+AI-powered issue tracker CLI. Reads and manages issues across Jira, GitHub, and Linear with output as JSON and markdown.
+
+- **One CLI for Jira, GitHub, and Linear** — no tool-switching
+- **JSON and markdown output** — pipe directly into LLMs and scripts
+- **Claude Code skills** turn PM tickets into implementation plans
+- **Definition of Ready checks** catch incomplete tickets before coding starts
 
 ## Claude Code usage
 
