@@ -41,7 +41,7 @@ func (OSFileWriter) WriteFile(name string, data []byte, perm os.FileMode) error 
 }
 
 func (OSFileWriter) ReadFile(name string) ([]byte, error) {
-	return os.ReadFile(name)
+	return os.ReadFile(filepath.Clean(name))
 }
 
 type embeddedFile struct {
