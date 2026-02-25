@@ -62,3 +62,18 @@ type createResponse struct {
 	ID  string `json:"id"`
 	Key string `json:"key"`
 }
+
+type commentBody struct {
+	Body map[string]any `json:"body"`
+}
+
+type jiraComment struct {
+	ID      string          `json:"id"`
+	Author  *nameField      `json:"author"`
+	Body    json.RawMessage `json:"body"`
+	Created string          `json:"created"`
+}
+
+type commentsResponse struct {
+	Comments []jiraComment `json:"comments"`
+}

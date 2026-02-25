@@ -73,3 +73,31 @@ type issueCreatePayload struct {
 	Success bool        `json:"success"`
 	Issue   linearIssue `json:"issue"`
 }
+
+type linearComment struct {
+	ID        string    `json:"id"`
+	Body      string    `json:"body"`
+	User      *nameNode `json:"user"`
+	CreatedAt string    `json:"createdAt"`
+}
+
+type commentCreateData struct {
+	CommentCreate struct {
+		Success bool           `json:"success"`
+		Comment linearComment  `json:"comment"`
+	} `json:"commentCreate"`
+}
+
+type issueCommentsData struct {
+	Issue struct {
+		Comments struct {
+			Nodes []linearComment `json:"nodes"`
+		} `json:"comments"`
+	} `json:"issue"`
+}
+
+type issueIDData struct {
+	Issue struct {
+		ID string `json:"id"`
+	} `json:"issue"`
+}

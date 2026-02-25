@@ -160,8 +160,44 @@ func printIssuesTable(issues []tracker.Issue) error {
 // --- issue get ---
 
 type IssueCmd struct {
-	Get    GetCmd    `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
-	Create CreateCmd `kong:"cmd,help='Create a new issue in a project'"`
+	Get     GetCmd     `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
+	Create  CreateCmd  `kong:"cmd,help='Create a new issue in a project'"`
+	Comment CommentCmd `kong:"cmd,help='Comment operations on an issue'"`
+}
+
+type CommentCmd struct {
+	Add  AddCommentCmd   `kong:"cmd,help='Add a comment to an issue'"`
+	List ListCommentsCmd `kong:"cmd,help='List comments on an issue'"`
+}
+
+type AddCommentCmd struct {
+	Key      string           `kong:"arg,required,help='Issue key'"`
+	Body     string           `kong:"arg,required,help='Comment body (markdown)'"`
+	Provider tracker.Provider `kong:"-"`
+}
+
+func (cmd *AddCommentCmd) Run() error {
+	comment, err := cmd.Provider.AddComment(context.TODO(), cmd.Key, cmd.Body)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s\t%s\n", comment.ID, comment.Body)
+	return nil
+}
+
+type ListCommentsCmd struct {
+	Key      string           `kong:"arg,required,help='Issue key'"`
+	Provider tracker.Provider `kong:"-"`
+}
+
+func (cmd *ListCommentsCmd) Run() error {
+	comments, err := cmd.Provider.ListComments(context.TODO(), cmd.Key)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(comments)
 }
 
 type GetCmd struct {
@@ -348,6 +384,8 @@ func setProvider(cli *CLI, p tracker.Provider) {
 	cli.Issues.List.Provider = p
 	cli.Issue.Get.Provider = p
 	cli.Issue.Create.Provider = p
+	cli.Issue.Comment.Add.Provider = p
+	cli.Issue.Comment.List.Provider = p
 }
 
 // --- main ---

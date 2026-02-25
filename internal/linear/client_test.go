@@ -452,3 +452,107 @@ func Test_projectFromIdentifier(t *testing.T) {
 		})
 	}
 }
+
+func TestAddComment_happy(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG-42", vars["id"])
+				return `{"data":{"issue":{"id":"issue-uuid-123"}}}`
+			},
+			"commentCreate(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "issue-uuid-123", vars["issueId"])
+				assert.Equal(t, "Hello world", vars["body"])
+				return `{"data":{"commentCreate":{"success":true,"comment":{
+					"id":"comment-uuid-1","body":"Hello world",
+					"createdAt":"2025-01-15T10:30:00Z",
+					"user":{"name":"Alice"}
+				}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	comment, err := client.AddComment(context.Background(), "ENG-42", "Hello world")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+	assert.Equal(t, "comment-uuid-1", comment.ID)
+	assert.Equal(t, "Alice", comment.Author)
+	assert.Equal(t, "Hello world", comment.Body)
+	assert.False(t, comment.Created.IsZero())
+}
+
+func TestAddComment_httpError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// Issue ID lookup succeeds.
+			_, _ = fmt.Fprint(w, `{"data":{"issue":{"id":"issue-uuid-123"}}}`)
+			return
+		}
+		// Comment creation returns HTTP error.
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.AddComment(context.Background(), "ENG-42", "test")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected status")
+}
+
+func TestListComments_happy(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(vars map[string]any) string {
+				assert.Equal(t, "ENG-42", vars["id"])
+				return `{"data":{"issue":{"comments":{"nodes":[
+					{"id":"c1","body":"First comment","createdAt":"2025-01-15T10:30:00Z","user":{"name":"Alice"}},
+					{"id":"c2","body":"Second comment","createdAt":"2025-01-16T11:00:00Z","user":{"name":"Bob"}}
+				]}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	comments, err := client.ListComments(context.Background(), "ENG-42")
+
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+
+	assert.Equal(t, "c1", comments[0].ID)
+	assert.Equal(t, "Alice", comments[0].Author)
+	assert.Equal(t, "First comment", comments[0].Body)
+
+	assert.Equal(t, "c2", comments[1].ID)
+	assert.Equal(t, "Bob", comments[1].Author)
+	assert.Equal(t, "Second comment", comments[1].Body)
+}
+
+func TestListComments_empty(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"comments":{"nodes":[]}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	comments, err := client.ListComments(context.Background(), "ENG-42")
+
+	require.NoError(t, err)
+	assert.Empty(t, comments)
+}

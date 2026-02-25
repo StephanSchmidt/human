@@ -51,6 +51,7 @@ type Provider interface {
 	Lister
 	Getter
 	Creator
+	Commenter
 }
 
 // Instance represents a configured tracker backend ready for use.

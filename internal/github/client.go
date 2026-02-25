@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/tracker"
@@ -124,6 +125,86 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Project:     issue.Project,
 		Summary:     result.Title,
 		Description: result.Body,
+	}, nil
+}
+
+// AddComment implements tracker.Commenter.
+func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (*tracker.Comment, error) {
+	owner, repo, number, err := parseIssueKey(issueKey)
+	if err != nil {
+		return nil, err
+	}
+
+	payload, err := json.Marshal(commentRequest{Body: body})
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling comment request",
+			"issueKey", issueKey)
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var gc ghComment
+	if err := json.NewDecoder(resp.Body).Decode(&gc); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comment response",
+			"issueKey", issueKey)
+	}
+
+	return toTrackerComment(gc)
+}
+
+// ListComments implements tracker.Commenter.
+func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.Comment, error) {
+	owner, repo, number, err := parseIssueKey(issueKey)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var ghComments []ghComment
+	if err := json.NewDecoder(resp.Body).Decode(&ghComments); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comments response",
+			"issueKey", issueKey)
+	}
+
+	comments := make([]tracker.Comment, 0, len(ghComments))
+	for _, gc := range ghComments {
+		c, err := toTrackerComment(gc)
+		if err != nil {
+			return nil, err
+		}
+		comments = append(comments, *c)
+	}
+	return comments, nil
+}
+
+func toTrackerComment(gc ghComment) (*tracker.Comment, error) {
+	created, err := time.Parse(time.RFC3339, gc.CreatedAt)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "parsing comment timestamp",
+			"commentID", gc.ID)
+	}
+
+	author := ""
+	if gc.User != nil {
+		author = gc.User.Login
+	}
+
+	return &tracker.Comment{
+		ID:      strconv.Itoa(gc.ID),
+		Author:  author,
+		Body:    gc.Body,
+		Created: created,
 	}, nil
 }
 

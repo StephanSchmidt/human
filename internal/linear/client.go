@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/tracker"
@@ -31,6 +32,23 @@ const getIssueQuery = `query($id: String!) {
 
 const getTeamIDQuery = `query($key: String!) {
 	teams(filter: { key: { eq: $key } }) { nodes { id } }
+}`
+
+const getIssueIDQuery = `query($id: String!) {
+	issue(id: $id) { id }
+}`
+
+const listCommentsQuery = `query($id: String!) {
+	issue(id: $id) {
+		comments { nodes { id body createdAt user { name } } }
+	}
+}`
+
+const addCommentMutation = `mutation($issueId: String!, $body: String!) {
+	commentCreate(input: { issueId: $issueId, body: $body }) {
+		success
+		comment { id body createdAt user { name } }
+	}
 }`
 
 const createIssueMutation = `mutation($teamId: String!, $title: String!, $description: String) {
@@ -128,6 +146,106 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 
 	created := toTrackerIssue(result.IssueCreate.Issue, issue.Project)
 	return &created, nil
+}
+
+// AddComment implements tracker.Commenter.
+func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (*tracker.Comment, error) {
+	issueID, err := c.resolveIssueID(ctx, issueKey)
+	if err != nil {
+		return nil, err
+	}
+
+	vars := map[string]any{
+		"issueId": issueID,
+		"body":    body,
+	}
+
+	data, err := c.doGraphQL(ctx, addCommentMutation, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	var result commentCreateData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comment create response",
+			"issueKey", issueKey)
+	}
+
+	if !result.CommentCreate.Success {
+		return nil, errors.WithDetails("linear comment creation failed",
+			"issueKey", issueKey)
+	}
+
+	return toTrackerComment(result.CommentCreate.Comment)
+}
+
+// ListComments implements tracker.Commenter.
+func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.Comment, error) {
+	vars := map[string]any{"id": issueKey}
+
+	data, err := c.doGraphQL(ctx, listCommentsQuery, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	var result issueCommentsData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comments response",
+			"issueKey", issueKey)
+	}
+
+	comments := make([]tracker.Comment, 0, len(result.Issue.Comments.Nodes))
+	for _, lc := range result.Issue.Comments.Nodes {
+		c, err := toTrackerComment(lc)
+		if err != nil {
+			return nil, err
+		}
+		comments = append(comments, *c)
+	}
+	return comments, nil
+}
+
+// resolveIssueID looks up the internal Linear issue ID for an identifier.
+func (c *Client) resolveIssueID(ctx context.Context, identifier string) (string, error) {
+	vars := map[string]any{"id": identifier}
+
+	data, err := c.doGraphQL(ctx, getIssueIDQuery, vars)
+	if err != nil {
+		return "", err
+	}
+
+	var result issueIDData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding issue ID response",
+			"identifier", identifier)
+	}
+
+	if result.Issue.ID == "" {
+		return "", errors.WithDetails("linear issue not found",
+			"identifier", identifier)
+	}
+
+	return result.Issue.ID, nil
+}
+
+func toTrackerComment(lc linearComment) (*tracker.Comment, error) {
+	created, err := time.Parse(time.RFC3339, lc.CreatedAt)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "parsing comment timestamp",
+			"commentID", lc.ID)
+	}
+
+	author := ""
+	if lc.User != nil {
+		author = lc.User.Name
+	}
+
+	return &tracker.Comment{
+		ID:      lc.ID,
+		Author:  author,
+		Body:    lc.Body,
+		Created: created,
+	}, nil
 }
 
 // resolveTeamID looks up the internal Linear team ID for a team key.

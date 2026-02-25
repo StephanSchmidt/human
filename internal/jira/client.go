@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/jira/adf"
@@ -136,6 +137,83 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Type:        issue.Type,
 		Summary:     issue.Summary,
 		Description: issue.Description,
+	}, nil
+}
+
+// AddComment implements tracker.Commenter.
+func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (*tracker.Comment, error) {
+	payload := commentBody{Body: adf.FromMarkdown(body)}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling comment request",
+			"issueKey", issueKey)
+	}
+
+	path := fmt.Sprintf("/rest/api/3/issue/%s/comment", url.PathEscape(issueKey))
+	resp, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var jc jiraComment
+	if err := json.NewDecoder(resp.Body).Decode(&jc); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comment response",
+			"issueKey", issueKey)
+	}
+
+	return toTrackerComment(jc)
+}
+
+// ListComments implements tracker.Commenter.
+func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.Comment, error) {
+	path := fmt.Sprintf("/rest/api/3/issue/%s/comment", url.PathEscape(issueKey))
+	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result commentsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding comments response",
+			"issueKey", issueKey)
+	}
+
+	comments := make([]tracker.Comment, 0, len(result.Comments))
+	for _, jc := range result.Comments {
+		c, err := toTrackerComment(jc)
+		if err != nil {
+			return nil, err
+		}
+		comments = append(comments, *c)
+	}
+	return comments, nil
+}
+
+func toTrackerComment(jc jiraComment) (*tracker.Comment, error) {
+	created, err := time.Parse("2006-01-02T15:04:05.000-0700", jc.Created)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "parsing comment timestamp",
+			"commentID", jc.ID)
+	}
+
+	body := ""
+	if len(jc.Body) > 0 && string(jc.Body) != "null" {
+		var doc map[string]any
+		if err := json.Unmarshal(jc.Body, &doc); err != nil {
+			return nil, errors.WrapWithDetails(err, "parsing comment ADF body",
+				"commentID", jc.ID)
+		}
+		body = adf.ToMarkdown(doc)
+	}
+
+	return &tracker.Comment{
+		ID:      jc.ID,
+		Author:  nameOrEmpty(jc.Author),
+		Body:    body,
+		Created: created,
 	}, nil
 }
 

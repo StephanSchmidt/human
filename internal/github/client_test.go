@@ -54,6 +54,22 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "", issues[1].Assignee)
 }
 
+func TestListIssues_emptyResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+}
+
 func TestListIssues_invalidProject(t *testing.T) {
 	client := New("http://localhost", "ghp_test")
 	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
@@ -110,6 +126,19 @@ func TestGetIssue_happy(t *testing.T) {
 	assert.Equal(t, "bob", issue.Assignee)
 	assert.Equal(t, "alice", issue.Reporter)
 	assert.Equal(t, "## Description\n\nThis is markdown.", issue.Description)
+}
+
+func TestGetIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.GetIssue(context.Background(), "octocat/hello-world#42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected status")
 }
 
 func TestGetIssue_invalidKey(t *testing.T) {
@@ -264,4 +293,98 @@ func Test_parseIssueKey(t *testing.T) {
 			assert.Equal(t, tt.wantNumber, number)
 		})
 	}
+}
+
+func TestAddComment_happy(t *testing.T) {
+	var gotBody commentRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/repos/octocat/hello-world/issues/42/comments", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{
+			"id": 101,
+			"body": "Hello world",
+			"user": {"login": "alice"},
+			"created_at": "2025-01-15T10:30:00Z"
+		}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	comment, err := client.AddComment(context.Background(), "octocat/hello-world#42", "Hello world")
+
+	require.NoError(t, err)
+	assert.Equal(t, "101", comment.ID)
+	assert.Equal(t, "alice", comment.Author)
+	assert.Equal(t, "Hello world", comment.Body)
+	assert.False(t, comment.Created.IsZero())
+
+	assert.Equal(t, "Hello world", gotBody.Body)
+}
+
+func TestAddComment_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.AddComment(context.Background(), "octocat/hello-world#42", "test")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected status")
+}
+
+func TestAddComment_invalidKey(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	_, err := client.AddComment(context.Background(), "badkey", "test")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestListComments_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/repos/octocat/hello-world/issues/42/comments", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `[
+			{"id": 101, "body": "First comment", "user": {"login": "alice"}, "created_at": "2025-01-15T10:30:00Z"},
+			{"id": 102, "body": "Second comment", "user": {"login": "bob"}, "created_at": "2025-01-16T11:00:00Z"}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	comments, err := client.ListComments(context.Background(), "octocat/hello-world#42")
+
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+
+	assert.Equal(t, "101", comments[0].ID)
+	assert.Equal(t, "alice", comments[0].Author)
+	assert.Equal(t, "First comment", comments[0].Body)
+
+	assert.Equal(t, "102", comments[1].ID)
+	assert.Equal(t, "bob", comments[1].Author)
+	assert.Equal(t, "Second comment", comments[1].Body)
+}
+
+func TestListComments_empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	comments, err := client.ListComments(context.Background(), "octocat/hello-world#42")
+
+	require.NoError(t, err)
+	assert.Empty(t, comments)
 }

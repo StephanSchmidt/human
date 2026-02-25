@@ -30,3 +30,14 @@ type createResponse struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 }
+
+type commentRequest struct {
+	Body string `json:"body"`
+}
+
+type ghComment struct {
+	ID        int     `json:"id"`
+	Body      string  `json:"body"`
+	User      *ghUser `json:"user"`
+	CreatedAt string  `json:"created_at"`
+}
