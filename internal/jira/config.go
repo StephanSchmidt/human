@@ -70,49 +70,6 @@ func applyGlobalEnvOverrides(cfg *Config) {
 	}
 }
 
-// Names returns the name of each config entry.
-func Names(configs []Config) []string {
-	names := make([]string, len(configs))
-	for i, c := range configs {
-		names[i] = c.Name
-	}
-	return names
-}
-
-// SetupEnv selects a Jira config by name and sets JIRA_URL, JIRA_USER,
-// and JIRA_KEY environment variables. When name is empty the first entry
-// is used. Env vars already set in the environment are not overwritten.
-func SetupEnv(configs []Config, name string) error {
-	if len(configs) == 0 {
-		return nil
-	}
-
-	cfg, err := selectConfig(configs, name)
-	if err != nil {
-		return err
-	}
-
-	applyEnvOverrides(&cfg)
-
-	return setEnv(cfg)
-}
-
-// selectConfig picks a Config by name, or returns the first entry when
-// name is empty.
-func selectConfig(configs []Config, name string) (Config, error) {
-	if name == "" {
-		return configs[0], nil
-	}
-
-	for _, c := range configs {
-		if c.Name == name {
-			return c, nil
-		}
-	}
-
-	return Config{}, errors.WithDetails("unknown jira config", "name", name)
-}
-
 // applyEnvOverrides checks for per-instance environment variables
 // (JIRA_<UPPER(name)>_URL, _USER, _KEY) and overwrites the corresponding
 // struct fields when set.
@@ -132,26 +89,3 @@ func applyEnvOverrides(cfg *Config) {
 	}
 }
 
-// setEnv sets JIRA_URL, JIRA_USER, and JIRA_KEY from a Config,
-// skipping any variable already present in the environment.
-func setEnv(cfg Config) error {
-	envMap := map[string]string{
-		"JIRA_URL":  cfg.URL,
-		"JIRA_USER": cfg.User,
-		"JIRA_KEY":  cfg.Key,
-	}
-
-	for envVar, val := range envMap {
-		if _, exists := os.LookupEnv(envVar); exists {
-			continue
-		}
-		if val == "" {
-			continue
-		}
-		if err := os.Setenv(envVar, val); err != nil {
-			return errors.WrapWithDetails(err, "setting env var", "key", envVar)
-		}
-	}
-
-	return nil
-}

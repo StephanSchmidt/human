@@ -77,69 +77,6 @@ func TestLoadConfigs_missingFile(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestSetupEnv_defaultsToFirst(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: first\n    url: https://api.github.com\n    token: tok1\n  - name: second\n    url: https://ghe.example.com/api/v3\n    token: tok2\n")
-
-	unsetEnv(t, "GITHUB_URL")
-	unsetEnv(t, "GITHUB_TOKEN")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "")
-	require.NoError(t, err)
-
-	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
-	assert.Equal(t, "tok1", os.Getenv("GITHUB_TOKEN"))
-}
-
-func TestSetupEnv_selectsByName(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: first\n    url: https://api.github.com\n    token: tok1\n  - name: second\n    url: https://ghe.example.com/api/v3\n    token: tok2\n")
-
-	unsetEnv(t, "GITHUB_URL")
-	unsetEnv(t, "GITHUB_TOKEN")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "second")
-	require.NoError(t, err)
-
-	assert.Equal(t, "https://ghe.example.com/api/v3", os.Getenv("GITHUB_URL"))
-	assert.Equal(t, "tok2", os.Getenv("GITHUB_TOKEN"))
-}
-
-func TestSetupEnv_unknownName(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "nonexistent")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown github config")
-}
-
-func TestSetupEnv_defaultURL(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: personal\n    token: ghp_abc\n")
-
-	unsetEnv(t, "GITHUB_URL")
-	unsetEnv(t, "GITHUB_TOKEN")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "")
-	require.NoError(t, err)
-
-	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
-	assert.Equal(t, "ghp_abc", os.Getenv("GITHUB_TOKEN"))
-}
-
 func TestApplyEnvOverrides(t *testing.T) {
 	tests := []struct {
 		name string
@@ -203,63 +140,6 @@ func TestApplyEnvOverrides(t *testing.T) {
 			assert.Equal(t, tt.want, cfg)
 		})
 	}
-}
-
-func TestSetupEnv_instanceEnvOverride(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n    token: file-token\n")
-
-	unsetEnv(t, "GITHUB_URL")
-	unsetEnv(t, "GITHUB_TOKEN")
-	t.Setenv("GITHUB_WORK_TOKEN", "env-instance-token")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "work")
-	require.NoError(t, err)
-
-	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
-	assert.Equal(t, "env-instance-token", os.Getenv("GITHUB_TOKEN"))
-}
-
-func TestSetupEnv_globalEnvOverridesInstance(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n    token: file-token\n")
-
-	unsetEnv(t, "GITHUB_URL")
-	t.Setenv("GITHUB_TOKEN", "global-token")
-	t.Setenv("GITHUB_WORK_TOKEN", "instance-token")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "work")
-	require.NoError(t, err)
-
-	// Global GITHUB_TOKEN takes priority over instance-specific GITHUB_WORK_TOKEN.
-	assert.Equal(t, "global-token", os.Getenv("GITHUB_TOKEN"))
-}
-
-func TestSetupEnv_missingFile(t *testing.T) {
-	dir := t.TempDir()
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "")
-	assert.NoError(t, err)
-}
-
-func TestSetupEnv_emptyList(t *testing.T) {
-	dir := t.TempDir()
-	writeConfig(t, dir, "githubs: []\n")
-
-	configs, err := LoadConfigs(dir)
-	require.NoError(t, err)
-
-	err = SetupEnv(configs, "")
-	assert.NoError(t, err)
 }
 
 func TestLoadInstances_happyPath(t *testing.T) {
