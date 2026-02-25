@@ -2,4 +2,4 @@ jiras:
   - name: myorg
     url: https://yourorg.atlassian.net
     user: you@example.com
-    key: your-api-token
+    # key comes from env: export JIRA_MYORG_KEY=your-api-token

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"github.com/spf13/viper"
 
@@ -56,6 +57,8 @@ func LoadConfig(dir, name string) error {
 		return err
 	}
 
+	applyEnvOverrides(&cfg)
+
 	return setJiraEnv(cfg)
 }
 
@@ -91,6 +94,26 @@ func selectJira(configs []JiraConfig, name string) (JiraConfig, error) {
 	}
 
 	return JiraConfig{}, errors.WithDetails("unknown jira config", "name", name)
+}
+
+// applyEnvOverrides checks for per-instance environment variables
+// (JIRA_<UPPER(name)>_URL, _USER, _KEY) and overwrites the corresponding
+// struct fields when set. This allows instance-specific secrets to live in
+// the environment rather than in .humanconfig.
+func applyEnvOverrides(cfg *JiraConfig) {
+	if cfg.Name == "" {
+		return
+	}
+	prefix := "JIRA_" + strings.ToUpper(cfg.Name) + "_"
+	if v, ok := os.LookupEnv(prefix + "URL"); ok {
+		cfg.URL = v
+	}
+	if v, ok := os.LookupEnv(prefix + "USER"); ok {
+		cfg.User = v
+	}
+	if v, ok := os.LookupEnv(prefix + "KEY"); ok {
+		cfg.Key = v
+	}
 }
 
 // setJiraEnv sets JIRA_URL, JIRA_USER, and JIRA_KEY from a JiraConfig,

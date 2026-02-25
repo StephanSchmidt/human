@@ -150,6 +150,106 @@ func TestLoadConfig_envOverridesConfig(t *testing.T) {
 	assert.Equal(t, "tok1", os.Getenv("JIRA_KEY"))
 }
 
+func TestApplyEnvOverrides(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    JiraConfig
+		envs   map[string]string
+		want   JiraConfig
+	}{
+		{
+			name: "overrides all fields",
+			cfg:  JiraConfig{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
+			envs: map[string]string{
+				"JIRA_WORK_URL":  "new-url",
+				"JIRA_WORK_USER": "new-user",
+				"JIRA_WORK_KEY":  "new-key",
+			},
+			want: JiraConfig{Name: "work", URL: "new-url", User: "new-user", Key: "new-key"},
+		},
+		{
+			name: "unset env leaves config alone",
+			cfg:  JiraConfig{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
+			envs: map[string]string{},
+			want: JiraConfig{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
+		},
+		{
+			name: "uppercased name",
+			cfg:  JiraConfig{Name: "my-org", URL: "old-url", User: "old-user", Key: "old-key"},
+			envs: map[string]string{
+				"JIRA_MY-ORG_KEY": "env-key",
+			},
+			want: JiraConfig{Name: "my-org", URL: "old-url", User: "old-user", Key: "env-key"},
+		},
+		{
+			name: "empty name is a no-op",
+			cfg:  JiraConfig{URL: "url", User: "user", Key: "key"},
+			envs: map[string]string{},
+			want: JiraConfig{URL: "url", User: "user", Key: "key"},
+		},
+		{
+			name: "partial override",
+			cfg:  JiraConfig{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
+			envs: map[string]string{
+				"JIRA_WORK_KEY": "env-key",
+			},
+			want: JiraConfig{Name: "work", URL: "old-url", User: "old-user", Key: "env-key"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Unset all possible env vars to isolate tests.
+			for _, suffix := range []string{"URL", "USER", "KEY"} {
+				if tt.cfg.Name != "" {
+					unsetEnv(t, "JIRA_"+tt.cfg.Name+"_"+suffix)
+				}
+			}
+			for k, v := range tt.envs {
+				t.Setenv(k, v)
+			}
+
+			cfg := tt.cfg
+			applyEnvOverrides(&cfg)
+
+			assert.Equal(t, tt.want, cfg)
+		})
+	}
+}
+
+func TestLoadConfig_instanceEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: file-key\n")
+
+	unsetEnv(t, "JIRA_URL")
+	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
+	t.Setenv("JIRA_WORK_KEY", "env-instance-key")
+
+	err := LoadConfig(dir, "work")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://work.atlassian.net", os.Getenv("JIRA_URL"))
+	assert.Equal(t, "me@work.com", os.Getenv("JIRA_USER"))
+	assert.Equal(t, "env-instance-key", os.Getenv("JIRA_KEY"))
+}
+
+func TestLoadConfig_globalEnvOverridesInstanceEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: file-key\n")
+
+	unsetEnv(t, "JIRA_URL")
+	unsetEnv(t, "JIRA_USER")
+	t.Setenv("JIRA_KEY", "global-key")
+	t.Setenv("JIRA_WORK_KEY", "instance-key")
+
+	err := LoadConfig(dir, "work")
+	require.NoError(t, err)
+
+	// Global JIRA_KEY takes priority over instance-specific JIRA_WORK_KEY.
+	assert.Equal(t, "global-key", os.Getenv("JIRA_KEY"))
+}
+
 func TestLoadConfig_missingFile(t *testing.T) {
 	dir := t.TempDir()
 	err := LoadConfig(dir, "")
