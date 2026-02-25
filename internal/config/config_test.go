@@ -263,3 +263,320 @@ func TestLoadConfig_emptyList(t *testing.T) {
 	err := LoadConfig(dir, "")
 	assert.NoError(t, err)
 }
+
+// --- GitHub config tests ---
+
+func TestLoadGitHubConfigs(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		want    []GitHubConfig
+		wantErr string
+	}{
+		{
+			name: "single entry",
+			yaml: "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n",
+			want: []GitHubConfig{
+				{Name: "personal", URL: "https://api.github.com", Token: "ghp_abc"},
+			},
+		},
+		{
+			name: "multiple entries",
+			yaml: "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n  - name: work\n    url: https://github.example.com/api/v3\n    token: ghp_xyz\n",
+			want: []GitHubConfig{
+				{Name: "personal", URL: "https://api.github.com", Token: "ghp_abc"},
+				{Name: "work", URL: "https://github.example.com/api/v3", Token: "ghp_xyz"},
+			},
+		},
+		{
+			name: "empty list",
+			yaml: "githubs: []\n",
+			want: []GitHubConfig{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeConfig(t, dir, tt.yaml)
+
+			got, err := LoadGitHubConfigs(dir)
+
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestLoadGitHubConfigs_missingFile(t *testing.T) {
+	dir := t.TempDir()
+	got, err := LoadGitHubConfigs(dir)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+func TestLoadGitHubConfig_defaultsToFirst(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: first\n    url: https://api.github.com\n    token: tok1\n  - name: second\n    url: https://ghe.example.com/api/v3\n    token: tok2\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+
+	err := LoadGitHubConfig(dir, "")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
+	assert.Equal(t, "tok1", os.Getenv("GITHUB_TOKEN"))
+}
+
+func TestLoadGitHubConfig_selectsByName(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: first\n    url: https://api.github.com\n    token: tok1\n  - name: second\n    url: https://ghe.example.com/api/v3\n    token: tok2\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+
+	err := LoadGitHubConfig(dir, "second")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://ghe.example.com/api/v3", os.Getenv("GITHUB_URL"))
+	assert.Equal(t, "tok2", os.Getenv("GITHUB_TOKEN"))
+}
+
+func TestLoadGitHubConfig_unknownName(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n")
+
+	err := LoadGitHubConfig(dir, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown github config")
+}
+
+func TestLoadGitHubConfig_defaultURL(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: personal\n    token: ghp_abc\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+
+	err := LoadGitHubConfig(dir, "")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
+	assert.Equal(t, "ghp_abc", os.Getenv("GITHUB_TOKEN"))
+}
+
+func TestApplyGitHubEnvOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  GitHubConfig
+		envs map[string]string
+		want GitHubConfig
+	}{
+		{
+			name: "overrides all fields",
+			cfg:  GitHubConfig{Name: "work", URL: "old-url", Token: "old-token"},
+			envs: map[string]string{
+				"GITHUB_WORK_URL":   "new-url",
+				"GITHUB_WORK_TOKEN": "new-token",
+			},
+			want: GitHubConfig{Name: "work", URL: "new-url", Token: "new-token"},
+		},
+		{
+			name: "unset env leaves config alone",
+			cfg:  GitHubConfig{Name: "work", URL: "orig-url", Token: "orig-token"},
+			envs: map[string]string{},
+			want: GitHubConfig{Name: "work", URL: "orig-url", Token: "orig-token"},
+		},
+		{
+			name: "uppercased name",
+			cfg:  GitHubConfig{Name: "my-org", URL: "old-url", Token: "old-token"},
+			envs: map[string]string{
+				"GITHUB_MY-ORG_TOKEN": "env-token",
+			},
+			want: GitHubConfig{Name: "my-org", URL: "old-url", Token: "env-token"},
+		},
+		{
+			name: "empty name is a no-op",
+			cfg:  GitHubConfig{URL: "url", Token: "token"},
+			envs: map[string]string{},
+			want: GitHubConfig{URL: "url", Token: "token"},
+		},
+		{
+			name: "partial override",
+			cfg:  GitHubConfig{Name: "work", URL: "old-url", Token: "old-token"},
+			envs: map[string]string{
+				"GITHUB_WORK_TOKEN": "env-token",
+			},
+			want: GitHubConfig{Name: "work", URL: "old-url", Token: "env-token"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, suffix := range []string{"URL", "TOKEN"} {
+				if tt.cfg.Name != "" {
+					unsetEnv(t, "GITHUB_"+tt.cfg.Name+"_"+suffix)
+				}
+			}
+			for k, v := range tt.envs {
+				t.Setenv(k, v)
+			}
+
+			cfg := tt.cfg
+			applyGitHubEnvOverrides(&cfg)
+
+			assert.Equal(t, tt.want, cfg)
+		})
+	}
+}
+
+func TestLoadGitHubConfig_instanceEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n    token: file-token\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+	t.Setenv("GITHUB_WORK_TOKEN", "env-instance-token")
+
+	err := LoadGitHubConfig(dir, "work")
+	require.NoError(t, err)
+
+	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
+	assert.Equal(t, "env-instance-token", os.Getenv("GITHUB_TOKEN"))
+}
+
+func TestLoadGitHubConfig_globalEnvOverridesInstance(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n    token: file-token\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	t.Setenv("GITHUB_TOKEN", "global-token")
+	t.Setenv("GITHUB_WORK_TOKEN", "instance-token")
+
+	err := LoadGitHubConfig(dir, "work")
+	require.NoError(t, err)
+
+	// Global GITHUB_TOKEN takes priority over instance-specific GITHUB_WORK_TOKEN.
+	assert.Equal(t, "global-token", os.Getenv("GITHUB_TOKEN"))
+}
+
+func TestLoadGitHubConfig_missingFile(t *testing.T) {
+	dir := t.TempDir()
+	err := LoadGitHubConfig(dir, "")
+	assert.NoError(t, err)
+}
+
+func TestLoadGitHubConfig_emptyList(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs: []\n")
+
+	err := LoadGitHubConfig(dir, "")
+	assert.NoError(t, err)
+}
+
+// --- ResolveTracker tests ---
+
+func TestResolveTracker_nameInJiras(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
+
+	unsetEnv(t, "JIRA_URL")
+	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
+
+	kind, err := ResolveTracker(dir, "work")
+	require.NoError(t, err)
+	assert.Equal(t, TrackerJira, kind)
+	assert.Equal(t, "https://work.atlassian.net", os.Getenv("JIRA_URL"))
+}
+
+func TestResolveTracker_nameInGithubs(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+
+	kind, err := ResolveTracker(dir, "personal")
+	require.NoError(t, err)
+	assert.Equal(t, TrackerGitHub, kind)
+	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
+}
+
+func TestResolveTracker_unknownName(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
+
+	_, err := ResolveTracker(dir, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tracker name not found")
+}
+
+func TestResolveTracker_duplicateName(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\ngithubs:\n  - name: work\n    token: ghp_abc\n")
+
+	_, err := ResolveTracker(dir, "work")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ambiguous tracker name")
+}
+
+func TestResolveTracker_autoDetectJiraOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
+
+	unsetEnv(t, "JIRA_URL")
+	unsetEnv(t, "JIRA_USER")
+	unsetEnv(t, "JIRA_KEY")
+
+	kind, err := ResolveTracker(dir, "")
+	require.NoError(t, err)
+	assert.Equal(t, TrackerJira, kind)
+	assert.Equal(t, "https://work.atlassian.net", os.Getenv("JIRA_URL"))
+}
+
+func TestResolveTracker_autoDetectGitHubOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n")
+
+	unsetEnv(t, "GITHUB_URL")
+	unsetEnv(t, "GITHUB_TOKEN")
+
+	kind, err := ResolveTracker(dir, "")
+	require.NoError(t, err)
+	assert.Equal(t, TrackerGitHub, kind)
+	assert.Equal(t, "https://api.github.com", os.Getenv("GITHUB_URL"))
+}
+
+func TestResolveTracker_autoDetectBothTypes(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\ngithubs:\n  - name: personal\n    token: ghp_abc\n")
+
+	_, err := ResolveTracker(dir, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "multiple tracker types configured")
+}
+
+func TestResolveTracker_noConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "{}\n")
+
+	_, err := ResolveTracker(dir, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tracker configured")
+}
+
+func TestResolveTracker_missingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := ResolveTracker(dir, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tracker configured")
+}
