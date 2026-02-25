@@ -38,3 +38,27 @@ type nameField struct {
 	DisplayName string `json:"displayName"`
 	Name        string `json:"name"`
 }
+
+type createRequest struct {
+	Fields createFields `json:"fields"`
+}
+
+type createFields struct {
+	Project     keyField       `json:"project"`
+	Summary     string         `json:"summary"`
+	IssueType   nameOnly       `json:"issuetype"`
+	Description map[string]any `json:"description,omitempty"`
+}
+
+type keyField struct {
+	Key string `json:"key"`
+}
+
+type nameOnly struct {
+	Name string `json:"name"`
+}
+
+type createResponse struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}

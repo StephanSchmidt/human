@@ -8,6 +8,8 @@ import (
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
 	Key         string
+	Project     string // project key, e.g. "KAN"
+	Type        string // issue type, e.g. "Task", "Bug"
 	Summary     string
 	Status      string
 	Priority    string

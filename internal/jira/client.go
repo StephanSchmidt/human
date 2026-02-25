@@ -1,9 +1,11 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -33,7 +35,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		"fields":     {"*navigable"},
 	}
 
-	resp, err := c.doRequest(ctx, http.MethodGet, "/rest/api/3/search/jql", query.Encode())
+	resp, err := c.doRequest(ctx, http.MethodGet, "/rest/api/3/search/jql", query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +65,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 		"fields": {"summary,status,description,assignee,reporter,priority"},
 	}
 
-	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode())
+	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +99,45 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 	}, nil
 }
 
-func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string) (*http.Response, error) {
+// CreateIssue implements tracker.Creator.
+func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error) {
+	payload := createRequest{
+		Fields: createFields{
+			Project:     keyField{Key: issue.Project},
+			Summary:     issue.Summary,
+			IssueType:   nameOnly{Name: issue.Type},
+			Description: adf.FromMarkdown(issue.Description),
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling create request",
+			"project", issue.Project)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/rest/api/3/issue", "", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result createResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding create response",
+			"project", issue.Project)
+	}
+
+	return &tracker.Issue{
+		Key:         result.Key,
+		Project:     issue.Project,
+		Type:        issue.Type,
+		Summary:     issue.Summary,
+		Description: issue.Description,
+	}, nil
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "parsing base URL",
@@ -106,13 +146,16 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string) (
 	u.Path = path
 	u.RawQuery = rawQuery
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "creating request",
 			"method", method, "path", path)
 	}
 	req.SetBasicAuth(c.user, c.key)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -123,7 +166,7 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string) (
 		return nil, errors.WithDetails("requesting Jira: nil response",
 			"method", method, "path", path)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_ = resp.Body.Close()
 		return nil, errors.WithDetails("jira returned unexpected status",
 			"statusCode", resp.StatusCode, "method", method, "path", path)
