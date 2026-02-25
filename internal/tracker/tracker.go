@@ -7,15 +7,15 @@ import (
 
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
-	Key         string
-	Project     string // project key, e.g. "KAN"
-	Type        string // issue type, e.g. "Task", "Bug"
-	Summary     string
-	Status      string
-	Priority    string
-	Assignee    string
-	Reporter    string
-	Description string // markdown
+	Key         string `json:"key"`
+	Project     string `json:"project"`     // project key, e.g. "KAN"
+	Type        string `json:"type"`        // issue type, e.g. "Task", "Bug"
+	Summary     string `json:"summary"`
+	Status      string `json:"status"`
+	Priority    string `json:"priority"`
+	Assignee    string `json:"assignee"`
+	Reporter    string `json:"reporter"`
+	Description string `json:"description"` // markdown
 }
 
 // Comment is a provider-agnostic comment representation.

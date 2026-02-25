@@ -118,11 +118,12 @@ func (cmd *InstallCmd) Run() error {
 // --- issues list ---
 
 type IssuesCmd struct {
-	List ListCmd `kong:"cmd,help='List project issues as a KEY/STATUS/SUMMARY table'"`
+	List ListCmd `kong:"cmd,help='List project issues (JSON)'"`
 }
 
 type ListCmd struct {
 	Project string `kong:"required,help='Jira project key (e.g. KAN)'"`
+	Table   bool   `kong:"help='Output as human-readable table instead of JSON'"`
 }
 
 func (cmd *ListCmd) Run(l tracker.Lister) error {
@@ -134,6 +135,19 @@ func (cmd *ListCmd) Run(l tracker.Lister) error {
 		return err
 	}
 
+	if cmd.Table {
+		return printIssuesTable(issues)
+	}
+	return printIssuesJSON(issues)
+}
+
+func printIssuesJSON(issues []tracker.Issue) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(issues)
+}
+
+func printIssuesTable(issues []tracker.Issue) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tSUMMARY")
 	for _, issue := range issues {
@@ -219,7 +233,7 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	w := ctx.Stdout
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Examples:")
-	_, _ = fmt.Fprintln(w, "  # List all issues in a project (outputs tab-separated table)")
+	_, _ = fmt.Fprintln(w, "  # List all issues in a project (JSON)")
 	_, _ = fmt.Fprintln(w, "  human issues list --project=KAN")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Get a single issue as markdown")
