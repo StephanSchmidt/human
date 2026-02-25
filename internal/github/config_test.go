@@ -142,6 +142,54 @@ func TestApplyEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyGlobalEnvOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		envs map[string]string
+		want Config
+	}{
+		{
+			name: "overrides all fields",
+			cfg:  Config{Name: "work", URL: "old-url", Token: "old-token"},
+			envs: map[string]string{
+				"GITHUB_URL":   "global-url",
+				"GITHUB_TOKEN": "global-token",
+			},
+			want: Config{Name: "work", URL: "global-url", Token: "global-token"},
+		},
+		{
+			name: "unset env leaves config alone",
+			cfg:  Config{Name: "work", URL: "orig-url", Token: "orig-token"},
+			envs: map[string]string{},
+			want: Config{Name: "work", URL: "orig-url", Token: "orig-token"},
+		},
+		{
+			name: "partial override",
+			cfg:  Config{Name: "work", URL: "old-url", Token: "old-token"},
+			envs: map[string]string{
+				"GITHUB_TOKEN": "global-token",
+			},
+			want: Config{Name: "work", URL: "old-url", Token: "global-token"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetEnv(t, "GITHUB_URL")
+			unsetEnv(t, "GITHUB_TOKEN")
+			for k, v := range tt.envs {
+				t.Setenv(k, v)
+			}
+
+			cfg := tt.cfg
+			applyGlobalEnvOverrides(&cfg)
+
+			assert.Equal(t, tt.want, cfg)
+		})
+	}
+}
+
 func TestLoadInstances_happyPath(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "githubs:\n  - name: personal\n    url: https://api.github.com\n    token: ghp_abc\n")

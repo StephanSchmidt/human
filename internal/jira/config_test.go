@@ -160,6 +160,56 @@ func TestApplyEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyGlobalEnvOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		envs map[string]string
+		want Config
+	}{
+		{
+			name: "overrides all fields",
+			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
+			envs: map[string]string{
+				"JIRA_URL":  "global-url",
+				"JIRA_USER": "global-user",
+				"JIRA_KEY":  "global-key",
+			},
+			want: Config{Name: "work", URL: "global-url", User: "global-user", Key: "global-key"},
+		},
+		{
+			name: "unset env leaves config alone",
+			cfg:  Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
+			envs: map[string]string{},
+			want: Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
+		},
+		{
+			name: "partial override",
+			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
+			envs: map[string]string{
+				"JIRA_KEY": "global-key",
+			},
+			want: Config{Name: "work", URL: "old-url", User: "old-user", Key: "global-key"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			unsetEnv(t, "JIRA_URL")
+			unsetEnv(t, "JIRA_USER")
+			unsetEnv(t, "JIRA_KEY")
+			for k, v := range tt.envs {
+				t.Setenv(k, v)
+			}
+
+			cfg := tt.cfg
+			applyGlobalEnvOverrides(&cfg)
+
+			assert.Equal(t, tt.want, cfg)
+		})
+	}
+}
+
 func TestLoadInstances_happyPath(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: tok1\n")
