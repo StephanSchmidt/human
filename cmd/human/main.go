@@ -15,20 +15,23 @@ import (
 	"human/errors"
 	"human/internal/claude"
 	"human/internal/config"
+	"human/internal/github"
 	"human/internal/jira"
 	"human/internal/tracker"
 )
 
 // CLI is the top-level Kong struct with global flags.
 type CLI struct {
-	Jira     string     `kong:"help='Named Jira config from .humanconfig (uses first entry when omitted)'"`
-	JiraKey  string     `kong:"env='JIRA_KEY',help='Jira API token'"`
-	JiraURL  string     `kong:"env='JIRA_URL',help='Jira base URL'"`
-	JiraUser string     `kong:"env='JIRA_USER',help='Jira user email'"`
-	Issues   IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
-	Issue    IssueCmd   `kong:"cmd,help='Single issue operations'"`
-	Install  InstallCmd  `kong:"cmd,help='Install agent integrations'"`
-	Tracker  TrackerCmd  `kong:"cmd,help='Manage tracker connections'"`
+	TrackerName string     `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
+	JiraKey     string     `kong:"env='JIRA_KEY',help='Jira API token'"`
+	JiraURL     string     `kong:"env='JIRA_URL',help='Jira base URL'"`
+	JiraUser    string     `kong:"env='JIRA_USER',help='Jira user email'"`
+	GitHubToken string     `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
+	GitHubURL   string     `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
+	Issues      IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
+	Issue       IssueCmd   `kong:"cmd,help='Single issue operations'"`
+	Install     InstallCmd `kong:"cmd,help='Install agent integrations'"`
+	Tracker     TrackerCmd `kong:"cmd,help='Manage tracker connections'"`
 }
 
 // --- tracker list ---
@@ -53,19 +56,31 @@ type TrackerListCmd struct {
 
 // Run lists configured tracker instances.
 func (cmd *TrackerListCmd) Run() error {
-	configs, err := config.LoadJiraConfigs(".")
+	var entries []trackerEntry
+
+	jiraConfigs, err := config.LoadJiraConfigs(".")
 	if err != nil {
 		return err
 	}
-
-	entries := make([]trackerEntry, len(configs))
-	for i, c := range configs {
-		entries[i] = trackerEntry{
+	for _, c := range jiraConfigs {
+		entries = append(entries, trackerEntry{
 			Name: c.Name,
 			Type: "jira",
 			URL:  c.URL,
 			User: c.User,
-		}
+		})
+	}
+
+	ghConfigs, err := config.LoadGitHubConfigs(".")
+	if err != nil {
+		return err
+	}
+	for _, c := range ghConfigs {
+		entries = append(entries, trackerEntry{
+			Name: c.Name,
+			Type: "github",
+			URL:  c.URL,
+		})
 	}
 
 	if cmd.Table {
@@ -75,7 +90,7 @@ func (cmd *TrackerListCmd) Run() error {
 }
 
 func printTrackerJSON(entries []trackerEntry) error {
-	fmt.Println("// Configured issue trackers. Use --jira=<name> to select one.")
+	fmt.Println("// Configured issue trackers. Use --tracker=<name> to select one.")
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(entries)
@@ -122,7 +137,7 @@ type IssuesCmd struct {
 }
 
 type ListCmd struct {
-	Project string `kong:"required,help='Jira project key (e.g. KAN)'"`
+	Project string `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
 	Table   bool   `kong:"help='Output as human-readable table instead of JSON'"`
 }
 
@@ -164,7 +179,7 @@ type IssueCmd struct {
 }
 
 type GetCmd struct {
-	Key string `kong:"arg,required,help='Issue key (e.g. KAN-1)'"`
+	Key string `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123)'"`
 }
 
 func (cmd *GetCmd) Run(g tracker.Getter) error {
@@ -198,10 +213,10 @@ func (cmd *GetCmd) Run(g tracker.Getter) error {
 // --- issue create ---
 
 type CreateCmd struct {
-	Project     string `kong:"required,help='Project key (e.g. KAN)'"`
-	Type        string `kong:"default='Task',help='Issue type (e.g. Task, Bug, Story)'"`
+	Project     string `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo)'"`
+	Type        string `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
 	Summary     string `kong:"arg,required,help='Issue summary'"`
-	Description string `kong:"help='Issue description (plain text)'"`
+	Description string `kong:"help='Issue description (markdown)'"`
 }
 
 func (cmd *CreateCmd) Run(c tracker.Creator) error {
@@ -233,32 +248,35 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	w := ctx.Stdout
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Examples:")
-	_, _ = fmt.Fprintln(w, "  # List all issues in a project (JSON)")
+	_, _ = fmt.Fprintln(w, "  # List Jira issues (JSON)")
 	_, _ = fmt.Fprintln(w, "  human issues list --project=KAN")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # List GitHub issues (JSON)")
+	_, _ = fmt.Fprintln(w, "  human issues list --project=octocat/hello-world")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Get a single issue as markdown")
 	_, _ = fmt.Fprintln(w, "  human issue get KAN-1")
+	_, _ = fmt.Fprintln(w, "  human issue get octocat/hello-world#42")
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Pipe issue details to another tool")
-	_, _ = fmt.Fprintln(w, "  human issue get KAN-1 | llm 'summarize this'")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Create a new issue in a project")
+	_, _ = fmt.Fprintln(w, "  # Create a new issue")
 	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
+	_, _ = fmt.Fprintln(w, `  human issue create --project=octocat/hello-world "Fix bug"`)
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # List configured trackers (JSON)")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Use a specific Jira config by name")
-	_, _ = fmt.Fprintln(w, "  human --jira=work issues list --project=KAN")
+	_, _ = fmt.Fprintln(w, "  # Use a specific config by name")
+	_, _ = fmt.Fprintln(w, "  human --tracker=work issues list --project=KAN")
+	_, _ = fmt.Fprintln(w, "  human --tracker=personal issues list --project=octocat/hello-world")
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent (no Jira credentials needed)")
+	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 
 	return nil
 }
 
-// needsJiraClient returns true for commands that require Jira credentials.
-func needsJiraClient(command string) bool {
+// needsTrackerClient returns true for commands that require a tracker client.
+func needsTrackerClient(command string) bool {
 	switch {
 	case strings.HasPrefix(command, "install"):
 		return false
@@ -282,18 +300,54 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages Jira issues. Output is plain text tables and markdown."),
+		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira and GitHub. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
 	)
 
-	// Load .humanconfig after parsing so --jira flag is available.
-	// Config values fill env gaps not covered by flags or shell env.
-	if err := config.LoadConfig(".", cli.Jira); err != nil {
-		log.Warn().Err(err).Msg("failed to parse .humanconfig")
+	if needsTrackerClient(ctx.Command()) {
+		kind, err := config.ResolveTracker(".", cli.TrackerName)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+
+		backfillJiraEnv(&cli)
+		backfillGitHubEnv(&cli)
+
+		switch kind {
+		case config.TrackerJira:
+			if cli.JiraURL == "" || cli.JiraUser == "" || cli.JiraKey == "" {
+				fmt.Fprintln(os.Stderr, "error: missing required Jira config (--jira-url, --jira-user, --jira-key or env vars)")
+				os.Exit(1)
+			}
+			client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
+			ctx.BindTo(client, (*tracker.Lister)(nil))
+			ctx.BindTo(client, (*tracker.Getter)(nil))
+			ctx.BindTo(client, (*tracker.Creator)(nil))
+
+		case config.TrackerGitHub:
+			if cli.GitHubToken == "" {
+				fmt.Fprintln(os.Stderr, "error: missing required GitHub config (--github-token or GITHUB_TOKEN env var)")
+				os.Exit(1)
+			}
+			if cli.GitHubURL == "" {
+				cli.GitHubURL = "https://api.github.com"
+			}
+			client := github.New(cli.GitHubURL, cli.GitHubToken)
+			ctx.BindTo(client, (*tracker.Lister)(nil))
+			ctx.BindTo(client, (*tracker.Getter)(nil))
+			ctx.BindTo(client, (*tracker.Creator)(nil))
+		}
 	}
 
-	// Backfill CLI fields from env vars that LoadConfig may have set.
+	if err := ctx.Run(); err != nil {
+		errors.LogError(err).Msg("command failed")
+		os.Exit(1)
+	}
+}
+
+func backfillJiraEnv(cli *CLI) {
 	if cli.JiraURL == "" {
 		cli.JiraURL = os.Getenv("JIRA_URL")
 	}
@@ -303,20 +357,13 @@ func main() {
 	if cli.JiraKey == "" {
 		cli.JiraKey = os.Getenv("JIRA_KEY")
 	}
+}
 
-	if needsJiraClient(ctx.Command()) {
-		if cli.JiraURL == "" || cli.JiraUser == "" || cli.JiraKey == "" {
-			fmt.Fprintln(os.Stderr, "error: missing required Jira config (--jira-url, --jira-user, --jira-key or env vars)")
-			os.Exit(1)
-		}
-		client := jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey)
-		ctx.BindTo(client, (*tracker.Lister)(nil))
-		ctx.BindTo(client, (*tracker.Getter)(nil))
-		ctx.BindTo(client, (*tracker.Creator)(nil))
+func backfillGitHubEnv(cli *CLI) {
+	if cli.GitHubURL == "" {
+		cli.GitHubURL = os.Getenv("GITHUB_URL")
 	}
-
-	if err := ctx.Run(); err != nil {
-		errors.LogError(err).Msg("command failed")
-		os.Exit(1)
+	if cli.GitHubToken == "" {
+		cli.GitHubToken = os.Getenv("GITHUB_TOKEN")
 	}
 }
