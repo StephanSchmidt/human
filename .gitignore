@@ -1,8 +1,7 @@
 bin/
 dist/
 /human
-.humanconfig
+local/
 coverage.out
-test.sh
 logo/
 .claude/

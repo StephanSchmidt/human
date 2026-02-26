@@ -1,6 +1,8 @@
 package config
 
 import (
+	"path/filepath"
+
 	"github.com/spf13/viper"
 
 	"github.com/stephanschmidt/human/errors"
@@ -25,12 +27,13 @@ func UnmarshalSection(dir, key string, target any) error {
 }
 
 // readConfig creates a viper instance and reads the .humanconfig file from
-// dir. Returns (nil, nil) when no config file exists.
+// dir (or its local/ subdirectory). Returns (nil, nil) when no config file exists.
 func readConfig(dir string) (*viper.Viper, error) {
 	v := viper.New()
 	v.SetConfigName(".humanconfig")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(dir)
+	v.AddConfigPath(filepath.Join(dir, "local"))
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {

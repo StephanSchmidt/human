@@ -1,4 +1,4 @@
-.PHONY: all build install test coverage lint sec secrets check clean upgrade-deps release
+.PHONY: all build install test test-integration coverage lint sec secrets check clean upgrade-deps release
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
@@ -29,6 +29,9 @@ sec:
 
 secrets:
 	go tool gitleaks git -v
+
+test-integration: build
+	go run ./cmd/integrationtest
 
 check: lint sec secrets
 
