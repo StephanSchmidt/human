@@ -83,8 +83,8 @@ type linearComment struct {
 
 type commentCreateData struct {
 	CommentCreate struct {
-		Success bool           `json:"success"`
-		Comment linearComment  `json:"comment"`
+		Success bool          `json:"success"`
+		Comment linearComment `json:"comment"`
 	} `json:"commentCreate"`
 }
 

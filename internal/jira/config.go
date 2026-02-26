@@ -88,4 +88,3 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Key = v
 	}
 }
-

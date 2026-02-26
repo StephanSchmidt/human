@@ -122,7 +122,7 @@ func TestGetIssue_happy(t *testing.T) {
 	assert.Equal(t, "The answer", issue.Summary)
 	assert.Equal(t, "open", issue.Status)
 	assert.Equal(t, "enhancement", issue.Type) // first label
-	assert.Equal(t, "", issue.Priority)         // GitHub has no priority
+	assert.Equal(t, "", issue.Priority)        // GitHub has no priority
 	assert.Equal(t, "bob", issue.Assignee)
 	assert.Equal(t, "alice", issue.Reporter)
 	assert.Equal(t, "## Description\n\nThis is markdown.", issue.Description)

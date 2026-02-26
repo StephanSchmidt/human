@@ -84,4 +84,3 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Token = v
 	}
 }
-

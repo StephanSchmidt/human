@@ -11,11 +11,11 @@ import (
 // stubProvider satisfies Provider with no-op methods.
 type stubProvider struct{}
 
-func (stubProvider) ListIssues(context.Context, ListOptions) ([]Issue, error)        { return nil, nil }
-func (stubProvider) GetIssue(context.Context, string) (*Issue, error)                { return nil, nil }
-func (stubProvider) CreateIssue(context.Context, *Issue) (*Issue, error)             { return nil, nil }
-func (stubProvider) ListComments(context.Context, string) ([]Comment, error)         { return nil, nil }
-func (stubProvider) AddComment(context.Context, string, string) (*Comment, error)    { return nil, nil }
+func (stubProvider) ListIssues(context.Context, ListOptions) ([]Issue, error)     { return nil, nil }
+func (stubProvider) GetIssue(context.Context, string) (*Issue, error)             { return nil, nil }
+func (stubProvider) CreateIssue(context.Context, *Issue) (*Issue, error)          { return nil, nil }
+func (stubProvider) ListComments(context.Context, string) ([]Comment, error)      { return nil, nil }
+func (stubProvider) AddComment(context.Context, string, string) (*Comment, error) { return nil, nil }
 
 func TestResolve_byName(t *testing.T) {
 	instances := []Instance{
