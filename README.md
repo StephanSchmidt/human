@@ -12,9 +12,9 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, and Linear with output as JSON and markdown.
+Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, and Azure DevOps with output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, GitLab, and Linear** — no tool-switching for the AI
+- **One CLI for Jira, GitHub, GitLab, Linear, and Azure DevOps** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
 - **Claude Code skills** turn PM tickets into implementation plans
 - **Definition of Ready checks** AI catches incomplete tickets before coding starts
@@ -71,7 +71,7 @@ go install github.com/stephanschmidt/human@latest
 
 ## CLI usage
 
-Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, GitLab, and Linear — only the project identifier changes.
+Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, GitLab, Linear, and Azure DevOps — only the project identifier changes.
 
 ```bash
 # List issues (JSON by default)
@@ -79,6 +79,7 @@ human issues list --project=KAN                    # Jira
 human issues list --project=octocat/hello-world    # GitHub
 human issues list --project=mygroup/myproject      # GitLab
 human issues list --project=ENG                    # Linear
+human issues list --project=Human                  # Azure DevOps
 
 # Human-readable table
 human issues list --project=KAN --table
@@ -88,6 +89,7 @@ human issue get KAN-1
 human issue get octocat/hello-world#42
 human issue get mygroup/myproject#42
 human issue get ENG-123
+human issue get Human/42                           # Azure DevOps
 
 # Create an issue
 human issue create --project=ENG "Implement feature"
@@ -166,6 +168,16 @@ linears:
     token: lin_xxx
 ```
 
+### Azure DevOps
+
+```yaml
+azuredevops:
+  - name: work
+    # url: https://dev.azure.com  # optional, this is the default
+    org: myorg
+    token: pat-xxx
+```
+
 By default the first entry is used. Select a specific instance with `--tracker`:
 
 ```bash
@@ -216,3 +228,12 @@ The GitLab API URL defaults to `https://gitlab.com` when not set.
 4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
 
 The Linear API URL defaults to `https://api.linear.app` when not set.
+
+### Azure DevOps settings resolution
+
+1. **CLI flags** (`--azure-url`, `--azure-org`, `--azure-token`)
+2. **Global environment variables** (`AZURE_URL`, `AZURE_ORG`, `AZURE_TOKEN`)
+3. **Per-instance environment variables** (`AZURE_<NAME>_URL`, `AZURE_<NAME>_ORG`, `AZURE_<NAME>_TOKEN` — name is uppercased, e.g. `AZURE_WORK_TOKEN`)
+4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+
+The Azure DevOps URL defaults to `https://dev.azure.com` when not set.

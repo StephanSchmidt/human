@@ -79,6 +79,18 @@ func main() {
 		ran++
 	}
 
+	// ── Azure DevOps ───────────────────────────────
+	if p := os.Getenv("HUMAN_TEST_AZURE_PROJECT"); p != "" {
+		trackerName := os.Getenv("HUMAN_TEST_AZURE_TRACKER")
+		if trackerName == "" {
+			trackerName = "human"
+		}
+		runTracker(trackerTest{
+			name: "azuredevops", tracker: trackerName, project: p,
+		})
+		ran++
+	}
+
 	// ── Summary ─────────────────────────────────────
 	fmt.Println()
 	if ran == 0 {
