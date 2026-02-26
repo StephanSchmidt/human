@@ -7,114 +7,150 @@ import (
 	"time"
 )
 
+type nodeRenderer func(map[string]any) string
+
+var renderers map[string]nodeRenderer
+
+func init() {
+	renderers = map[string]nodeRenderer{
+		"doc":          renderChildrenOnly,
+		"listItem":     renderChildrenOnly,
+		"mediaSingle":  renderChildrenOnly,
+		"mediaGroup":   renderChildrenOnly,
+		"paragraph":    renderParagraph,
+		"heading":      renderHeading,
+		"text":         renderText,
+		"hardBreak":    renderHardBreak,
+		"rule":         renderRule,
+		"bulletList":   renderBulletList,
+		"orderedList":  renderOrderedList,
+		"codeBlock":    renderCodeBlock,
+		"blockquote":   renderBlockquote,
+		"inlineCard":   renderInlineCard,
+		"mention":      renderMention,
+		"emoji":        renderEmoji,
+		"date":         renderDate,
+		"status":       renderStatus,
+		"panel":        renderPanel,
+		"expand":       renderExpand,
+		"nestedExpand": renderExpand,
+		"table":        renderTable,
+		"media":        renderMedia,
+		"mediaInline":  renderMedia,
+	}
+}
+
 func ToMarkdown(node map[string]any) string {
 	nodeType, _ := node["type"].(string)
-
-	switch nodeType {
-	case "doc":
-		return renderChildren(node)
-
-	case "paragraph":
-		return renderChildren(node) + "\n\n"
-
-	case "heading":
-		level := intAttr(node, "level", 1)
-		prefix := strings.Repeat("#", level)
-		return prefix + " " + renderChildren(node) + "\n\n"
-
-	case "text":
-		text, _ := node["text"].(string)
-		return applyMarks(text, node)
-
-	case "hardBreak":
-		return "\n"
-
-	case "rule":
-		return "---\n\n"
-
-	case "bulletList":
-		return renderList(node, false)
-
-	case "orderedList":
-		return renderList(node, true)
-
-	case "listItem":
-		return renderChildren(node)
-
-	case "codeBlock":
-		lang, _ := stringAttr(node, "language")
-		body := renderChildren(node)
-		if !strings.HasSuffix(body, "\n") {
-			body += "\n"
-		}
-		return "```" + lang + "\n" + body + "```\n\n"
-
-	case "blockquote":
-		inner := renderChildren(node)
-		lines := strings.Split(strings.TrimRight(inner, "\n"), "\n")
-		var b strings.Builder
-		for _, line := range lines {
-			b.WriteString("> ")
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-		return b.String()
-
-	case "inlineCard":
-		if u, ok := stringAttr(node, "url"); ok {
-			return fmt.Sprintf("[%s](%s)", u, u)
-		}
-		return ""
-
-	case "mention":
-		text, _ := stringAttr(node, "text")
-		return text
-
-	case "emoji":
-		name, _ := stringAttr(node, "shortName")
-		return name
-
-	case "date":
-		ts, _ := stringAttr(node, "timestamp")
-		ms, err := strconv.ParseInt(ts, 10, 64)
-		if err != nil {
-			return ts
-		}
-		return time.UnixMilli(ms).UTC().Format("2006-01-02")
-
-	case "status":
-		text, _ := stringAttr(node, "text")
-		return "[" + text + "]"
-
-	case "panel":
-		return renderPanel(node)
-
-	case "expand", "nestedExpand":
-		title, _ := stringAttr(node, "title")
-		var b strings.Builder
-		if title != "" {
-			b.WriteString("**" + title + "**\n\n")
-		}
-		b.WriteString(renderChildren(node))
-		return b.String()
-
-	case "table":
-		return renderTable(node)
-
-	case "mediaSingle", "mediaGroup":
-		return renderChildren(node)
-
-	case "media", "mediaInline":
-		if u, ok := stringAttr(node, "url"); ok {
-			return fmt.Sprintf("[media](%s)", u)
-		}
-		return "[media]"
-
-	default:
-		// Graceful fallback: recurse into content children.
-		return renderChildren(node)
+	if render, ok := renderers[nodeType]; ok {
+		return render(node)
 	}
+	return renderChildren(node)
+}
+
+func renderChildrenOnly(node map[string]any) string {
+	return renderChildren(node)
+}
+
+func renderParagraph(node map[string]any) string {
+	return renderChildren(node) + "\n\n"
+}
+
+func renderHeading(node map[string]any) string {
+	level := intAttr(node, "level", 1)
+	prefix := strings.Repeat("#", level)
+	return prefix + " " + renderChildren(node) + "\n\n"
+}
+
+func renderText(node map[string]any) string {
+	text, _ := node["text"].(string)
+	return applyMarks(text, node)
+}
+
+func renderHardBreak(_ map[string]any) string {
+	return "\n"
+}
+
+func renderRule(_ map[string]any) string {
+	return "---\n\n"
+}
+
+func renderBulletList(node map[string]any) string {
+	return renderList(node, false)
+}
+
+func renderOrderedList(node map[string]any) string {
+	return renderList(node, true)
+}
+
+func renderCodeBlock(node map[string]any) string {
+	lang, _ := stringAttr(node, "language")
+	body := renderChildren(node)
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	return "```" + lang + "\n" + body + "```\n\n"
+}
+
+func renderBlockquote(node map[string]any) string {
+	inner := renderChildren(node)
+	lines := strings.Split(strings.TrimRight(inner, "\n"), "\n")
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString("> ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderInlineCard(node map[string]any) string {
+	if u, ok := stringAttr(node, "url"); ok {
+		return fmt.Sprintf("[%s](%s)", u, u)
+	}
+	return ""
+}
+
+func renderMention(node map[string]any) string {
+	text, _ := stringAttr(node, "text")
+	return text
+}
+
+func renderEmoji(node map[string]any) string {
+	name, _ := stringAttr(node, "shortName")
+	return name
+}
+
+func renderDate(node map[string]any) string {
+	ts, _ := stringAttr(node, "timestamp")
+	ms, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return ts
+	}
+	return time.UnixMilli(ms).UTC().Format("2006-01-02")
+}
+
+func renderStatus(node map[string]any) string {
+	text, _ := stringAttr(node, "text")
+	return "[" + text + "]"
+}
+
+func renderExpand(node map[string]any) string {
+	title, _ := stringAttr(node, "title")
+	var b strings.Builder
+	if title != "" {
+		b.WriteString("**" + title + "**\n\n")
+	}
+	b.WriteString(renderChildren(node))
+	return b.String()
+}
+
+func renderMedia(node map[string]any) string {
+	if u, ok := stringAttr(node, "url"); ok {
+		return fmt.Sprintf("[media](%s)", u)
+	}
+	return "[media]"
 }
 
 func renderChildren(node map[string]any) string {
