@@ -1,4 +1,4 @@
-<img src="h-l1.svg" width="80" alt="human logo">
+<img src="h-l2.svg" width="80" alt="human logo">
 
 [![CI](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml/badge.svg)](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/stephanschmidt/human)](https://goreportcard.com/report/github.com/stephanschmidt/human)
