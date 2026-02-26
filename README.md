@@ -49,6 +49,24 @@ The `/human-plan` skill fetches a ticket, explores the codebase, and produces a 
 
 The plan is written to `.human/plans/kan-1.md`.
 
+## Install
+
+```bash
+curl -sSfL gethuman.sh/install.sh | bash
+```
+
+Or with Homebrew:
+
+```bash
+brew install stephanschmidt/tap/human
+```
+
+Or with Go:
+
+```bash
+go install github.com/stephanschmidt/human@latest
+```
+
 ## CLI usage
 
 Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, GitLab, and Linear — only the project identifier changes.

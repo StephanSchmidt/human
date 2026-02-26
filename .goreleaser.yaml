@@ -1,7 +1,7 @@
 version: 2
 
 builds:
-  - main: ./cmd/human
+  - main: .
     binary: human
     ldflags:
       - -s -w
@@ -24,6 +24,16 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+brews:
+  - repository:
+      owner: StephanSchmidt
+      name: homebrew-tap
+    homepage: https://github.com/StephanSchmidt/human
+    description: Issue tracker CLI for AIs
+    license: MIT
+    install: |
+      bin.install "human"
 
 changelog:
   sort: asc
