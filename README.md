@@ -49,63 +49,27 @@ The plan is written to `.human/plans/kan-1.md`.
 
 ## CLI usage
 
-Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output.
-
-### Jira examples
+Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, and Linear — only the project identifier changes.
 
 ```bash
-# JSON output (default)
-human issues list --project=KAN
+# List issues (JSON by default)
+human issues list --project=KAN                    # Jira
+human issues list --project=octocat/hello-world    # GitHub
+human issues list --project=ENG                    # Linear
 
 # Human-readable table
 human issues list --project=KAN --table
 
 # Get a single issue as markdown
 human issue get KAN-1
-
-# With a named Jira instance
-human --tracker=work issues list --project=KAN
-
-# With explicit flags
-human --jira-url=https://yourorg.atlassian.net --jira-user=you@example.com --jira-key=YOUR_TOKEN issues list --project=KAN
-```
-
-### GitHub examples
-
-```bash
-# List open issues
-human issues list --project=octocat/hello-world
-
-# Get a single issue as markdown
 human issue get octocat/hello-world#42
-
-# Create a new issue
-human issue create --project=octocat/hello-world "Fix the bug"
-
-# With a named GitHub instance
-human --tracker=personal issues list --project=octocat/hello-world
-
-# With explicit flags
-human --github-token=ghp_xxx issues list --project=octocat/hello-world
-```
-
-### Linear examples
-
-```bash
-# List team issues
-human issues list --project=ENG
-
-# Get a single issue as markdown
 human issue get ENG-123
 
-# Create a new issue
+# Create an issue
 human issue create --project=ENG "Implement feature"
 
-# With a named Linear instance
-human --tracker=work issues list --project=ENG
-
-# With explicit flags
-human --linear-token=lin_xxx issues list --project=ENG
+# Use a named tracker instance from .humanconfig.yaml
+human --tracker=work issues list --project=KAN
 ```
 
 ## Setup
