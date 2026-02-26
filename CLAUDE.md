@@ -6,7 +6,7 @@ Phase 1: Interact with issue trackers with product management issues and create 
 
 # Project Structure
 
-- `cmd/human/` — CLI entry point
+- `main.go` — CLI entry point
 - `internal/tracker/` — Provider-agnostic issue tracker interfaces (Lister, Getter, Creator, etc.)
 - `internal/jira/` — Jira API client and types
 - `errors/` — Custom error handling (WithDetails)

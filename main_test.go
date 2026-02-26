@@ -19,11 +19,11 @@ import (
 // --- mock provider ---
 
 type mockProvider struct {
-	listIssuesFn    func(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error)
-	getIssueFn      func(ctx context.Context, key string) (*tracker.Issue, error)
-	createIssueFn   func(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error)
-	listCommentsFn  func(ctx context.Context, issueKey string) ([]tracker.Comment, error)
-	addCommentFn    func(ctx context.Context, issueKey string, body string) (*tracker.Comment, error)
+	listIssuesFn   func(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error)
+	getIssueFn     func(ctx context.Context, key string) (*tracker.Issue, error)
+	createIssueFn  func(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error)
+	listCommentsFn func(ctx context.Context, issueKey string) ([]tracker.Comment, error)
+	addCommentFn   func(ctx context.Context, issueKey string, body string) (*tracker.Comment, error)
 }
 
 func (m *mockProvider) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -635,11 +635,17 @@ func TestTrackerListCmd_Run_empty(t *testing.T) {
 }
 
 func TestTrackerListCmd_Run_defaultDir(t *testing.T) {
-	// When Dir is empty, defaults to "."
+	// When Dir is empty, defaults to "." — use a clean temp dir to avoid
+	// picking up a real .humanconfig from the repo root.
+	dir := t.TempDir()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
 	var buf bytes.Buffer
 	cmd := &TrackerListCmd{Out: &buf}
-	// This should not error — just reads config from "."
-	err := cmd.Run()
+	err = cmd.Run()
 	require.NoError(t, err)
 	// Output should contain something (either trackers or empty)
 	assert.True(t, strings.Contains(buf.String(), "//") || strings.Contains(buf.String(), "[]"))

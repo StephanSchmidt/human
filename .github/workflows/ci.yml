@@ -39,4 +39,4 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go build -o bin/human ./cmd/human
+      - run: go build -o bin/human .
