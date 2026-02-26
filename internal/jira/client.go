@@ -30,6 +30,11 @@ func New(baseURL, user, key string) *Client {
 	return &Client{baseURL: baseURL, user: user, key: key, http: http.DefaultClient}
 }
 
+// SetHTTPDoer replaces the HTTP client used for API requests.
+func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
+	c.http = doer
+}
+
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	jql := fmt.Sprintf("project=%s order by created DESC", opts.Project)

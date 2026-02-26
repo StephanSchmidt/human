@@ -31,6 +31,11 @@ func New(baseURL, token string) *Client {
 	return &Client{baseURL: baseURL, token: token, http: http.DefaultClient}
 }
 
+// SetHTTPDoer replaces the HTTP client used for API requests.
+func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
+	c.http = doer
+}
+
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	owner, repo, err := splitProject(opts.Project)

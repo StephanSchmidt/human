@@ -15,6 +15,60 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// errDoer is a mock HTTPDoer that returns a fixed error.
+type errDoer struct {
+	err error
+}
+
+func (d *errDoer) Do(*http.Request) (*http.Response, error) {
+	return nil, d.err
+}
+
+// nilDoer is a mock HTTPDoer that returns a nil response.
+type nilDoer struct{}
+
+func (*nilDoer) Do(*http.Request) (*http.Response, error) {
+	return nil, nil
+}
+
+func TestDoRequest_networkError(t *testing.T) {
+	client := New("https://api.github.com", "ghp_test")
+	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
+
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requesting GitHub")
+}
+
+func TestDoRequest_nilResponse(t *testing.T) {
+	client := New("https://api.github.com", "ghp_test")
+	client.SetHTTPDoer(&nilDoer{})
+
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil response")
+}
+
+func TestDoRequest_invalidBaseURL(t *testing.T) {
+	client := New("ftp://api.github.com", "ghp_test")
+
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scheme must be http or https")
+}
+
 func TestListIssues_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
@@ -374,6 +428,23 @@ func TestListComments_happy(t *testing.T) {
 	assert.Equal(t, "102", comments[1].ID)
 	assert.Equal(t, "bob", comments[1].Author)
 	assert.Equal(t, "Second comment", comments[1].Body)
+}
+
+func TestDoRequest_authHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer ghp_secret_token", r.Header.Get("Authorization"))
+
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_secret_token")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 10,
+	})
+
+	require.NoError(t, err)
 }
 
 func TestListComments_empty(t *testing.T) {
