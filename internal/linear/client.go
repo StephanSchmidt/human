@@ -62,11 +62,12 @@ const createIssueMutation = `mutation($teamId: String!, $title: String!, $descri
 type Client struct {
 	baseURL string
 	token   string
+	http    tracker.HTTPDoer
 }
 
 // New creates a Linear client with the given base URL and API key.
 func New(baseURL, token string) *Client {
-	return &Client{baseURL: baseURL, token: token}
+	return &Client{baseURL: baseURL, token: token, http: http.DefaultClient}
 }
 
 // ListIssues implements tracker.Lister.
@@ -279,6 +280,9 @@ func (c *Client) doGraphQL(ctx context.Context, query string, variables map[stri
 	}
 
 	endpoint := c.baseURL + "/graphql"
+	if err := tracker.ValidateURL(endpoint); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "creating request",
@@ -287,7 +291,7 @@ func (c *Client) doGraphQL(ctx context.Context, query string, variables map[stri
 	req.Header.Set("Authorization", c.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "requesting linear",
 			"endpoint", endpoint)

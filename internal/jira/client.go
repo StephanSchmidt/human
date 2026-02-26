@@ -22,11 +22,12 @@ type Client struct {
 	baseURL string
 	user    string
 	key     string
+	http    tracker.HTTPDoer
 }
 
 // New creates a Jira client with the given base URL, user email, and API key.
 func New(baseURL, user, key string) *Client {
-	return &Client{baseURL: baseURL, user: user, key: key}
+	return &Client{baseURL: baseURL, user: user, key: key, http: http.DefaultClient}
 }
 
 // ListIssues implements tracker.Lister.
@@ -218,6 +219,9 @@ func toTrackerComment(jc jiraComment) (*tracker.Comment, error) {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
+	if err := tracker.ValidateURL(c.baseURL); err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "parsing base URL",
@@ -237,7 +241,7 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "requesting Jira",
 			"method", method, "path", path)

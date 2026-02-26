@@ -22,11 +22,12 @@ var _ tracker.Provider = (*Client)(nil)
 type Client struct {
 	baseURL string
 	token   string
+	http    tracker.HTTPDoer
 }
 
 // New creates a GitLab client with the given base URL and private token.
 func New(baseURL, token string) *Client {
-	return &Client{baseURL: baseURL, token: token}
+	return &Client{baseURL: baseURL, token: token, http: http.DefaultClient}
 }
 
 // ListIssues implements tracker.Lister.
@@ -226,6 +227,9 @@ func toTrackerComment(gn glNote) (*tracker.Comment, error) {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
+	if err := tracker.ValidateURL(c.baseURL); err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "parsing base URL",
@@ -244,7 +248,7 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "requesting GitLab",
 			"method", method, "path", path)
