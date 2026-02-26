@@ -9,6 +9,11 @@ githubs:
     # url: https://api.github.com  # optional, this is the default
     # token comes from env: export GITHUB_PERSONAL_TOKEN=ghp_xxx
 
+gitlabs:
+  - name: work
+    # url: https://gitlab.com  # optional, this is the default
+    # token comes from env: export GITLAB_WORK_TOKEN=glpat-xxx
+
 linears:
   - name: work
     # url: https://api.linear.app  # optional, this is the default

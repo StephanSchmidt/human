@@ -10,9 +10,9 @@
 
 # human
 
-Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, and Linear with output as JSON and markdown.
+Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, and Linear with output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, and Linear** — no tool-switching for the AI
+- **One CLI for Jira, GitHub, GitLab, and Linear** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
 - **Claude Code skills** turn PM tickets into implementation plans
 - **Definition of Ready checks** AI catches incomplete tickets before coding starts
@@ -51,12 +51,13 @@ The plan is written to `.human/plans/kan-1.md`.
 
 ## CLI usage
 
-Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, and Linear — only the project identifier changes.
+Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, GitLab, and Linear — only the project identifier changes.
 
 ```bash
 # List issues (JSON by default)
 human issues list --project=KAN                    # Jira
 human issues list --project=octocat/hello-world    # GitHub
+human issues list --project=mygroup/myproject      # GitLab
 human issues list --project=ENG                    # Linear
 
 # Human-readable table
@@ -65,10 +66,17 @@ human issues list --project=KAN --table
 # Get a single issue as markdown
 human issue get KAN-1
 human issue get octocat/hello-world#42
+human issue get mygroup/myproject#42
 human issue get ENG-123
 
 # Create an issue
 human issue create --project=ENG "Implement feature"
+
+# Add a comment to an issue
+human issue comment add KAN-1 "This is done"
+
+# List comments on an issue
+human issue comment list KAN-1
 
 # Use a named tracker instance from .humanconfig.yaml
 human --tracker=work issues list --project=KAN
@@ -117,6 +125,18 @@ githubs:
     token: ghp_yyy
 ```
 
+### GitLab
+
+```yaml
+gitlabs:
+  - name: work
+    # url: https://gitlab.com  # optional, this is the default
+    token: glpat-xxx
+  - name: selfhosted
+    url: https://gitlab.example.com
+    token: glpat-yyy
+```
+
 ### Linear
 
 ```yaml
@@ -158,6 +178,15 @@ Settings are resolved in priority order (highest wins):
 4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
 
 The GitHub API URL defaults to `https://api.github.com` when not set.
+
+### GitLab settings resolution
+
+1. **CLI flags** (`--gitlab-url`, `--gitlab-token`)
+2. **Global environment variables** (`GITLAB_URL`, `GITLAB_TOKEN`)
+3. **Per-instance environment variables** (`GITLAB_<NAME>_URL`, `GITLAB_<NAME>_TOKEN` — name is uppercased, e.g. `GITLAB_WORK_TOKEN`)
+4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+
+The GitLab API URL defaults to `https://gitlab.com` when not set.
 
 ### Linear settings resolution
 

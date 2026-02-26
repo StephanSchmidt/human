@@ -39,7 +39,7 @@ Use todo list as much as possible.
  
 Run 'make test' before and after changes. Run 'make lint' after changes. **ALWAYS** run 'make check' before pushing.
 
-Treat tests as a second source of truth. **ALWAYS** check for failing tests if the code is wrong or the test is wrong. Fix accordingly.
+Treat tests as a second source of truth. **ALWAYS** check for failing tests if the code is wrong or the test is wrong. Fix accordingly. Testcoverage is not allowed to fall below 80%.
 
 Apply these refactorings after changes to keep code testable:
 - 'Extract Interface': Accept interfaces instead of concrete types if possible.
