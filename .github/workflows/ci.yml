@@ -26,27 +26,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go tool gotestsum -- -coverprofile=coverage.out ./...
-      - name: Extract coverage percentage
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | sed 's/%//')
-          echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
-      - name: Generate coverage badge
-        if: github.ref == 'refs/heads/main'
-        run: |
-          COV_INT=${COVERAGE%%.*}
-          if [ "$COV_INT" -ge 80 ]; then COLOR=brightgreen
-          elif [ "$COV_INT" -ge 60 ]; then COLOR=yellow
-          else COLOR=red; fi
-          mkdir -p badges
-          echo "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"${COVERAGE}%\",\"color\":\"${COLOR}\"}" > badges/coverage.json
-      - name: Push coverage badge
-        if: github.ref == 'refs/heads/main'
-        uses: peaceiris/actions-gh-pages@v4
+      - uses: codecov/codecov-action@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./badges
-          publish_branch: badges
-          keep_files: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.out
 
   build:
     runs-on: ubuntu-latest

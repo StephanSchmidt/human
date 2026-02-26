@@ -1,7 +1,7 @@
 <img src="h-l2.svg" width="80" alt="human logo">
 
 [![CI](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml/badge.svg)](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/StephanSchmidt/human/badges/coverage.json)](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/StephanSchmidt/human/branch/main/graph/badge.svg)](https://codecov.io/gh/StephanSchmidt/human)
 [![Go Report Card](https://goreportcard.com/badge/github.com/stephanschmidt/human)](https://goreportcard.com/report/github.com/stephanschmidt/human)
 [![Go Reference](https://pkg.go.dev/badge/github.com/stephanschmidt/human.svg)](https://pkg.go.dev/github.com/stephanschmidt/human)
 [![Latest Release](https://img.shields.io/github/v/release/StephanSchmidt/human)](https://github.com/StephanSchmidt/human/releases/latest)
