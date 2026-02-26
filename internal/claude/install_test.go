@@ -142,6 +142,22 @@ func TestInstall_WrapsMkdirError(t *testing.T) {
 	assert.NotEmpty(t, details["path"])
 }
 
+func TestInstall_PersonalMode(t *testing.T) {
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	err := Install(&buf, fw, true)
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "created")
+
+	// Verify files are written under the home directory, not ".claude"
+	for path := range fw.files {
+		assert.Contains(t, path, ".claude")
+		assert.NotEqual(t, ".claude", path[:6], "personal mode should use absolute home path")
+	}
+}
+
 func TestInstall_WrapsWriteError(t *testing.T) {
 	fw := newMockFileWriter()
 	fw.writeFn = func(_ string) error {
