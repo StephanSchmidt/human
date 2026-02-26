@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/stephanschmidt/human/errors"
+	"github.com/stephanschmidt/human/internal/azuredevops"
 	"github.com/stephanschmidt/human/internal/claude"
 	"github.com/stephanschmidt/human/internal/github"
 	"github.com/stephanschmidt/human/internal/gitlab"
@@ -41,6 +43,9 @@ type CLI struct {
 	GitLabURL   string           `kong:"env='GITLAB_URL',help='GitLab base URL'"`
 	LinearToken string           `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
 	LinearURL   string           `kong:"env='LINEAR_URL',help='Linear API base URL'"`
+	AzureToken  string           `kong:"env='AZURE_TOKEN',help='Azure DevOps PAT token'"`
+	AzureURL    string           `kong:"env='AZURE_URL',help='Azure DevOps base URL'"`
+	AzureOrg    string           `kong:"env='AZURE_ORG',help='Azure DevOps organization'"`
 	Issues      IssuesCmd        `kong:"cmd,help='Bulk issue operations'"`
 	Issue       IssueCmd         `kong:"cmd,help='Single issue operations'"`
 	Install     InstallCmd       `kong:"cmd,help='Install agent integrations'"`
@@ -421,7 +426,13 @@ func loadAllInstances(dir string) ([]tracker.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(all, li...), nil
+	all = append(all, li...)
+
+	adi, err := azuredevops.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(all, adi...), nil
 }
 
 // instanceFromCLI builds a tracker instance from CLI flags, returning nil
@@ -468,6 +479,17 @@ func instanceFromCLI(cli *CLI) *tracker.Instance {
 			Provider: linear.New(url, cli.LinearToken),
 		}
 	}
+	if cli.AzureToken != "" && cli.AzureOrg != "" {
+		url := cli.AzureURL
+		if url == "" {
+			url = "https://dev.azure.com"
+		}
+		return &tracker.Instance{
+			Kind:     "azuredevops",
+			URL:      url,
+			Provider: azuredevops.New(url, cli.AzureOrg, cli.AzureToken),
+		}
+	}
 	return nil
 }
 
@@ -492,6 +514,18 @@ func setOutput(cli *CLI, w io.Writer) {
 	cli.Tracker.List.Out = w
 }
 
+// auditLogPath returns the path to the audit log file (~/.human/audit.log),
+// creating the directory if needed.
+func auditLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".human", "audit.log")
+	}
+	dir := filepath.Join(home, ".human")
+	_ = os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "audit.log")
+}
+
 // --- main ---
 
 func main() {
@@ -505,7 +539,7 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, and Linear. Output is JSON and markdown."),
+		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, Linear, and Azure DevOps. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
 		kong.Vars{"version": version + " (" + commit + ") " + date},
@@ -530,7 +564,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		setProvider(&cli, instance.Provider)
+		auditPath := auditLogPath()
+		ap, auditErr := tracker.NewAuditProvider(instance.Provider, instance.Name, instance.Kind, auditPath)
+		if auditErr != nil {
+			fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
+			setProvider(&cli, instance.Provider)
+		} else {
+			defer func() { _ = ap.Close() }()
+			setProvider(&cli, ap)
+		}
 	}
 
 	if err := ctx.Run(); err != nil {

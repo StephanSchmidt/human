@@ -16,6 +16,13 @@ import (
 	"github.com/stephanschmidt/human/internal/tracker"
 )
 
+func TestAuditLogPath(t *testing.T) {
+	p := auditLogPath()
+	assert.Contains(t, p, ".human")
+	assert.Contains(t, p, "audit.log")
+	assert.True(t, filepath.IsAbs(p), "expected absolute path, got %s", p)
+}
+
 // --- mock provider ---
 
 type mockProvider struct {
@@ -191,6 +198,21 @@ func TestInstanceFromCLI(t *testing.T) {
 			name:     "jira takes priority over github",
 			cli:      CLI{JiraURL: "https://x.atlassian.net", JiraUser: "a@b.com", JiraKey: "key", GitHubToken: "ghp_test"},
 			wantKind: "jira",
+		},
+		{
+			name:     "azure devops token and org",
+			cli:      CLI{AzureToken: "pat-test", AzureOrg: "myorg"},
+			wantKind: "azuredevops",
+		},
+		{
+			name:    "azure devops token only returns nil",
+			cli:     CLI{AzureToken: "pat-test"},
+			wantNil: true,
+		},
+		{
+			name:     "azure devops with custom URL",
+			cli:      CLI{AzureToken: "pat-test", AzureOrg: "myorg", AzureURL: "https://custom.azure.com"},
+			wantKind: "azuredevops",
 		},
 	}
 
@@ -369,10 +391,25 @@ func TestLoadAllInstances_multipleProviders(t *testing.T) {
 githubs:
   - name: oss
     token: ghp_test
+azuredevops:
+  - name: devops
+    org: myorg
+    token: pat-test
 `)
+
+	unsetAzureEnvs(t)
+
 	instances, err := loadAllInstances(dir)
 	require.NoError(t, err)
-	assert.Len(t, instances, 2)
+	assert.Len(t, instances, 3)
+}
+
+func unsetAzureEnvs(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"AZURE_URL", "AZURE_ORG", "AZURE_TOKEN"} {
+		t.Setenv(key, "")
+		require.NoError(t, os.Unsetenv(key))
+	}
 }
 
 // --- Run() method tests ---
