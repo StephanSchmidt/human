@@ -4,7 +4,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/config"
 	"github.com/stephanschmidt/human/internal/tracker"
 )
@@ -45,7 +44,7 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 		applyGlobalEnvOverrides(&cfg)
 
 		if cfg.Token == "" {
-			return nil, errors.WithDetails("incomplete linear config", "name", cfg.Name)
+			continue
 		}
 
 		instances = append(instances, tracker.Instance{

@@ -269,7 +269,7 @@ func TestLoadInstances_globalEnvOverridesInstanceEnv(t *testing.T) {
 	assert.Equal(t, "https://work.atlassian.net", instances[0].URL)
 }
 
-func TestLoadInstances_incompleteConfig(t *testing.T) {
+func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n")
 
@@ -277,7 +277,7 @@ func TestLoadInstances_incompleteConfig(t *testing.T) {
 	unsetEnv(t, "JIRA_USER")
 	unsetEnv(t, "JIRA_KEY")
 
-	_, err := LoadInstances(dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incomplete jira config")
+	instances, err := LoadInstances(dir)
+	require.NoError(t, err)
+	assert.Empty(t, instances)
 }

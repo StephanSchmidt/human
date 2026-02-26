@@ -258,14 +258,14 @@ func TestLoadInstances_globalEnvOverridesInstance(t *testing.T) {
 	assert.Equal(t, "https://api.github.com", instances[0].URL)
 }
 
-func TestLoadInstances_incompleteConfig(t *testing.T) {
+func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n")
 
 	unsetEnv(t, "GITHUB_URL")
 	unsetEnv(t, "GITHUB_TOKEN")
 
-	_, err := LoadInstances(dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incomplete github config")
+	instances, err := LoadInstances(dir)
+	require.NoError(t, err)
+	assert.Empty(t, instances)
 }

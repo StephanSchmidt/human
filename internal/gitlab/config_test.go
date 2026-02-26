@@ -220,14 +220,14 @@ func TestLoadInstances_defaultURL(t *testing.T) {
 	assert.Equal(t, "https://gitlab.com", instances[0].URL)
 }
 
-func TestLoadInstances_incompleteConfig(t *testing.T) {
+func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "gitlabs:\n  - name: work\n    url: https://gitlab.com\n")
 
 	unsetEnv(t, "GITLAB_URL")
 	unsetEnv(t, "GITLAB_TOKEN")
 
-	_, err := LoadInstances(dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incomplete gitlab config")
+	instances, err := LoadInstances(dir)
+	require.NoError(t, err)
+	assert.Empty(t, instances)
 }
