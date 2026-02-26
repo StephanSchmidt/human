@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -63,12 +64,18 @@ type trackerEntry struct {
 
 // TrackerListCmd prints all configured tracker instances.
 type TrackerListCmd struct {
-	Table bool `kong:"help='Output as human-readable table instead of JSON'"`
+	Table bool      `kong:"help='Output as human-readable table instead of JSON'"`
+	Dir   string    `kong:"-"`
+	Out   io.Writer `kong:"-"`
 }
 
 // Run lists configured tracker instances.
 func (cmd *TrackerListCmd) Run() error {
-	instances, err := loadAllInstances(".")
+	dir := cmd.Dir
+	if dir == "" {
+		dir = "."
+	}
+	instances, err := loadAllInstances(dir)
 	if err != nil {
 		return err
 	}
@@ -79,24 +86,24 @@ func (cmd *TrackerListCmd) Run() error {
 	}
 
 	if cmd.Table {
-		return printTrackerTable(entries)
+		return printTrackerTable(cmd.Out, entries)
 	}
-	return printTrackerJSON(entries)
+	return printTrackerJSON(cmd.Out, entries)
 }
 
-func printTrackerJSON(entries []trackerEntry) error {
-	fmt.Println("// Configured issue trackers. Use --tracker=<name> to select one.")
-	enc := json.NewEncoder(os.Stdout)
+func printTrackerJSON(w io.Writer, entries []trackerEntry) error {
+	_, _ = fmt.Fprintln(w, "// Configured issue trackers. Use --tracker=<name> to select one.")
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(entries)
 }
 
-func printTrackerTable(entries []trackerEntry) error {
+func printTrackerTable(out io.Writer, entries []trackerEntry) error {
 	if len(entries) == 0 {
-		fmt.Println("No trackers configured in .humanconfig")
+		_, _ = fmt.Fprintln(out, "No trackers configured in .humanconfig")
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER")
 	for _, e := range entries {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User)
@@ -135,6 +142,7 @@ type ListCmd struct {
 	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
 	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
 	Provider tracker.Provider `kong:"-"`
+	Out      io.Writer        `kong:"-"`
 }
 
 func (cmd *ListCmd) Run() error {
@@ -147,19 +155,19 @@ func (cmd *ListCmd) Run() error {
 	}
 
 	if cmd.Table {
-		return printIssuesTable(issues)
+		return printIssuesTable(cmd.Out, issues)
 	}
-	return printIssuesJSON(issues)
+	return printIssuesJSON(cmd.Out, issues)
 }
 
-func printIssuesJSON(issues []tracker.Issue) error {
-	enc := json.NewEncoder(os.Stdout)
+func printIssuesJSON(w io.Writer, issues []tracker.Issue) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(issues)
 }
 
-func printIssuesTable(issues []tracker.Issue) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func printIssuesTable(out io.Writer, issues []tracker.Issue) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tSUMMARY")
 	for _, issue := range issues {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", issue.Key, issue.Status, issue.Summary)
@@ -184,6 +192,7 @@ type AddCommentCmd struct {
 	Key      string           `kong:"arg,required,help='Issue key'"`
 	Body     string           `kong:"arg,required,help='Comment body (markdown)'"`
 	Provider tracker.Provider `kong:"-"`
+	Out      io.Writer        `kong:"-"`
 }
 
 func (cmd *AddCommentCmd) Run() error {
@@ -191,13 +200,14 @@ func (cmd *AddCommentCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s\t%s\n", comment.ID, comment.Body)
+	_, _ = fmt.Fprintf(cmd.Out, "%s\t%s\n", comment.ID, comment.Body)
 	return nil
 }
 
 type ListCommentsCmd struct {
 	Key      string           `kong:"arg,required,help='Issue key'"`
 	Provider tracker.Provider `kong:"-"`
+	Out      io.Writer        `kong:"-"`
 }
 
 func (cmd *ListCommentsCmd) Run() error {
@@ -205,7 +215,7 @@ func (cmd *ListCommentsCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(cmd.Out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(comments)
 }
@@ -213,6 +223,7 @@ func (cmd *ListCommentsCmd) Run() error {
 type GetCmd struct {
 	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, GitLab: group/project#42, Linear: ENG-123)'"`
 	Provider tracker.Provider `kong:"-"`
+	Out      io.Writer        `kong:"-"`
 }
 
 func (cmd *GetCmd) Run() error {
@@ -228,16 +239,17 @@ func (cmd *GetCmd) Run() error {
 		return s
 	}
 
-	fmt.Printf("# %s: %s\n\n", issue.Key, issue.Summary)
-	fmt.Println("| Field    | Value       |")
-	fmt.Println("|----------|-------------|")
-	fmt.Printf("| Status   | %s |\n", issue.Status)
-	fmt.Printf("| Priority | %s |\n", displayOrNone(issue.Priority))
-	fmt.Printf("| Assignee | %s |\n", displayOrNone(issue.Assignee))
-	fmt.Printf("| Reporter | %s |\n", displayOrNone(issue.Reporter))
+	w := cmd.Out
+	_, _ = fmt.Fprintf(w, "# %s: %s\n\n", issue.Key, issue.Summary)
+	_, _ = fmt.Fprintln(w, "| Field    | Value       |")
+	_, _ = fmt.Fprintln(w, "|----------|-------------|")
+	_, _ = fmt.Fprintf(w, "| Status   | %s |\n", issue.Status)
+	_, _ = fmt.Fprintf(w, "| Priority | %s |\n", displayOrNone(issue.Priority))
+	_, _ = fmt.Fprintf(w, "| Assignee | %s |\n", displayOrNone(issue.Assignee))
+	_, _ = fmt.Fprintf(w, "| Reporter | %s |\n", displayOrNone(issue.Reporter))
 
 	if issue.Description != "" {
-		fmt.Printf("\n## Description\n\n%s", issue.Description)
+		_, _ = fmt.Fprintf(w, "\n## Description\n\n%s", issue.Description)
 	}
 
 	return nil
@@ -251,6 +263,7 @@ type CreateCmd struct {
 	Summary     string           `kong:"arg,required,help='Issue summary'"`
 	Description string           `kong:"help='Issue description (markdown)'"`
 	Provider    tracker.Provider `kong:"-"`
+	Out         io.Writer        `kong:"-"`
 }
 
 func (cmd *CreateCmd) Run() error {
@@ -263,7 +276,7 @@ func (cmd *CreateCmd) Run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s\t%s\n", issue.Key, issue.Summary)
+	_, _ = fmt.Fprintf(cmd.Out, "%s\t%s\n", issue.Key, issue.Summary)
 	return nil
 }
 
@@ -443,6 +456,16 @@ func setProvider(cli *CLI, p tracker.Provider) {
 	cli.Issue.Comment.List.Provider = p
 }
 
+// setOutput sets the Out writer on all commands that produce output.
+func setOutput(cli *CLI, w io.Writer) {
+	cli.Issues.List.Out = w
+	cli.Issue.Get.Out = w
+	cli.Issue.Create.Out = w
+	cli.Issue.Comment.Add.Out = w
+	cli.Issue.Comment.List.Out = w
+	cli.Tracker.List.Out = w
+}
+
 // --- main ---
 
 func main() {
@@ -461,6 +484,8 @@ func main() {
 		kong.UsageOnError(),
 		kong.Vars{"version": version + " (" + commit + ") " + date},
 	)
+
+	setOutput(&cli, os.Stdout)
 
 	if needsTrackerClient(ctx.Command()) {
 		instances, err := loadAllInstances(".")
