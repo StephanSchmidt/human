@@ -5,6 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/stephanschmidt/human)](https://goreportcard.com/report/github.com/stephanschmidt/human)
 [![Go Reference](https://pkg.go.dev/badge/github.com/stephanschmidt/human.svg)](https://pkg.go.dev/github.com/stephanschmidt/human)
 [![Latest Release](https://img.shields.io/github/v/release/StephanSchmidt/human)](https://github.com/StephanSchmidt/human/releases/latest)
+[![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/StephanSchmidt/human/network/updates)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StephanSchmidt/human/blob/main/LICENSE)
 
 # human
