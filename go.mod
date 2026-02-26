@@ -551,11 +551,13 @@ require (
 )
 
 tool (
+	github.com/fzipp/gocyclo/cmd/gocyclo
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/goreleaser/goreleaser/v2
 	github.com/securego/gosec/v2/cmd/gosec
 	github.com/zricethezav/gitleaks/v8
 	go.uber.org/nilaway/cmd/nilaway
+	golang.org/x/tools/cmd/goimports
 	golang.org/x/vuln/cmd/govulncheck
 	gotest.tools/gotestsum
 	honnef.co/go/tools/cmd/staticcheck

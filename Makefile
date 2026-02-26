@@ -3,6 +3,7 @@
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
 build:
+	go tool goimports -w .
 	go build -ldflags "-X main.version=dev -X main.commit=$$(git rev-parse --short HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o bin/human ./cmd/human
 
 install:
@@ -20,6 +21,7 @@ lint:
 	go tool staticcheck ./...
 	go tool golangci-lint run ./...
 	go tool nilaway ./...
+	go tool gocyclo -over 15 .
 
 sec:
 	go tool gosec -exclude=G704 ./...
