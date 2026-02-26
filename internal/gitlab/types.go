@@ -1,0 +1,43 @@
+package gitlab
+
+// glIssue is the GitLab API representation of an issue.
+type glIssue struct {
+	IID         int      `json:"iid"`
+	ProjectID   int      `json:"project_id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	State       string   `json:"state"`
+	Author      *glUser  `json:"author"`
+	Assignees   []glUser `json:"assignees"`
+	Labels      []string `json:"labels"`
+}
+
+// glUser is the GitLab API representation of a user.
+type glUser struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+}
+
+// glNote is the GitLab API representation of a note (comment).
+type glNote struct {
+	ID        int     `json:"id"`
+	Body      string  `json:"body"`
+	Author    *glUser `json:"author"`
+	CreatedAt string  `json:"created_at"`
+	System    bool    `json:"system"`
+}
+
+type createRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
+type createResponse struct {
+	IID         int    `json:"iid"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type noteRequest struct {
+	Body string `json:"body"`
+}

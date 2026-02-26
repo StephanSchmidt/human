@@ -15,6 +15,7 @@ import (
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/claude"
 	"github.com/stephanschmidt/human/internal/github"
+	"github.com/stephanschmidt/human/internal/gitlab"
 	"github.com/stephanschmidt/human/internal/jira"
 	"github.com/stephanschmidt/human/internal/linear"
 	"github.com/stephanschmidt/human/internal/tracker"
@@ -30,17 +31,19 @@ var (
 type CLI struct {
 	Version     kong.VersionFlag `kong:"help='Print version information'"`
 	TrackerName string           `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
-	JiraKey     string     `kong:"env='JIRA_KEY',help='Jira API token'"`
-	JiraURL     string     `kong:"env='JIRA_URL',help='Jira base URL'"`
-	JiraUser    string     `kong:"env='JIRA_USER',help='Jira user email'"`
-	GitHubToken string     `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
-	GitHubURL   string     `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
-	LinearToken string     `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
-	LinearURL   string     `kong:"env='LINEAR_URL',help='Linear API base URL'"`
-	Issues      IssuesCmd  `kong:"cmd,help='Bulk issue operations'"`
-	Issue       IssueCmd   `kong:"cmd,help='Single issue operations'"`
-	Install     InstallCmd `kong:"cmd,help='Install agent integrations'"`
-	Tracker     TrackerCmd `kong:"cmd,help='Manage tracker connections'"`
+	JiraKey     string           `kong:"env='JIRA_KEY',help='Jira API token'"`
+	JiraURL     string           `kong:"env='JIRA_URL',help='Jira base URL'"`
+	JiraUser    string           `kong:"env='JIRA_USER',help='Jira user email'"`
+	GitHubToken string           `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
+	GitHubURL   string           `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
+	GitLabToken string           `kong:"env='GITLAB_TOKEN',help='GitLab private token'"`
+	GitLabURL   string           `kong:"env='GITLAB_URL',help='GitLab base URL'"`
+	LinearToken string           `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
+	LinearURL   string           `kong:"env='LINEAR_URL',help='Linear API base URL'"`
+	Issues      IssuesCmd        `kong:"cmd,help='Bulk issue operations'"`
+	Issue       IssueCmd         `kong:"cmd,help='Single issue operations'"`
+	Install     InstallCmd       `kong:"cmd,help='Install agent integrations'"`
+	Tracker     TrackerCmd       `kong:"cmd,help='Manage tracker connections'"`
 }
 
 // --- tracker list ---
@@ -129,7 +132,7 @@ type IssuesCmd struct {
 }
 
 type ListCmd struct {
-	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, Linear: ENG)'"`
+	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
 	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
 	Provider tracker.Provider `kong:"-"`
 }
@@ -208,7 +211,7 @@ func (cmd *ListCommentsCmd) Run() error {
 }
 
 type GetCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, Linear: ENG-123)'"`
+	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, GitLab: group/project#42, Linear: ENG-123)'"`
 	Provider tracker.Provider `kong:"-"`
 }
 
@@ -243,7 +246,7 @@ func (cmd *GetCmd) Run() error {
 // --- issue create ---
 
 type CreateCmd struct {
-	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, Linear: ENG)'"`
+	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
 	Type        string           `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
 	Summary     string           `kong:"arg,required,help='Issue summary'"`
 	Description string           `kong:"help='Issue description (markdown)'"`
@@ -292,6 +295,15 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, "  # Create a new issue")
 	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
 	_, _ = fmt.Fprintln(w, `  human issue create --project=octocat/hello-world "Fix bug"`)
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # List GitLab issues (JSON)")
+	_, _ = fmt.Fprintln(w, "  human issues list --project=mygroup/myproject")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Get a GitLab issue as markdown")
+	_, _ = fmt.Fprintln(w, "  human issue get mygroup/myproject#42")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Create a GitLab issue")
+	_, _ = fmt.Fprintln(w, `  human issue create --project=mygroup/myproject "Fix bug"`)
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # List Linear issues (JSON)")
 	_, _ = fmt.Fprintln(w, "  human issues list --project=ENG")
@@ -362,6 +374,12 @@ func loadAllInstances(dir string) ([]tracker.Instance, error) {
 	}
 	all = append(all, gi...)
 
+	gli, err := gitlab.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	all = append(all, gli...)
+
 	li, err := linear.LoadInstances(dir)
 	if err != nil {
 		return nil, err
@@ -389,6 +407,17 @@ func instanceFromCLI(cli *CLI) *tracker.Instance {
 			Kind:     "github",
 			URL:      url,
 			Provider: github.New(url, cli.GitHubToken),
+		}
+	}
+	if cli.GitLabToken != "" {
+		url := cli.GitLabURL
+		if url == "" {
+			url = "https://gitlab.com"
+		}
+		return &tracker.Instance{
+			Kind:     "gitlab",
+			URL:      url,
+			Provider: gitlab.New(url, cli.GitLabToken),
 		}
 	}
 	if cli.LinearToken != "" {
@@ -427,7 +456,7 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, and Linear. Output is JSON and markdown."),
+		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, and Linear. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
 		kong.Vars{"version": version + " (" + commit + ") " + date},

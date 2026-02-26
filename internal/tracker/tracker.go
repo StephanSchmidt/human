@@ -30,8 +30,8 @@ func DetectKind(key string) string {
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
 	Key         string `json:"key"`
-	Project     string `json:"project"`     // project key, e.g. "KAN"
-	Type        string `json:"type"`        // issue type, e.g. "Task", "Bug"
+	Project     string `json:"project"` // project key, e.g. "KAN"
+	Type        string `json:"type"`    // issue type, e.g. "Task", "Bug"
 	Summary     string `json:"summary"`
 	Status      string `json:"status"`
 	Priority    string `json:"priority"`
@@ -76,10 +76,10 @@ type Provider interface {
 
 // Instance represents a configured tracker backend ready for use.
 type Instance struct {
-	Name     string   // config entry name ("work", "personal"), empty for CLI-flag instances
-	Kind     string   // "jira", "github", "linear"
-	URL      string   // display URL
-	User     string   // display user (Jira only)
+	Name     string // config entry name ("work", "personal"), empty for CLI-flag instances
+	Kind     string // "jira", "github", "linear"
+	URL      string // display URL
+	User     string // display user (Jira only)
 	Provider Provider
 }
 
@@ -137,7 +137,7 @@ func resolveByName(name string, instances []Instance) (*Instance, error) {
 // If multiple kinds remain an error is returned asking the user to specify --tracker.
 func resolveAutoDetect(instances []Instance, keyHint string) (*Instance, error) {
 	if len(instances) == 0 {
-		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, or linears: to .humanconfig.yaml")
+		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, gitlabs:, or linears: to .humanconfig.yaml")
 	}
 
 	// Try to narrow by key format.
