@@ -108,6 +108,30 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "", issues[1].Assignee)
 }
 
+func TestListIssues_all(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "all", r.URL.Query().Get("state"))
+
+		_, _ = fmt.Fprint(w, `[
+			{"number":1,"title":"Open issue","body":"","state":"open","user":{"login":"alice"},"labels":[]},
+			{"number":2,"title":"Closed issue","body":"","state":"closed","user":{"login":"alice"},"labels":[]}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "octocat/hello-world",
+		MaxResults: 50,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "open", issues[0].Status)
+	assert.Equal(t, "closed", issues[1].Status)
+}
+
 func TestListIssues_emptyResult(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `[]`)
@@ -148,7 +172,7 @@ func TestListIssues_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_happy(t *testing.T) {
@@ -192,7 +216,7 @@ func TestGetIssue_httpError(t *testing.T) {
 	_, err := client.GetIssue(context.Background(), "octocat/hello-world#42")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_invalidKey(t *testing.T) {
@@ -282,7 +306,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func Test_splitProject(t *testing.T) {
@@ -392,7 +416,7 @@ func TestAddComment_httpError(t *testing.T) {
 	_, err := client.AddComment(context.Background(), "octocat/hello-world#42", "test")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestAddComment_invalidKey(t *testing.T) {
@@ -445,6 +469,50 @@ func TestDoRequest_authHeader(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+func TestDeleteIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/repos/octocat/hello-world/issues/42", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "closed", payload["state"])
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"number":42,"state":"closed"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.DeleteIssue(context.Background(), "octocat/hello-world#42")
+
+	require.NoError(t, err)
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.DeleteIssue(context.Background(), "octocat/hello-world#42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDeleteIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	err := client.DeleteIssue(context.Background(), "badkey")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
 }
 
 func TestListComments_empty(t *testing.T) {

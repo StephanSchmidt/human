@@ -45,7 +45,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	path := fmt.Sprintf("/api/v4/projects/%s/issues", encodedProject)
 	query := url.Values{
 		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
-		"state":    {"opened"},
+	}
+	if !opts.IncludeAll {
+		query.Set("state", "opened")
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode(), nil)
@@ -231,6 +233,27 @@ func toTrackerComment(gn glNote) (*tracker.Comment, error) {
 	}, nil
 }
 
+// DeleteIssue implements tracker.Deleter.
+func (c *Client) DeleteIssue(ctx context.Context, key string) error {
+	project, iid, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	encodedProject, err := splitProject(project)
+	if err != nil {
+		return err
+	}
+
+	path := fmt.Sprintf("/api/v4/projects/%s/issues/%d", encodedProject, iid)
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, "", nil)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
 	if err := tracker.ValidateURL(c.baseURL); err != nil {
 		return nil, err
@@ -240,7 +263,9 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 		return nil, errors.WrapWithDetails(err, "parsing base URL",
 			"baseURL", c.baseURL)
 	}
-	u.Path = path
+	decodedPath, _ := url.PathUnescape(path)
+	u.Path = decodedPath
+	u.RawPath = path
 	u.RawQuery = rawQuery
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
@@ -263,8 +288,11 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 			"method", method, "path", path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		_ = resp.Body.Close()
-		return nil, errors.WithDetails("gitlab returned unexpected status",
+		safePath := strings.ReplaceAll(path, "%", "%%")
+		return nil, errors.WithDetails(
+			"gitlab "+method+" "+safePath+" returned "+strconv.Itoa(resp.StatusCode)+": "+string(respBody),
 			"statusCode", resp.StatusCode, "method", method, "path", path)
 	}
 	return resp, nil

@@ -72,7 +72,7 @@ func TestDoRequest_invalidBaseURL(t *testing.T) {
 func TestListIssues_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues", r.URL.Path)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues", r.URL.RawPath)
 		assert.Equal(t, "50", r.URL.Query().Get("per_page"))
 		assert.Equal(t, "opened", r.URL.Query().Get("state"))
 		assert.Equal(t, "glpat-test", r.Header.Get("PRIVATE-TOKEN"))
@@ -103,6 +103,30 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "mygroup/myproject#2", issues[1].Key)
 	assert.Equal(t, "", issues[1].Type)
 	assert.Equal(t, "", issues[1].Assignee)
+}
+
+func TestListIssues_all(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "", r.URL.Query().Get("state"))
+
+		_, _ = fmt.Fprint(w, `[
+			{"iid":1,"project_id":100,"title":"Open issue","description":"","state":"opened","author":{"id":1,"username":"alice"},"assignees":[],"labels":[]},
+			{"iid":2,"project_id":100,"title":"Closed issue","description":"","state":"closed","author":{"id":1,"username":"alice"},"assignees":[],"labels":[]}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "mygroup/myproject",
+		MaxResults: 50,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "opened", issues[0].Status)
+	assert.Equal(t, "closed", issues[1].Status)
 }
 
 func TestListIssues_emptyResult(t *testing.T) {
@@ -145,13 +169,13 @@ func TestListIssues_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42", r.URL.Path)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42", r.URL.RawPath)
 
 		_, _ = fmt.Fprint(w, `{
 			"iid": 42,
@@ -190,7 +214,7 @@ func TestGetIssue_httpError(t *testing.T) {
 	_, err := client.GetIssue(context.Background(), "mygroup/myproject#42")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_invalidKey(t *testing.T) {
@@ -205,7 +229,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	var gotBody createRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues", r.URL.Path)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues", r.URL.RawPath)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		body, err := io.ReadAll(r.Body)
@@ -247,14 +271,14 @@ func TestCreateIssue_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestAddComment_happy(t *testing.T) {
 	var gotBody noteRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42/notes", r.URL.Path)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42/notes", r.URL.RawPath)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		body, err := io.ReadAll(r.Body)
@@ -294,13 +318,13 @@ func TestAddComment_httpError(t *testing.T) {
 	_, err := client.AddComment(context.Background(), "mygroup/myproject#42", "test")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestListComments_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42/notes", r.URL.Path)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42/notes", r.URL.RawPath)
 		assert.Equal(t, "asc", r.URL.Query().Get("sort"))
 
 		_, _ = fmt.Fprint(w, `[
@@ -341,6 +365,42 @@ func TestDoRequest_authHeader(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+func TestDeleteIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/42", r.URL.RawPath)
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.DeleteIssue(context.Background(), "mygroup/myproject#42")
+
+	require.NoError(t, err)
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.DeleteIssue(context.Background(), "mygroup/myproject#42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDeleteIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.DeleteIssue(context.Background(), "nohash")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
 }
 
 func TestListComments_empty(t *testing.T) {

@@ -76,6 +76,7 @@ type Comment struct {
 type ListOptions struct {
 	Project    string
 	MaxResults int
+	IncludeAll bool // when false, only open/active issues are returned
 }
 
 // Read interfaces (implemented now).
@@ -96,6 +97,7 @@ type Provider interface {
 	Getter
 	Creator
 	Commenter
+	Deleter
 }
 
 // Instance represents a configured tracker backend ready for use.
@@ -118,6 +120,11 @@ type Creator interface {
 type Commenter interface {
 	ListComments(ctx context.Context, issueKey string) ([]Comment, error)
 	AddComment(ctx context.Context, issueKey string, body string) (*Comment, error)
+}
+
+// Deleter deletes (or closes) an issue by key.
+type Deleter interface {
+	DeleteIssue(ctx context.Context, key string) error
 }
 
 // Transitioner moves an issue to a new status.

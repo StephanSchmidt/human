@@ -182,14 +182,16 @@ func TestCreateIssue_httpError(t *testing.T) {
 	})
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestListIssues_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/rest/api/3/search/jql", r.URL.Path)
-		assert.Contains(t, r.URL.Query().Get("jql"), "project=KAN")
+		jql := r.URL.Query().Get("jql")
+		assert.Contains(t, jql, "project=KAN")
+		assert.Contains(t, jql, "statusCategory != Done")
 		assert.Equal(t, "10", r.URL.Query().Get("maxResults"))
 
 		_, _ = fmt.Fprint(w, `{"issues":[
@@ -215,6 +217,32 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "KAN-2", issues[1].Key)
 	assert.Equal(t, "Second issue", issues[1].Summary)
 	assert.Equal(t, "In Progress", issues[1].Status)
+}
+
+func TestListIssues_all(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jql := r.URL.Query().Get("jql")
+		assert.Contains(t, jql, "project=KAN")
+		assert.NotContains(t, jql, "statusCategory")
+
+		_, _ = fmt.Fprint(w, `{"issues":[
+			{"key":"KAN-1","fields":{"summary":"Open issue","status":{"name":"To Do"}}},
+			{"key":"KAN-2","fields":{"summary":"Done issue","status":{"name":"Done"}}}
+		]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "KAN",
+		MaxResults: 10,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "To Do", issues[0].Status)
+	assert.Equal(t, "Done", issues[1].Status)
 }
 
 func TestListIssues_emptyResult(t *testing.T) {
@@ -246,7 +274,7 @@ func TestListIssues_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_happy(t *testing.T) {
@@ -291,7 +319,7 @@ func TestGetIssue_httpError(t *testing.T) {
 	_, err := client.GetIssue(context.Background(), "KAN-42")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestAddComment_happy(t *testing.T) {
@@ -337,7 +365,7 @@ func TestAddComment_httpError(t *testing.T) {
 	_, err := client.AddComment(context.Background(), "KAN-1", "test")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestListComments_happy(t *testing.T) {
@@ -395,6 +423,34 @@ func TestDoRequest_authHeader(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+func TestDeleteIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/rest/api/3/issue/KAN-42", r.URL.Path)
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.DeleteIssue(context.Background(), "KAN-42")
+
+	require.NoError(t, err)
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.DeleteIssue(context.Background(), "KAN-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestListComments_empty(t *testing.T) {

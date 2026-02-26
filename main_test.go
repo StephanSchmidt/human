@@ -22,6 +22,7 @@ type mockProvider struct {
 	listIssuesFn   func(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error)
 	getIssueFn     func(ctx context.Context, key string) (*tracker.Issue, error)
 	createIssueFn  func(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error)
+	deleteIssueFn  func(ctx context.Context, key string) error
 	listCommentsFn func(ctx context.Context, issueKey string) ([]tracker.Comment, error)
 	addCommentFn   func(ctx context.Context, issueKey string, body string) (*tracker.Comment, error)
 }
@@ -36,6 +37,10 @@ func (m *mockProvider) GetIssue(ctx context.Context, key string) (*tracker.Issue
 
 func (m *mockProvider) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error) {
 	return m.createIssueFn(ctx, issue)
+}
+
+func (m *mockProvider) DeleteIssue(ctx context.Context, key string) error {
+	return m.deleteIssueFn(ctx, key)
 }
 
 func (m *mockProvider) ListComments(ctx context.Context, issueKey string) ([]tracker.Comment, error) {
@@ -63,6 +68,11 @@ func TestKeyHint(t *testing.T) {
 			name: "issue create project",
 			cli:  CLI{Issue: IssueCmd{Create: CreateCmd{Project: "octocat/hello-world"}}},
 			want: "octocat/hello-world",
+		},
+		{
+			name: "issue delete key",
+			cli:  CLI{Issue: IssueCmd{Delete: DeleteCmd{Key: "KAN-99"}}},
+			want: "KAN-99",
 		},
 		{
 			name: "issues list project",
@@ -113,6 +123,7 @@ func TestNeedsTrackerClient(t *testing.T) {
 		{"issues list", true},
 		{"issue get", true},
 		{"issue create", true},
+		{"issue delete", true},
 		{"issue comment add", true},
 		{"issue comment list", true},
 	}
@@ -300,6 +311,7 @@ func TestSetProvider(t *testing.T) {
 	assert.Equal(t, tracker.Provider(p), cli.Issues.List.Provider)
 	assert.Equal(t, tracker.Provider(p), cli.Issue.Get.Provider)
 	assert.Equal(t, tracker.Provider(p), cli.Issue.Create.Provider)
+	assert.Equal(t, tracker.Provider(p), cli.Issue.Delete.Provider)
 	assert.Equal(t, tracker.Provider(p), cli.Issue.Comment.Add.Provider)
 	assert.Equal(t, tracker.Provider(p), cli.Issue.Comment.List.Provider)
 }
@@ -312,6 +324,7 @@ func TestSetOutput(t *testing.T) {
 	assert.Equal(t, &buf, cli.Issues.List.Out)
 	assert.Equal(t, &buf, cli.Issue.Get.Out)
 	assert.Equal(t, &buf, cli.Issue.Create.Out)
+	assert.Equal(t, &buf, cli.Issue.Delete.Out)
 	assert.Equal(t, &buf, cli.Issue.Comment.Add.Out)
 	assert.Equal(t, &buf, cli.Issue.Comment.List.Out)
 	assert.Equal(t, &buf, cli.Tracker.List.Out)
@@ -372,6 +385,7 @@ func TestListCmd_Run_JSON(t *testing.T) {
 		listIssuesFn: func(_ context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 			assert.Equal(t, "KAN", opts.Project)
 			assert.Equal(t, 50, opts.MaxResults)
+			assert.False(t, opts.IncludeAll)
 			return issues, nil
 		},
 	}
@@ -381,6 +395,26 @@ func TestListCmd_Run_JSON(t *testing.T) {
 	err := cmd.Run()
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
+}
+
+func TestListCmd_Run_All(t *testing.T) {
+	issues := []tracker.Issue{
+		{Key: "KAN-1", Summary: "Open", Status: "Open"},
+		{Key: "KAN-2", Summary: "Done", Status: "Done"},
+	}
+	p := &mockProvider{
+		listIssuesFn: func(_ context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
+			assert.True(t, opts.IncludeAll)
+			return issues, nil
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &ListCmd{Project: "KAN", All: true, Provider: p, Out: &buf}
+	err := cmd.Run()
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
+	assert.Contains(t, buf.String(), `"key": "KAN-2"`)
 }
 
 func TestListCmd_Run_Table(t *testing.T) {
@@ -512,6 +546,34 @@ func TestCreateCmd_Run_error(t *testing.T) {
 	cmd := &CreateCmd{Project: "KAN", Summary: "X", Provider: p, Out: &buf}
 	err := cmd.Run()
 	assert.EqualError(t, err, "create failed")
+}
+
+func TestDeleteCmd_Run(t *testing.T) {
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, key string) error {
+			assert.Equal(t, "KAN-1", key)
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &DeleteCmd{Key: "KAN-1", Provider: p, Out: &buf}
+	err := cmd.Run()
+	require.NoError(t, err)
+	assert.Equal(t, "Deleted KAN-1\n", buf.String())
+}
+
+func TestDeleteCmd_Run_error(t *testing.T) {
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			return fmt.Errorf("delete failed")
+		},
+	}
+
+	var buf bytes.Buffer
+	cmd := &DeleteCmd{Key: "KAN-1", Provider: p, Out: &buf}
+	err := cmd.Run()
+	assert.EqualError(t, err, "delete failed")
 }
 
 func TestAddCommentCmd_Run(t *testing.T) {

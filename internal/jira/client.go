@@ -37,7 +37,11 @@ func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
 
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
-	jql := fmt.Sprintf("project=%s order by created DESC", opts.Project)
+	jql := fmt.Sprintf("project=%s", opts.Project)
+	if !opts.IncludeAll {
+		jql += " AND statusCategory != Done"
+	}
+	jql += " order by created DESC"
 	query := url.Values{
 		"jql":        {jql},
 		"maxResults": {fmt.Sprintf("%d", opts.MaxResults)},
@@ -223,6 +227,17 @@ func toTrackerComment(jc jiraComment) (*tracker.Comment, error) {
 	}, nil
 }
 
+// DeleteIssue implements tracker.Deleter.
+func (c *Client) DeleteIssue(ctx context.Context, key string) error {
+	path := fmt.Sprintf("/rest/api/3/issue/%s", url.PathEscape(key))
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, "", nil)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
 	if err := tracker.ValidateURL(c.baseURL); err != nil {
 		return nil, err
@@ -256,8 +271,10 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 			"method", method, "path", path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		_ = resp.Body.Close()
-		return nil, errors.WithDetails("jira returned unexpected status",
+		return nil, errors.WithDetails(
+			fmt.Sprintf("jira %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
 			"statusCode", resp.StatusCode, "method", method, "path", path)
 	}
 	return resp, nil

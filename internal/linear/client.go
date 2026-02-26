@@ -23,6 +23,13 @@ const listIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	}
 }`
 
+const listOpenIssuesQuery = `query($teamKey: String!, $first: Int!) {
+	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
 const getIssueQuery = `query($id: String!) {
 	issue(id: $id) {
 		identifier title description state { name } priorityLabel
@@ -49,6 +56,10 @@ const addCommentMutation = `mutation($issueId: String!, $body: String!) {
 		success
 		comment { id body createdAt user { name } }
 	}
+}`
+
+const deleteIssueMutation = `mutation($id: String!) {
+	issueDelete(id: $id) { success }
 }`
 
 const createIssueMutation = `mutation($teamId: String!, $title: String!, $description: String) {
@@ -82,7 +93,12 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		"first":   opts.MaxResults,
 	}
 
-	data, err := c.doGraphQL(ctx, listIssuesQuery, vars)
+	query := listOpenIssuesQuery
+	if opts.IncludeAll {
+		query = listIssuesQuery
+	}
+
+	data, err := c.doGraphQL(ctx, query, vars)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +227,34 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	return comments, nil
 }
 
+// DeleteIssue implements tracker.Deleter.
+func (c *Client) DeleteIssue(ctx context.Context, key string) error {
+	issueID, err := c.resolveIssueID(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	vars := map[string]any{"id": issueID}
+
+	data, err := c.doGraphQL(ctx, deleteIssueMutation, vars)
+	if err != nil {
+		return err
+	}
+
+	var result issueDeleteData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return errors.WrapWithDetails(err, "decoding delete response",
+			"issueKey", key)
+	}
+
+	if !result.IssueDelete.Success {
+		return errors.WithDetails("linear issue deletion failed",
+			"issueKey", key)
+	}
+
+	return nil
+}
+
 // resolveIssueID looks up the internal Linear issue ID for an identifier.
 func (c *Client) resolveIssueID(ctx context.Context, identifier string) (string, error) {
 	vars := map[string]any{"id": identifier}
@@ -308,7 +352,8 @@ func (c *Client) doGraphQL(ctx context.Context, query string, variables map[stri
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.WithDetails("linear returned unexpected status",
+		return nil, errors.WithDetails(
+			fmt.Sprintf("linear POST %s returned %d", endpoint, resp.StatusCode),
 			"statusCode", resp.StatusCode, "endpoint", endpoint)
 	}
 

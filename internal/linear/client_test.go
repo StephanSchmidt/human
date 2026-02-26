@@ -115,22 +115,24 @@ func TestDoGraphQL_invalidBaseURL(t *testing.T) {
 }
 
 func TestListIssues_happy(t *testing.T) {
+	issuesResponse := `{"data":{"issues":{"nodes":[
+		{"identifier":"ENG-1","title":"First issue","description":"desc1",
+		 "state":{"name":"In Progress"},"priorityLabel":"High",
+		 "assignee":{"name":"Alice"},"creator":{"name":"Bob"},
+		 "labels":{"nodes":[{"name":"bug"}]}},
+		{"identifier":"ENG-2","title":"Second issue","description":"desc2",
+		 "state":{"name":"Todo"},"priorityLabel":"Low",
+		 "assignee":null,"creator":{"name":"Charlie"},
+		 "labels":{"nodes":[]}}
+	]}}}`
+
 	srv := httptest.NewServer(&graphQLHandler{
 		t: t,
 		handlers: map[string]func(vars map[string]any) string{
-			"issues(": func(vars map[string]any) string {
+			"completed": func(vars map[string]any) string {
 				assert.Equal(t, "ENG", vars["teamKey"])
 				assert.EqualValues(t, 50, vars["first"])
-				return `{"data":{"issues":{"nodes":[
-					{"identifier":"ENG-1","title":"First issue","description":"desc1",
-					 "state":{"name":"In Progress"},"priorityLabel":"High",
-					 "assignee":{"name":"Alice"},"creator":{"name":"Bob"},
-					 "labels":{"nodes":[{"name":"bug"}]}},
-					{"identifier":"ENG-2","title":"Second issue","description":"desc2",
-					 "state":{"name":"Todo"},"priorityLabel":"Low",
-					 "assignee":null,"creator":{"name":"Charlie"},
-					 "labels":{"nodes":[]}}
-				]}}}`
+				return issuesResponse
 			},
 		},
 	})
@@ -159,11 +161,43 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "", issues[1].Type)
 }
 
+func TestListIssues_all(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issues(": func(vars map[string]any) string {
+				assert.Equal(t, "ENG", vars["teamKey"])
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"ENG-1","title":"Open issue","description":"",
+					 "state":{"name":"In Progress"},"priorityLabel":"",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}},
+					{"identifier":"ENG-2","title":"Done issue","description":"",
+					 "state":{"name":"Done"},"priorityLabel":"",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "ENG",
+		MaxResults: 50,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "In Progress", issues[0].Status)
+	assert.Equal(t, "Done", issues[1].Status)
+}
+
 func TestListIssues_emptyResult(t *testing.T) {
 	srv := httptest.NewServer(&graphQLHandler{
 		t: t,
 		handlers: map[string]func(vars map[string]any) string{
-			"issues(": func(_ map[string]any) string {
+			"completed": func(_ map[string]any) string {
 				return `{"data":{"issues":{"nodes":[]}}}`
 			},
 		},
@@ -210,7 +244,7 @@ func TestListIssues_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_happy(t *testing.T) {
@@ -255,7 +289,7 @@ func TestGetIssue_httpError(t *testing.T) {
 	_, err := client.GetIssue(context.Background(), "ENG-42")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestGetIssue_graphQLError(t *testing.T) {
@@ -387,7 +421,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestCreateIssue_teamNotFound(t *testing.T) {
@@ -560,7 +594,7 @@ func TestAddComment_httpError(t *testing.T) {
 	_, err := client.AddComment(context.Background(), "ENG-42", "test")
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unexpected status")
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestListComments_happy(t *testing.T) {
@@ -591,6 +625,72 @@ func TestListComments_happy(t *testing.T) {
 	assert.Equal(t, "c2", comments[1].ID)
 	assert.Equal(t, "Bob", comments[1].Author)
 	assert.Equal(t, "Second comment", comments[1].Body)
+}
+
+func TestDeleteIssue_happy(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG-42", vars["id"])
+				return `{"data":{"issue":{"id":"issue-uuid-123"}}}`
+			},
+			"issueDelete(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "issue-uuid-123", vars["id"])
+				return `{"data":{"issueDelete":{"success":true}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.DeleteIssue(context.Background(), "ENG-42")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			_, _ = fmt.Fprint(w, `{"data":{"issue":{"id":"issue-uuid-123"}}}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.DeleteIssue(context.Background(), "ENG-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDeleteIssue_serverReturnsFailure(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"issue-uuid-123"}}}`
+			},
+			"issueDelete(": func(_ map[string]any) string {
+				return `{"data":{"issueDelete":{"success":false}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.DeleteIssue(context.Background(), "ENG-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deletion failed")
 }
 
 func TestListComments_empty(t *testing.T) {

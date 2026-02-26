@@ -140,6 +140,7 @@ type IssuesCmd struct {
 
 type ListCmd struct {
 	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
+	All      bool             `kong:"help='Include all issues (default: open only)'"`
 	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
 	Provider tracker.Provider `kong:"-"`
 	Out      io.Writer        `kong:"-"`
@@ -149,6 +150,7 @@ func (cmd *ListCmd) Run() error {
 	issues, err := cmd.Provider.ListIssues(context.TODO(), tracker.ListOptions{
 		Project:    cmd.Project,
 		MaxResults: 50,
+		IncludeAll: cmd.All,
 	})
 	if err != nil {
 		return err
@@ -180,6 +182,7 @@ func printIssuesTable(out io.Writer, issues []tracker.Issue) error {
 type IssueCmd struct {
 	Get     GetCmd     `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
 	Create  CreateCmd  `kong:"cmd,help='Create a new issue in a project'"`
+	Delete  DeleteCmd  `kong:"cmd,help='Delete (or close) an issue by key'"`
 	Comment CommentCmd `kong:"cmd,help='Comment operations on an issue'"`
 }
 
@@ -280,6 +283,22 @@ func (cmd *CreateCmd) Run() error {
 	return nil
 }
 
+// --- issue delete ---
+
+type DeleteCmd struct {
+	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, GitLab: group/project#42, Linear: ENG-123)'"`
+	Provider tracker.Provider `kong:"-"`
+	Out      io.Writer        `kong:"-"`
+}
+
+func (cmd *DeleteCmd) Run() error {
+	if err := cmd.Provider.DeleteIssue(context.TODO(), cmd.Key); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(cmd.Out, "Deleted %s\n", cmd.Key)
+	return nil
+}
+
 // --- help ---
 
 func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
@@ -327,6 +346,9 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, "  # Create a Linear issue")
 	_, _ = fmt.Fprintln(w, `  human issue create --project=ENG "Implement feature"`)
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Delete an issue")
+	_, _ = fmt.Fprintln(w, "  human issue delete KAN-1")
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # List configured trackers (JSON)")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w)
@@ -348,6 +370,8 @@ func keyHint(cli *CLI) string {
 		return cli.Issue.Get.Key
 	case cli.Issue.Create.Project != "":
 		return cli.Issue.Create.Project
+	case cli.Issue.Delete.Key != "":
+		return cli.Issue.Delete.Key
 	case cli.Issues.List.Project != "":
 		return cli.Issues.List.Project
 	case cli.Issue.Comment.Add.Key != "":
@@ -452,6 +476,7 @@ func setProvider(cli *CLI, p tracker.Provider) {
 	cli.Issues.List.Provider = p
 	cli.Issue.Get.Provider = p
 	cli.Issue.Create.Provider = p
+	cli.Issue.Delete.Provider = p
 	cli.Issue.Comment.Add.Provider = p
 	cli.Issue.Comment.List.Provider = p
 }
@@ -461,6 +486,7 @@ func setOutput(cli *CLI, w io.Writer) {
 	cli.Issues.List.Out = w
 	cli.Issue.Get.Out = w
 	cli.Issue.Create.Out = w
+	cli.Issue.Delete.Out = w
 	cli.Issue.Comment.Add.Out = w
 	cli.Issue.Comment.List.Out = w
 	cli.Tracker.List.Out = w

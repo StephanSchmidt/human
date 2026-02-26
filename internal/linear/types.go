@@ -101,3 +101,9 @@ type issueIDData struct {
 		ID string `json:"id"`
 	} `json:"issue"`
 }
+
+type issueDeleteData struct {
+	IssueDelete struct {
+		Success bool `json:"success"`
+	} `json:"issueDelete"`
+}

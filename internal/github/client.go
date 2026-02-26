@@ -44,9 +44,13 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	}
 
 	path := fmt.Sprintf("/repos/%s/%s/issues", owner, repo)
+	state := "open"
+	if opts.IncludeAll {
+		state = "all"
+	}
 	query := url.Values{
 		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
-		"state":    {"open"},
+		"state":    {state},
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode(), nil)
@@ -214,6 +218,28 @@ func toTrackerComment(gc ghComment) (*tracker.Comment, error) {
 	}, nil
 }
 
+// DeleteIssue implements tracker.Deleter by closing the issue.
+// GitHub does not support true deletion via the API, so we close the issue instead.
+func (c *Client) DeleteIssue(ctx context.Context, key string) error {
+	owner, repo, number, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]string{"state": "closed"})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling delete request", "key", key)
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
 	if err := tracker.ValidateURL(c.baseURL); err != nil {
 		return nil, err
@@ -247,8 +273,10 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 			"method", method, "path", path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		_ = resp.Body.Close()
-		return nil, errors.WithDetails("github returned unexpected status",
+		return nil, errors.WithDetails(
+			fmt.Sprintf("github %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
 			"statusCode", resp.StatusCode, "method", method, "path", path)
 	}
 	return resp, nil
