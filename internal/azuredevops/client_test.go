@@ -498,11 +498,11 @@ func TestDoRequest_authHeader(t *testing.T) {
 
 func Test_parseIssueKey(t *testing.T) {
 	tests := []struct {
-		name       string
-		key        string
-		wantProj   string
-		wantID     int
-		wantErr    string
+		name     string
+		key      string
+		wantProj string
+		wantID   int
+		wantErr  string
 	}{
 		{name: "valid", key: "Human/2", wantProj: "Human", wantID: 2},
 		{name: "project with spaces", key: "My Project/99", wantProj: "My Project", wantID: 99},
