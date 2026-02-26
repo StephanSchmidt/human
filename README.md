@@ -10,6 +10,8 @@
 
 # human
 
+[https://gethuman.sh](https://gethuman.sh)
+
 Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, and Linear with output as JSON and markdown.
 
 - **One CLI for Jira, GitHub, GitLab, and Linear** — no tool-switching for the AI
