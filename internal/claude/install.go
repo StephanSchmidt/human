@@ -22,6 +22,8 @@ var readySkillContent []byte
 //go:embed embed/human-ready-agent.md
 var readyAgentContent []byte
 
+var userHomeDir = os.UserHomeDir
+
 // FileWriter abstracts filesystem operations for testability.
 type FileWriter interface {
 	MkdirAll(path string, perm os.FileMode) error
@@ -54,7 +56,7 @@ type embeddedFile struct {
 func Install(w io.Writer, fw FileWriter, personal bool) error {
 	baseDir := ".claude"
 	if personal {
-		home, err := os.UserHomeDir()
+		home, err := userHomeDir()
 		if err != nil {
 			return errors.WrapWithDetails(err, "resolving home directory")
 		}

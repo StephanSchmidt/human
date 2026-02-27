@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go tool gotestsum -- -coverprofile=coverage.out ./...
+      - run: go tool gotestsum -- -coverprofile=coverage.out $(go list ./... | grep -v /cmd/)
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

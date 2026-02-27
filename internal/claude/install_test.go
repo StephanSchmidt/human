@@ -18,6 +18,7 @@ type mockFileWriter struct {
 	dirs    map[string]bool
 	mkdirFn func(path string) error
 	writeFn func(name string) error
+	readFn  func(name string) ([]byte, error)
 }
 
 func newMockFileWriter() *mockFileWriter {
@@ -48,6 +49,9 @@ func (m *mockFileWriter) WriteFile(name string, data []byte, _ os.FileMode) erro
 }
 
 func (m *mockFileWriter) ReadFile(name string) ([]byte, error) {
+	if m.readFn != nil {
+		return m.readFn(name)
+	}
 	data, ok := m.files[name]
 	if !ok {
 		return nil, os.ErrNotExist
@@ -172,4 +176,68 @@ func TestInstall_WrapsWriteError(t *testing.T) {
 
 	details := errors.AllDetails(err)
 	assert.NotEmpty(t, details["path"])
+}
+
+func TestInstall_PersonalMode_HomeDirError(t *testing.T) {
+	original := userHomeDir
+	t.Cleanup(func() { userHomeDir = original })
+	userHomeDir = func() (string, error) {
+		return "", fmt.Errorf("no home")
+	}
+
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	err := Install(&buf, fw, true)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolving home directory")
+}
+
+func TestOSFileWriter_MkdirAll(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "a", "b", "c")
+	fw := OSFileWriter{}
+
+	err := fw.MkdirAll(dir, 0o755)
+
+	require.NoError(t, err)
+	info, statErr := os.Stat(dir)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+func TestOSFileWriter_WriteAndReadFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "test.txt")
+	fw := OSFileWriter{}
+	content := []byte("hello world")
+
+	err := fw.WriteFile(path, content, 0o644)
+	require.NoError(t, err)
+
+	got, err := fw.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, content, got)
+}
+
+func TestOSFileWriter_ReadFile_NotFound(t *testing.T) {
+	fw := OSFileWriter{}
+
+	_, err := fw.ReadFile(filepath.Join(t.TempDir(), "nonexistent.txt"))
+
+	require.Error(t, err)
+}
+
+func TestInstall_ReadFileError_TreatedAsNew(t *testing.T) {
+	fw := newMockFileWriter()
+	fw.readFn = func(_ string) ([]byte, error) {
+		return nil, fmt.Errorf("permission denied")
+	}
+
+	var buf bytes.Buffer
+	err := Install(&buf, fw, false)
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "created")
+	assert.NotContains(t, buf.String(), "updated")
+	assert.NotContains(t, buf.String(), "unchanged")
 }

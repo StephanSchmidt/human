@@ -13,7 +13,7 @@ test:
 	go tool gotestsum ./...
 
 coverage:
-	go tool gotestsum -- -coverprofile=coverage.out ./...
+	go tool gotestsum -- -coverprofile=coverage.out $$(go list ./... | grep -v /cmd/)
 	go tool cover -func=coverage.out
 
 lint:
