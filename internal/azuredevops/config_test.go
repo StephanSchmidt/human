@@ -3,6 +3,7 @@ package azuredevops
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -126,9 +127,12 @@ func TestApplyEnvOverrides(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			unsetEnv(t, "AZURE_URL")
+			unsetEnv(t, "AZURE_ORG")
+			unsetEnv(t, "AZURE_TOKEN")
 			for _, suffix := range []string{"URL", "ORG", "TOKEN"} {
 				if tt.cfg.Name != "" {
-					unsetEnv(t, "AZURE_"+tt.cfg.Name+"_"+suffix)
+					unsetEnv(t, "AZURE_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
 				}
 			}
 			for k, v := range tt.envs {
@@ -200,6 +204,9 @@ func TestLoadInstances_happyPath(t *testing.T) {
 	unsetEnv(t, "AZURE_URL")
 	unsetEnv(t, "AZURE_ORG")
 	unsetEnv(t, "AZURE_TOKEN")
+	unsetEnv(t, "AZURE_WORK_URL")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	unsetEnv(t, "AZURE_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -218,6 +225,12 @@ func TestLoadInstances_multipleEntries(t *testing.T) {
 	unsetEnv(t, "AZURE_URL")
 	unsetEnv(t, "AZURE_ORG")
 	unsetEnv(t, "AZURE_TOKEN")
+	unsetEnv(t, "AZURE_WORK_URL")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	unsetEnv(t, "AZURE_WORK_TOKEN")
+	unsetEnv(t, "AZURE_PERSONAL_URL")
+	unsetEnv(t, "AZURE_PERSONAL_ORG")
+	unsetEnv(t, "AZURE_PERSONAL_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -241,6 +254,9 @@ func TestLoadInstances_defaultURL(t *testing.T) {
 	unsetEnv(t, "AZURE_URL")
 	unsetEnv(t, "AZURE_ORG")
 	unsetEnv(t, "AZURE_TOKEN")
+	unsetEnv(t, "AZURE_WORK_URL")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	unsetEnv(t, "AZURE_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -255,6 +271,9 @@ func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	unsetEnv(t, "AZURE_URL")
 	unsetEnv(t, "AZURE_ORG")
 	unsetEnv(t, "AZURE_TOKEN")
+	unsetEnv(t, "AZURE_WORK_URL")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	unsetEnv(t, "AZURE_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -268,6 +287,9 @@ func TestLoadInstances_incompleteConfigSkipped_missingOrg(t *testing.T) {
 	unsetEnv(t, "AZURE_URL")
 	unsetEnv(t, "AZURE_ORG")
 	unsetEnv(t, "AZURE_TOKEN")
+	unsetEnv(t, "AZURE_WORK_URL")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	unsetEnv(t, "AZURE_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)

@@ -3,6 +3,7 @@ package linear
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -125,9 +126,11 @@ func TestApplyEnvOverrides(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			unsetEnv(t, "LINEAR_URL")
+			unsetEnv(t, "LINEAR_TOKEN")
 			for _, suffix := range []string{"URL", "TOKEN"} {
 				if tt.cfg.Name != "" {
-					unsetEnv(t, "LINEAR_"+tt.cfg.Name+"_"+suffix)
+					unsetEnv(t, "LINEAR_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
 				}
 			}
 			for k, v := range tt.envs {
@@ -196,6 +199,8 @@ func TestLoadInstances_happyPath(t *testing.T) {
 
 	unsetEnv(t, "LINEAR_URL")
 	unsetEnv(t, "LINEAR_TOKEN")
+	unsetEnv(t, "LINEAR_WORK_URL")
+	unsetEnv(t, "LINEAR_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -213,6 +218,10 @@ func TestLoadInstances_multipleEntries(t *testing.T) {
 
 	unsetEnv(t, "LINEAR_URL")
 	unsetEnv(t, "LINEAR_TOKEN")
+	unsetEnv(t, "LINEAR_WORK_URL")
+	unsetEnv(t, "LINEAR_WORK_TOKEN")
+	unsetEnv(t, "LINEAR_PERSONAL_URL")
+	unsetEnv(t, "LINEAR_PERSONAL_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -235,6 +244,8 @@ func TestLoadInstances_defaultURL(t *testing.T) {
 
 	unsetEnv(t, "LINEAR_URL")
 	unsetEnv(t, "LINEAR_TOKEN")
+	unsetEnv(t, "LINEAR_WORK_URL")
+	unsetEnv(t, "LINEAR_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -264,6 +275,8 @@ func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 
 	unsetEnv(t, "LINEAR_URL")
 	unsetEnv(t, "LINEAR_TOKEN")
+	unsetEnv(t, "LINEAR_WORK_URL")
+	unsetEnv(t, "LINEAR_WORK_TOKEN")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)

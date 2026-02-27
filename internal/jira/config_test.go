@@ -3,6 +3,7 @@ package jira
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -143,9 +144,12 @@ func TestApplyEnvOverrides(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Unset all possible env vars to isolate tests.
+			unsetEnv(t, "JIRA_URL")
+			unsetEnv(t, "JIRA_USER")
+			unsetEnv(t, "JIRA_KEY")
 			for _, suffix := range []string{"URL", "USER", "KEY"} {
 				if tt.cfg.Name != "" {
-					unsetEnv(t, "JIRA_"+tt.cfg.Name+"_"+suffix)
+					unsetEnv(t, "JIRA_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
 				}
 			}
 			for k, v := range tt.envs {
@@ -217,6 +221,9 @@ func TestLoadInstances_happyPath(t *testing.T) {
 	unsetEnv(t, "JIRA_URL")
 	unsetEnv(t, "JIRA_USER")
 	unsetEnv(t, "JIRA_KEY")
+	unsetEnv(t, "JIRA_WORK_URL")
+	unsetEnv(t, "JIRA_WORK_USER")
+	unsetEnv(t, "JIRA_WORK_KEY")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -236,6 +243,12 @@ func TestLoadInstances_multipleEntries(t *testing.T) {
 	unsetEnv(t, "JIRA_URL")
 	unsetEnv(t, "JIRA_USER")
 	unsetEnv(t, "JIRA_KEY")
+	unsetEnv(t, "JIRA_WORK_URL")
+	unsetEnv(t, "JIRA_WORK_USER")
+	unsetEnv(t, "JIRA_WORK_KEY")
+	unsetEnv(t, "JIRA_PERSONAL_URL")
+	unsetEnv(t, "JIRA_PERSONAL_USER")
+	unsetEnv(t, "JIRA_PERSONAL_KEY")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
@@ -276,6 +289,9 @@ func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	unsetEnv(t, "JIRA_URL")
 	unsetEnv(t, "JIRA_USER")
 	unsetEnv(t, "JIRA_KEY")
+	unsetEnv(t, "JIRA_WORK_URL")
+	unsetEnv(t, "JIRA_WORK_USER")
+	unsetEnv(t, "JIRA_WORK_KEY")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
