@@ -121,75 +121,38 @@ make build
 
 ## Configuration
 
-`.humanconfig.yaml` holds named tracker instances:
-
-### Jira
+`.humanconfig.yaml` holds named tracker instances. Multiple instances per tracker are supported. By default the first entry is used; select a specific one with `--tracker`:
 
 ```yaml
 jiras:
   - name: work
     url: https://work.atlassian.net
     user: me@work.com
-    key: work-api-token
-  - name: personal
-    url: https://personal.atlassian.net
-    user: me@personal.com
-    key: personal-api-token
-```
+    key: api-token
 
-### GitHub
-
-```yaml
 githubs:
   - name: personal
-    # url: https://api.github.com  # optional, this is the default
     token: ghp_xxx
-  - name: work
-    url: https://github.example.com/api/v3
-    token: ghp_yyy
-```
 
-### GitLab
-
-```yaml
 gitlabs:
   - name: work
-    # url: https://gitlab.com  # optional, this is the default
     token: glpat-xxx
-  - name: selfhosted
-    url: https://gitlab.example.com
-    token: glpat-yyy
-```
 
-### Linear
-
-```yaml
 linears:
   - name: work
-    # url: https://api.linear.app  # optional, this is the default
     token: lin_xxx
-```
 
-### Azure DevOps
-
-```yaml
 azuredevops:
   - name: work
-    # url: https://dev.azure.com  # optional, this is the default
     org: myorg
     token: pat-xxx
-```
 
-### Shortcut
-
-```yaml
 shortcuts:
   - name: work
-    # url: https://api.app.shortcut.com  # optional, this is the default
     token: xxx
 ```
 
-By default the first entry is used. Select a specific instance with `--tracker`:
+Select a specific instance with `--tracker`:
 
 ```bash
 human --tracker=personal issues list --project=KAN
@@ -204,56 +167,20 @@ List all configured trackers (JSON output, also the default when run without arg
 human tracker list
 ```
 
-### Jira settings resolution
+### Settings resolution
 
-Settings are resolved in priority order (highest wins):
+Each setting is resolved in priority order (highest wins):
 
-1. **CLI flags** (`--jira-url`, `--jira-user`, `--jira-key`)
-2. **Global environment variables** (`JIRA_URL`, `JIRA_USER`, `JIRA_KEY`)
-3. **Per-instance environment variables** (`JIRA_<NAME>_URL`, `JIRA_<NAME>_USER`, `JIRA_<NAME>_KEY` — name is uppercased, e.g. `JIRA_WORK_KEY`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
+1. **CLI flags** (e.g. `--jira-url`)
+2. **Global env vars** (e.g. `JIRA_URL`)
+3. **Per-instance env vars** (e.g. `JIRA_WORK_URL` — name uppercased)
+4. **`.humanconfig.yaml`** — selected entry fills remaining gaps
 
-### GitHub settings resolution
-
-1. **CLI flags** (`--github-url`, `--github-token`)
-2. **Global environment variables** (`GITHUB_URL`, `GITHUB_TOKEN`)
-3. **Per-instance environment variables** (`GITHUB_<NAME>_URL`, `GITHUB_<NAME>_TOKEN` — name is uppercased, e.g. `GITHUB_PERSONAL_TOKEN`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
-
-The GitHub API URL defaults to `https://api.github.com` when not set.
-
-### GitLab settings resolution
-
-1. **CLI flags** (`--gitlab-url`, `--gitlab-token`)
-2. **Global environment variables** (`GITLAB_URL`, `GITLAB_TOKEN`)
-3. **Per-instance environment variables** (`GITLAB_<NAME>_URL`, `GITLAB_<NAME>_TOKEN` — name is uppercased, e.g. `GITLAB_WORK_TOKEN`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
-
-The GitLab API URL defaults to `https://gitlab.com` when not set.
-
-### Linear settings resolution
-
-1. **CLI flags** (`--linear-url`, `--linear-token`)
-2. **Global environment variables** (`LINEAR_URL`, `LINEAR_TOKEN`)
-3. **Per-instance environment variables** (`LINEAR_<NAME>_URL`, `LINEAR_<NAME>_TOKEN` — name is uppercased, e.g. `LINEAR_WORK_TOKEN`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
-
-The Linear API URL defaults to `https://api.linear.app` when not set.
-
-### Azure DevOps settings resolution
-
-1. **CLI flags** (`--azure-url`, `--azure-org`, `--azure-token`)
-2. **Global environment variables** (`AZURE_URL`, `AZURE_ORG`, `AZURE_TOKEN`)
-3. **Per-instance environment variables** (`AZURE_<NAME>_URL`, `AZURE_<NAME>_ORG`, `AZURE_<NAME>_TOKEN` — name is uppercased, e.g. `AZURE_WORK_TOKEN`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
-
-The Azure DevOps URL defaults to `https://dev.azure.com` when not set.
-
-### Shortcut settings resolution
-
-1. **CLI flags** (`--shortcut-url`, `--shortcut-token`)
-2. **Global environment variables** (`SHORTCUT_URL`, `SHORTCUT_TOKEN`)
-3. **Per-instance environment variables** (`SHORTCUT_<NAME>_URL`, `SHORTCUT_<NAME>_TOKEN` — name is uppercased, e.g. `SHORTCUT_WORK_TOKEN`)
-4. **`.humanconfig.yaml` file** — selected entry fills remaining gaps
-
-The Shortcut API URL defaults to `https://api.app.shortcut.com` when not set.
+| Tracker | Env prefix | Settings | Default URL |
+|---------|-----------|----------|-------------|
+| Jira | `JIRA_` | `URL`, `USER`, `KEY` | — |
+| GitHub | `GITHUB_` | `URL`, `TOKEN` | `https://api.github.com` |
+| GitLab | `GITLAB_` | `URL`, `TOKEN` | `https://gitlab.com` |
+| Linear | `LINEAR_` | `URL`, `TOKEN` | `https://api.linear.app` |
+| Azure DevOps | `AZURE_` | `URL`, `ORG`, `TOKEN` | `https://dev.azure.com` |
+| Shortcut | `SHORTCUT_` | `URL`, `TOKEN` | `https://api.app.shortcut.com` |
