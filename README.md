@@ -23,6 +23,8 @@
 
 As AI agents write more code autonomously, the question becomes: who decides *what* gets built? With `human`, an AI reads a product ticket from the issue tracker, creates an implementation ticket with a plan, and a human reviews it before coding starts. That's the human in the loop — and that's the pun.
 
+<img src="human-loop.svg" width="960" alt="human loop: PM Ticket → AI → Dev Ticket">
+
 ## Claude Code usage
 
 Install the Claude Code skills and agents into your project:
