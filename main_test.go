@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,6 +22,110 @@ func TestAuditLogPath(t *testing.T) {
 	assert.Contains(t, p, ".human")
 	assert.Contains(t, p, "audit.log")
 	assert.True(t, filepath.IsAbs(p), "expected absolute path, got %s", p)
+}
+
+// --- helpPrinter / printExamples tests ---
+
+func TestHelpPrinter_RootLevel(t *testing.T) {
+	orig := defaultHelpPrinter
+	t.Cleanup(func() { defaultHelpPrinter = orig })
+
+	defaultHelpPrinter = func(_ kong.HelpOptions, ctx *kong.Context) error {
+		_, _ = fmt.Fprintln(ctx.Stdout, "default help")
+		return nil
+	}
+
+	var buf bytes.Buffer
+	k, err := kong.New(&struct{}{}, kong.Writers(&buf, &buf))
+	require.NoError(t, err)
+	kctx, err := k.Parse([]string{})
+	require.NoError(t, err)
+
+	require.NoError(t, helpPrinter(kong.HelpOptions{}, kctx))
+
+	out := buf.String()
+	assert.Contains(t, out, "default help")
+	assert.Contains(t, out, "Examples:")
+}
+
+func TestHelpPrinter_SubCommand(t *testing.T) {
+	orig := defaultHelpPrinter
+	t.Cleanup(func() { defaultHelpPrinter = orig })
+
+	defaultHelpPrinter = func(_ kong.HelpOptions, ctx *kong.Context) error {
+		_, _ = fmt.Fprintln(ctx.Stdout, "default help")
+		return nil
+	}
+
+	var cli struct {
+		Sub struct{} `cmd:"sub"`
+	}
+	var buf bytes.Buffer
+	k, err := kong.New(&cli, kong.Writers(&buf, &buf))
+	require.NoError(t, err)
+	kctx, err := k.Parse([]string{"sub"})
+	require.NoError(t, err)
+
+	require.NoError(t, helpPrinter(kong.HelpOptions{}, kctx))
+
+	out := buf.String()
+	assert.Contains(t, out, "default help")
+	assert.NotContains(t, out, "Examples:")
+}
+
+func TestHelpPrinter_DefaultPrinterError(t *testing.T) {
+	orig := defaultHelpPrinter
+	t.Cleanup(func() { defaultHelpPrinter = orig })
+
+	defaultHelpPrinter = func(_ kong.HelpOptions, _ *kong.Context) error {
+		return fmt.Errorf("boom")
+	}
+
+	var buf bytes.Buffer
+	k, err := kong.New(&struct{}{}, kong.Writers(&buf, &buf))
+	require.NoError(t, err)
+	kctx, err := k.Parse([]string{})
+	require.NoError(t, err)
+
+	err = helpPrinter(kong.HelpOptions{}, kctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "boom")
+}
+
+func TestPrintExamples(t *testing.T) {
+	var buf bytes.Buffer
+	printExamples(&buf)
+
+	out := buf.String()
+
+	assert.Contains(t, out, "Examples:")
+
+	// Verify all provider examples are present.
+	assert.Contains(t, out, "human issues list --project=KAN", "Jira list example")
+	assert.Contains(t, out, "human issues list --project=octocat/hello-world", "GitHub list example")
+	assert.Contains(t, out, "human issues list --project=mygroup/myproject", "GitLab list example")
+	assert.Contains(t, out, "human issues list --project=ENG", "Linear list example")
+	assert.Contains(t, out, "human issues list --project=MyProject", "Shortcut list example")
+
+	// Verify get, create, delete examples.
+	assert.Contains(t, out, "human issue get KAN-1")
+	assert.Contains(t, out, "human issue get octocat/hello-world#42")
+	assert.Contains(t, out, "human issue get mygroup/myproject#42")
+	assert.Contains(t, out, "human issue get ENG-123")
+	assert.Contains(t, out, "human issue get 123", "Shortcut get example")
+	assert.Contains(t, out, `human issue create --project=KAN "Implement login page"`)
+	assert.Contains(t, out, "human issue delete KAN-1")
+
+	// Verify tracker and install examples.
+	assert.Contains(t, out, "human tracker list")
+	assert.Contains(t, out, "human --tracker=work issues list --project=KAN")
+	assert.Contains(t, out, "human install --agent claude")
+}
+
+func TestPrintExamples_startsWithBlankLine(t *testing.T) {
+	var buf bytes.Buffer
+	printExamples(&buf)
+	assert.True(t, strings.HasPrefix(buf.String(), "\n"), "output should start with a blank line separator")
 }
 
 // --- mock provider ---
@@ -213,6 +318,16 @@ func TestInstanceFromCLI(t *testing.T) {
 			name:     "azure devops with custom URL",
 			cli:      CLI{AzureToken: "pat-test", AzureOrg: "myorg", AzureURL: "https://custom.azure.com"},
 			wantKind: "azuredevops",
+		},
+		{
+			name:     "shortcut token only",
+			cli:      CLI{ShortcutToken: "tok-test"},
+			wantKind: "shortcut",
+		},
+		{
+			name:     "shortcut with custom URL",
+			cli:      CLI{ShortcutToken: "tok-test", ShortcutURL: "https://custom.shortcut.com"},
+			wantKind: "shortcut",
 		},
 	}
 

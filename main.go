@@ -21,6 +21,7 @@ import (
 	"github.com/stephanschmidt/human/internal/gitlab"
 	"github.com/stephanschmidt/human/internal/jira"
 	"github.com/stephanschmidt/human/internal/linear"
+	"github.com/stephanschmidt/human/internal/shortcut"
 	"github.com/stephanschmidt/human/internal/tracker"
 )
 
@@ -32,24 +33,26 @@ var (
 
 // CLI is the top-level Kong struct with global flags.
 type CLI struct {
-	Version     kong.VersionFlag `kong:"help='Print version information'"`
-	TrackerName string           `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
-	JiraKey     string           `kong:"env='JIRA_KEY',help='Jira API token'"`
-	JiraURL     string           `kong:"env='JIRA_URL',help='Jira base URL'"`
-	JiraUser    string           `kong:"env='JIRA_USER',help='Jira user email'"`
-	GitHubToken string           `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
-	GitHubURL   string           `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
-	GitLabToken string           `kong:"env='GITLAB_TOKEN',help='GitLab private token'"`
-	GitLabURL   string           `kong:"env='GITLAB_URL',help='GitLab base URL'"`
-	LinearToken string           `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
-	LinearURL   string           `kong:"env='LINEAR_URL',help='Linear API base URL'"`
-	AzureToken  string           `kong:"env='AZURE_TOKEN',help='Azure DevOps PAT token'"`
-	AzureURL    string           `kong:"env='AZURE_URL',help='Azure DevOps base URL'"`
-	AzureOrg    string           `kong:"env='AZURE_ORG',help='Azure DevOps organization'"`
-	Issues      IssuesCmd        `kong:"cmd,help='Bulk issue operations'"`
-	Issue       IssueCmd         `kong:"cmd,help='Single issue operations'"`
-	Install     InstallCmd       `kong:"cmd,help='Install agent integrations'"`
-	Tracker     TrackerCmd       `kong:"cmd,help='Manage tracker connections'"`
+	Version       kong.VersionFlag `kong:"help='Print version information'"`
+	TrackerName   string           `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
+	JiraKey       string           `kong:"env='JIRA_KEY',help='Jira API token'"`
+	JiraURL       string           `kong:"env='JIRA_URL',help='Jira base URL'"`
+	JiraUser      string           `kong:"env='JIRA_USER',help='Jira user email'"`
+	GitHubToken   string           `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
+	GitHubURL     string           `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
+	GitLabToken   string           `kong:"env='GITLAB_TOKEN',help='GitLab private token'"`
+	GitLabURL     string           `kong:"env='GITLAB_URL',help='GitLab base URL'"`
+	LinearToken   string           `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
+	LinearURL     string           `kong:"env='LINEAR_URL',help='Linear API base URL'"`
+	AzureToken    string           `kong:"env='AZURE_TOKEN',help='Azure DevOps PAT token'"`
+	AzureURL      string           `kong:"env='AZURE_URL',help='Azure DevOps base URL'"`
+	AzureOrg      string           `kong:"env='AZURE_ORG',help='Azure DevOps organization'"`
+	ShortcutToken string           `kong:"env='SHORTCUT_TOKEN',help='Shortcut API token'"`
+	ShortcutURL   string           `kong:"env='SHORTCUT_URL',help='Shortcut API base URL'"`
+	Issues        IssuesCmd        `kong:"cmd,help='Bulk issue operations'"`
+	Issue         IssueCmd         `kong:"cmd,help='Single issue operations'"`
+	Install       InstallCmd       `kong:"cmd,help='Install agent integrations'"`
+	Tracker       TrackerCmd       `kong:"cmd,help='Manage tracker connections'"`
 }
 
 // --- tracker list ---
@@ -306,8 +309,10 @@ func (cmd *DeleteCmd) Run() error {
 
 // --- help ---
 
+var defaultHelpPrinter = kong.DefaultHelpPrinter
+
 func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
-	if err := kong.DefaultHelpPrinter(options, ctx); err != nil {
+	if err := defaultHelpPrinter(options, ctx); err != nil {
 		return err
 	}
 
@@ -316,7 +321,11 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 		return nil
 	}
 
-	w := ctx.Stdout
+	printExamples(ctx.Stdout)
+	return nil
+}
+
+func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Examples:")
 	_, _ = fmt.Fprintln(w, "  # List Jira issues (JSON)")
@@ -351,6 +360,15 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w, "  # Create a Linear issue")
 	_, _ = fmt.Fprintln(w, `  human issue create --project=ENG "Implement feature"`)
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # List Shortcut stories (JSON)")
+	_, _ = fmt.Fprintln(w, "  human issues list --project=MyProject")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Get a Shortcut story as markdown")
+	_, _ = fmt.Fprintln(w, "  human issue get 123")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "  # Create a Shortcut story")
+	_, _ = fmt.Fprintln(w, `  human issue create --project=MyProject "Implement feature"`)
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Delete an issue")
 	_, _ = fmt.Fprintln(w, "  human issue delete KAN-1")
 	_, _ = fmt.Fprintln(w)
@@ -363,8 +381,6 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
-
-	return nil
 }
 
 // keyHint returns the first issue-key or project-key visible on the CLI so
@@ -432,7 +448,13 @@ func loadAllInstances(dir string) ([]tracker.Instance, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(all, adi...), nil
+	all = append(all, adi...)
+
+	sci, err := shortcut.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	return append(all, sci...), nil
 }
 
 // instanceFromCLI builds a tracker instance from CLI flags, returning nil
@@ -490,6 +512,17 @@ func instanceFromCLI(cli *CLI) *tracker.Instance {
 			Provider: azuredevops.New(url, cli.AzureOrg, cli.AzureToken),
 		}
 	}
+	if cli.ShortcutToken != "" {
+		url := cli.ShortcutURL
+		if url == "" {
+			url = "https://api.app.shortcut.com"
+		}
+		return &tracker.Instance{
+			Kind:     "shortcut",
+			URL:      url,
+			Provider: shortcut.New(url, cli.ShortcutToken),
+		}
+	}
 	return nil
 }
 
@@ -539,7 +572,7 @@ func main() {
 	var cli CLI
 	ctx := kong.Parse(&cli,
 		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, Linear, and Azure DevOps. Output is JSON and markdown."),
+		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Output is JSON and markdown."),
 		kong.Help(helpPrinter),
 		kong.UsageOnError(),
 		kong.Vars{"version": version + " (" + commit + ") " + date},
