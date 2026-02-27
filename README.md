@@ -12,12 +12,16 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut with output as JSON and markdown.
+**Human in the loop —** Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut with output as JSON and markdown.
 
 - **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
-- **Claude Code skills** turn PM tickets into implementation plans
+- **Claude Code skills** turn PM tickets into implementation plans and bug analyses
 - **Definition of Ready checks** AI catches incomplete tickets before coding starts
+
+### Why
+
+As AI agents write more code autonomously, the question becomes: who decides *what* gets built? With `human`, an AI reads a product ticket from the issue tracker, creates an implementation ticket with a plan, and a human reviews it before coding starts. That's the human in the loop — and that's the pun.
 
 ## Claude Code usage
 
@@ -50,6 +54,16 @@ The `/human-plan` skill fetches a ticket, explores the codebase, and produces a 
 ```
 
 The plan is written to `.human/plans/kan-1.md`.
+
+### Analyze a bug
+
+The `/human-bug-plan` skill fetches a bug ticket (including comments for stack traces and logs), explores the codebase for root cause, and writes a structured bug analysis with a fix plan.
+
+```
+/human-bug-plan KAN-1
+```
+
+The analysis is written to `.human/bugs/kan-1.md`.
 
 ## Install
 

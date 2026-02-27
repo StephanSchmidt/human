@@ -31,6 +31,10 @@
   - Accepts `<ticket-key>` argument
   - Delegates to the `human-planner` agent with prompt `Create an implementation plan for ticket <key>`
   - Writes the plan to `.human/plans/<key>.md` (lowercased key)
+- **`/human-bug-plan` skill** (`.claude/skills/human-bug-plan/SKILL.md`)
+  - Accepts `<ticket-key>` argument
+  - Delegates to the `human-bug-analyzer` agent with prompt `Analyze bug ticket <key>`
+  - Writes the analysis to `.human/bugs/<key>.md` (lowercased key)
 - **`human-ready` agent** (`.claude/agents/human-ready.md`)
   - Tools: Bash, Read
   - Runs `human tracker list` to discover configured trackers, then `human issue get <key>` to fetch the ticket
@@ -50,7 +54,15 @@
     3. Identify existing patterns, conventions, and related code
     4. Produce a structured plan (context, ordered changes with rationale, verification steps)
     5. Write the plan to `.human/plans/<key>.md` (lowercased key)
+- **`human-bug-analyzer` agent** (`.claude/agents/human-bug-analyzer.md`)
+  - Tools: Bash, Read, Grep, Glob, Write
+  - Analysis process:
+    1. Fetch the ticket via `human issue get <key>` and comments via `human issue comment list <key>`
+    2. Identify symptoms — error messages, stack traces, failing inputs, reproduction steps
+    3. Locate code — use Grep and Glob to find functions in stack traces, error messages, related code paths, tests, and log statements
+    4. Read and trace the code flow to identify root cause
+    5. Write the analysis to `.human/bugs/<key>.md` (lowercased key) with summary, symptoms, root cause, affected code, fix plan, test plan, and related code
 - **Integration with Claude Code**
   - `human install --agent claude` writes skills and agents to `.claude/skills/` and `.claude/agents/`
   - `--personal` flag installs to `~/.claude/` for user-wide availability
-  - Installs four files: `human-plan` skill, `human-ready` skill, `human-planner` agent, `human-ready` agent
+  - Installs six files: `human-plan` skill, `human-ready` skill, `human-bug-plan` skill, `human-planner` agent, `human-ready` agent, `human-bug-analyzer` agent

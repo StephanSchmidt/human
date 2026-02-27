@@ -72,11 +72,15 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
 	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
 	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
+	bugPlanSkillPath := filepath.Join(".claude", "skills", "human-bug-plan", "SKILL.md")
+	bugAnalyzerAgentPath := filepath.Join(".claude", "agents", "human-bug-analyzer.md")
 
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 	assert.Equal(t, string(agentContent), string(fw.files[agentPath]))
 	assert.Equal(t, string(readySkillContent), string(fw.files[readySkillPath]))
 	assert.Equal(t, string(readyAgentContent), string(fw.files[readyAgentPath]))
+	assert.Equal(t, string(bugPlanSkillContent), string(fw.files[bugPlanSkillPath]))
+	assert.Equal(t, string(bugAnalyzerAgentContent), string(fw.files[bugAnalyzerAgentPath]))
 }
 
 func TestInstall_SkipsUnchangedFiles(t *testing.T) {
@@ -86,10 +90,14 @@ func TestInstall_SkipsUnchangedFiles(t *testing.T) {
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
 	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
 	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
+	bugPlanSkillPath := filepath.Join(".claude", "skills", "human-bug-plan", "SKILL.md")
+	bugAnalyzerAgentPath := filepath.Join(".claude", "agents", "human-bug-analyzer.md")
 	fw.files[skillPath] = skillContent
 	fw.files[agentPath] = agentContent
 	fw.files[readySkillPath] = readySkillContent
 	fw.files[readyAgentPath] = readyAgentContent
+	fw.files[bugPlanSkillPath] = bugPlanSkillContent
+	fw.files[bugAnalyzerAgentPath] = bugAnalyzerAgentContent
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
@@ -124,9 +132,11 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 
 	skillDir := filepath.Join(".claude", "skills", "human-plan")
 	readySkillDir := filepath.Join(".claude", "skills", "human-ready")
+	bugPlanSkillDir := filepath.Join(".claude", "skills", "human-bug-plan")
 	agentDir := filepath.Join(".claude", "agents")
 	assert.True(t, fw.dirs[skillDir], "expected plan skill parent directory to be created")
 	assert.True(t, fw.dirs[readySkillDir], "expected ready skill parent directory to be created")
+	assert.True(t, fw.dirs[bugPlanSkillDir], "expected bug-plan skill parent directory to be created")
 	assert.True(t, fw.dirs[agentDir], "expected agent parent directory to be created")
 }
 

@@ -22,6 +22,12 @@ var readySkillContent []byte
 //go:embed embed/human-ready-agent.md
 var readyAgentContent []byte
 
+//go:embed embed/human-bug-plan-skill.md
+var bugPlanSkillContent []byte
+
+//go:embed embed/human-bug-analyzer-agent.md
+var bugAnalyzerAgentContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -68,6 +74,8 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: agentContent, relPath: filepath.Join("agents", "human-planner.md")},
 		{content: readySkillContent, relPath: filepath.Join("skills", "human-ready", "SKILL.md")},
 		{content: readyAgentContent, relPath: filepath.Join("agents", "human-ready.md")},
+		{content: bugPlanSkillContent, relPath: filepath.Join("skills", "human-bug-plan", "SKILL.md")},
+		{content: bugAnalyzerAgentContent, relPath: filepath.Join("agents", "human-bug-analyzer.md")},
 	}
 
 	for _, f := range files {
