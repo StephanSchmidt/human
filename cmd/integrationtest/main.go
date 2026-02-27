@@ -38,16 +38,10 @@ func main() {
 
 	ran := 0
 
-	// ── Jira ────────────────────────────────────────
+	// Jira has extra args (issue type), so it is handled separately.
 	if p := os.Getenv("HUMAN_TEST_JIRA_PROJECT"); p != "" {
-		trackerName := os.Getenv("HUMAN_TEST_JIRA_TRACKER")
-		if trackerName == "" {
-			trackerName = "amazingcto"
-		}
-		issueType := os.Getenv("HUMAN_TEST_JIRA_TYPE")
-		if issueType == "" {
-			issueType = "Task"
-		}
+		trackerName := envOrDefault("HUMAN_TEST_JIRA_TRACKER", "amazingcto")
+		issueType := envOrDefault("HUMAN_TEST_JIRA_TYPE", "Task")
 		runTracker(trackerTest{
 			name: "jira", tracker: trackerName, project: p,
 			create: []string{"--type", issueType},
@@ -55,40 +49,25 @@ func main() {
 		ran++
 	}
 
-	// ── Linear ──────────────────────────────────────
-	if p := os.Getenv("HUMAN_TEST_LINEAR_PROJECT"); p != "" {
-		trackerName := os.Getenv("HUMAN_TEST_LINEAR_TRACKER")
-		if trackerName == "" {
-			trackerName = "work"
-		}
-		runTracker(trackerTest{
-			name: "linear", tracker: trackerName, project: p,
-		})
-		ran++
+	// Standard trackers: env prefix → (name, default tracker).
+	standardTrackers := []struct {
+		envPrefix      string
+		name           string
+		defaultTracker string
+	}{
+		{"LINEAR", "linear", "work"},
+		{"GITLAB", "gitlab", "human"},
+		{"AZURE", "azuredevops", "human"},
+		{"SHORTCUT", "shortcut", "shortcut"},
 	}
-
-	// ── GitLab ──────────────────────────────────────
-	if p := os.Getenv("HUMAN_TEST_GITLAB_PROJECT"); p != "" {
-		trackerName := os.Getenv("HUMAN_TEST_GITLAB_TRACKER")
-		if trackerName == "" {
-			trackerName = "human"
+	for _, st := range standardTrackers {
+		if p := os.Getenv("HUMAN_TEST_" + st.envPrefix + "_PROJECT"); p != "" {
+			trackerName := envOrDefault("HUMAN_TEST_"+st.envPrefix+"_TRACKER", st.defaultTracker)
+			runTracker(trackerTest{
+				name: st.name, tracker: trackerName, project: p,
+			})
+			ran++
 		}
-		runTracker(trackerTest{
-			name: "gitlab", tracker: trackerName, project: p,
-		})
-		ran++
-	}
-
-	// ── Azure DevOps ───────────────────────────────
-	if p := os.Getenv("HUMAN_TEST_AZURE_PROJECT"); p != "" {
-		trackerName := os.Getenv("HUMAN_TEST_AZURE_TRACKER")
-		if trackerName == "" {
-			trackerName = "human"
-		}
-		runTracker(trackerTest{
-			name: "azuredevops", tracker: trackerName, project: p,
-		})
-		ran++
 	}
 
 	// ── Summary ─────────────────────────────────────
@@ -122,7 +101,7 @@ func runTracker(t trackerTest) {
 	}
 
 	// 1. Create a ticket
-	section("issue create")
+	section(t.name, "issue create")
 	createArgs := []string{"issue", "create", "--project", t.project, "--description", "automated integration test"}
 	createArgs = append(createArgs, t.create...)
 	createArgs = append(createArgs, summary)
@@ -136,7 +115,7 @@ func runTracker(t trackerTest) {
 	fmt.Printf("  created %s\n", createdKey)
 
 	// 2. Add a comment
-	section("issue comment add")
+	section(t.name, "issue comment add")
 	addOut, ok := run("issue comment add",
 		"issue", "comment", "add", createdKey, comment)
 
@@ -146,7 +125,7 @@ func runTracker(t trackerTest) {
 	}
 
 	// 3. Read the ticket back — verify summary appears
-	section("issue get")
+	section(t.name, "issue get")
 	getOut, ok := run("issue get",
 		"issue", "get", createdKey)
 	if ok {
@@ -155,7 +134,7 @@ func runTracker(t trackerTest) {
 	}
 
 	// 4. Read comments back — verify our comment appears
-	section("issue comment list")
+	section(t.name, "issue comment list")
 	listCommentsOut, ok := run("issue comment list",
 		"issue", "comment", "list", createdKey)
 	if ok {
@@ -165,7 +144,7 @@ func runTracker(t trackerTest) {
 	// 5. List all tickets — verify the created ticket is in there.
 	//    Some trackers (Jira) have eventual-consistency search indexes,
 	//    so retry a few times before giving up.
-	section("issues list")
+	section(t.name, "issues list")
 	const maxAttempts = 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		listOut, ok := run("issues list",
@@ -199,7 +178,7 @@ func runTracker(t trackerTest) {
 	}
 
 	// 6. Delete the ticket
-	section("issue delete")
+	section(t.name, "issue delete")
 	_, ok = run("issue delete",
 		"issue", "delete", createdKey)
 	if ok {
@@ -208,6 +187,13 @@ func runTracker(t trackerTest) {
 }
 
 // ── Helpers ─────────────────────────────────────────
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 func mustRun(desc string, args ...string) (string, bool) {
 	cmd := exec.Command(bin, args...) // #nosec G204 -- integration test intentionally runs the built binary
@@ -244,8 +230,8 @@ func assertContains(desc, haystack, needle string) {
 
 // ── Reporting ───────────────────────────────────────
 
-func section(name string) {
-	fmt.Printf("\n=== %s ===\n", name)
+func section(tracker, name string) {
+	fmt.Printf("\n=== %s: %s ===\n", tracker, name)
 }
 
 func pass(desc string) {
