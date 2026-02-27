@@ -555,7 +555,7 @@ func auditLogPath() string {
 		return filepath.Join(".", ".human", "audit.log")
 	}
 	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o755)
+	_ = os.MkdirAll(dir, 0o750)
 	return filepath.Join(dir, "audit.log")
 }
 

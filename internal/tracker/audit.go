@@ -31,7 +31,7 @@ type AuditProvider struct {
 // NewAuditProvider creates an AuditProvider that delegates to inner and appends
 // audit entries to the file at logPath. The file is created if it does not exist.
 func NewAuditProvider(inner Provider, name, kind, logPath string) (*AuditProvider, error) {
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- logPath is built by auditLogPath(), not user input
 	if err != nil {
 		return nil, err
 	}
