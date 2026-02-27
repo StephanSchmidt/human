@@ -1,0 +1,730 @@
+package shortcut
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stephanschmidt/human/internal/tracker"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// errDoer is a mock HTTPDoer that returns a fixed error.
+type errDoer struct {
+	err error
+}
+
+func (d *errDoer) Do(*http.Request) (*http.Response, error) {
+	return nil, d.err
+}
+
+// nilDoer is a mock HTTPDoer that returns a nil response.
+type nilDoer struct{}
+
+func (*nilDoer) Do(*http.Request) (*http.Response, error) {
+	return nil, nil
+}
+
+func TestDoRequest_networkError(t *testing.T) {
+	client := New("https://api.app.shortcut.com", "tok-test")
+	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
+
+	_, err := client.GetIssue(context.Background(), "1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requesting Shortcut")
+}
+
+func TestDoRequest_nilResponse(t *testing.T) {
+	client := New("https://api.app.shortcut.com", "tok-test")
+	client.SetHTTPDoer(&nilDoer{})
+
+	_, err := client.GetIssue(context.Background(), "1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil response")
+}
+
+func TestDoRequest_invalidBaseURL(t *testing.T) {
+	client := New("ftp://api.app.shortcut.com", "tok-test")
+
+	_, err := client.GetIssue(context.Background(), "1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scheme must be http or https")
+}
+
+func TestListIssues_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+
+		case "/api/v3/groups/grp-uuid-1/stories":
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "tok-test", r.Header.Get("Shortcut-Token"))
+
+			_, _ = fmt.Fprint(w, `[
+				{"id":1,"name":"Bug report","story_type":"bug","workflow_state_id":500,"owner_ids":["uuid-alice"],"requested_by_id":"uuid-bob","description":""},
+				{"id":2,"name":"Feature request","story_type":"feature","workflow_state_id":501,"owner_ids":[],"requested_by_id":"","description":""},
+				{"id":3,"name":"Old done item","story_type":"chore","workflow_state_id":502,"owner_ids":[],"requested_by_id":"","description":""}
+			]`)
+
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+
+		case "/api/v3/members/uuid-alice":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-alice","profile":{"name":"Alice Smith","display_name":"Alice"}}`)
+
+		case "/api/v3/members/uuid-bob":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-bob","profile":{"name":"Bob Jones","display_name":"Bob"}}`)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 50,
+	})
+
+	require.NoError(t, err)
+	// "Done" story filtered out by default
+	require.Len(t, issues, 2)
+
+	assert.Equal(t, "1", issues[0].Key)
+	assert.Equal(t, "Bug report", issues[0].Summary)
+	assert.Equal(t, "To Do", issues[0].Status)
+	assert.Equal(t, "bug", issues[0].Type)
+	assert.Equal(t, "Alice", issues[0].Assignee)
+	assert.Equal(t, "Bob", issues[0].Reporter)
+
+	assert.Equal(t, "2", issues[1].Key)
+	assert.Equal(t, "Feature request", issues[1].Summary)
+	assert.Equal(t, "In Progress", issues[1].Status)
+	assert.Equal(t, "", issues[1].Assignee)
+	assert.Equal(t, "", issues[1].Reporter)
+}
+
+func TestListIssues_all(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+
+		case "/api/v3/groups/grp-uuid-1/stories":
+			_, _ = fmt.Fprint(w, `[
+				{"id":1,"name":"Active item","story_type":"feature","workflow_state_id":500,"owner_ids":[],"requested_by_id":""},
+				{"id":2,"name":"Done item","story_type":"feature","workflow_state_id":502,"owner_ids":[],"requested_by_id":""},
+				{"id":3,"name":"Archived item","story_type":"chore","workflow_state_id":500,"archived":true,"owner_ids":[],"requested_by_id":""}
+			]`)
+
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	// IncludeAll=true: all 3 stories returned
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 50,
+		IncludeAll: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, issues, 3)
+
+	// IncludeAll=false (default): only active story returned
+	client2 := New(srv.URL, "tok-test")
+	filtered, err := client2.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 50,
+	})
+	require.NoError(t, err)
+	require.Len(t, filtered, 1)
+	assert.Equal(t, "Active item", filtered[0].Summary)
+}
+
+func TestListIssues_empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+		case "/api/v3/groups/grp-uuid-1/stories":
+			_, _ = fmt.Fprint(w, `[]`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 10,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+}
+
+func TestListIssues_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListIssues_groupNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Other"}]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "Human",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group not found")
+}
+
+func TestListIssues_missingProject(t *testing.T) {
+	client := New("http://localhost", "tok-test")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project is required")
+}
+
+func TestGetIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/stories/42":
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "tok-test", r.Header.Get("Shortcut-Token"))
+
+			_, _ = fmt.Fprint(w, `{
+				"id": 42,
+				"name": "The answer",
+				"description": "## Description\n\nThis is markdown.",
+				"story_type": "feature",
+				"workflow_state_id": 500,
+				"app_url": "https://app.shortcut.com/workspace/story/42",
+				"owner_ids": ["uuid-alice"],
+				"requested_by_id": "uuid-bob"
+			}`)
+
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"In Progress","type":"started"}
+			]}]`)
+
+		case "/api/v3/members/uuid-alice":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-alice","profile":{"name":"Alice","display_name":"Alice"}}`)
+
+		case "/api/v3/members/uuid-bob":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-bob","profile":{"name":"Bob","display_name":"Bob"}}`)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issue, err := client.GetIssue(context.Background(), "42")
+
+	require.NoError(t, err)
+	assert.Equal(t, "42", issue.Key)
+	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "In Progress", issue.Status)
+	assert.Equal(t, "feature", issue.Type)
+	assert.Equal(t, "Alice", issue.Assignee)
+	assert.Equal(t, "Bob", issue.Reporter)
+	assert.Equal(t, "## Description\n\nThis is markdown.", issue.Description)
+}
+
+func TestGetIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.GetIssue(context.Background(), "42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "tok-test")
+	_, err := client.GetIssue(context.Background(), "not-a-number")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid story ID")
+}
+
+func TestCreateIssue_happy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"}
+			]}]`)
+
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"},{"id":"grp-uuid-2","name":"Other"}]`)
+
+		case "/api/v3/stories":
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"id":99,"name":"New story","description":"Some description","story_type":"feature","workflow_state_id":500}`)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project:     "Human",
+		Summary:     "New story",
+		Description: "Some description",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "99", issue.Key)
+	assert.Equal(t, "Human", issue.Project)
+	assert.Equal(t, "New story", issue.Summary)
+	assert.Equal(t, "Some description", issue.Description)
+
+	assert.Equal(t, "New story", gotBody["name"])
+	assert.Equal(t, "Some description", gotBody["description"])
+	assert.Equal(t, float64(500), gotBody["workflow_state_id"])
+	assert.Equal(t, "grp-uuid-1", gotBody["group_id"])
+}
+
+func TestCreateIssue_withoutDescription(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"}
+			]}]`)
+
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+
+		case "/api/v3/stories":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"id":100,"name":"No desc","story_type":"feature","workflow_state_id":500}`)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "Human",
+		Summary: "No desc",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "100", issue.Key)
+	// Only name, no description
+	assert.Equal(t, "No desc", gotBody["name"])
+	_, hasDesc := gotBody["description"]
+	assert.False(t, hasDesc)
+}
+
+func TestCreateIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"}
+			]}]`)
+		case "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "Human",
+		Summary: "Will fail",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDefaultWorkflowStateID(t *testing.T) {
+	fetchCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			fetchCount++
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	// First call fetches workflows and picks first "unstarted" state
+	id1, err := client.defaultWorkflowStateID(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(500), id1)
+
+	// Second call uses cached value
+	id2, err := client.defaultWorkflowStateID(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(500), id2)
+
+	// Workflows should only be fetched once
+	assert.Equal(t, 1, fetchCount)
+}
+
+func TestDeleteIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "/api/v3/stories/42", r.URL.Path)
+		assert.Equal(t, "tok-test", r.Header.Get("Shortcut-Token"))
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.DeleteIssue(context.Background(), "42")
+
+	require.NoError(t, err)
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.DeleteIssue(context.Background(), "42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDeleteIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "tok-test")
+	err := client.DeleteIssue(context.Background(), "badkey")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid story ID")
+}
+
+func TestAddComment_happy(t *testing.T) {
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/stories/42/comments":
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{
+				"id": 101,
+				"text": "Hello world",
+				"author_id": "uuid-alice",
+				"created_at": "2025-01-15T10:30:00Z",
+				"updated_at": "2025-01-15T10:30:00Z"
+			}`)
+
+		case "/api/v3/members/uuid-alice":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-alice","profile":{"name":"Alice","display_name":"Alice"}}`)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	comment, err := client.AddComment(context.Background(), "42", "Hello world")
+
+	require.NoError(t, err)
+	assert.Equal(t, "101", comment.ID)
+	assert.Equal(t, "Alice", comment.Author)
+	assert.Equal(t, "Hello world", comment.Body)
+	assert.False(t, comment.Created.IsZero())
+
+	assert.Equal(t, "Hello world", gotBody["text"])
+}
+
+func TestAddComment_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.AddComment(context.Background(), "42", "test")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAddComment_invalidKey(t *testing.T) {
+	client := New("http://localhost", "tok-test")
+	_, err := client.AddComment(context.Background(), "badkey", "test")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid story ID")
+}
+
+func TestListComments_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/stories/42/comments":
+			assert.Equal(t, http.MethodGet, r.Method)
+			_, _ = fmt.Fprint(w, `[
+				{"id": 101, "text": "First comment", "author_id": "uuid-alice", "created_at": "2025-01-15T10:30:00Z", "updated_at": "2025-01-15T10:30:00Z"},
+				{"id": 102, "text": "Second comment", "author_id": "uuid-bob", "created_at": "2025-01-16T11:00:00Z", "updated_at": "2025-01-16T11:00:00Z"}
+			]`)
+
+		case "/api/v3/members/uuid-alice":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-alice","profile":{"name":"Alice","display_name":"Alice"}}`)
+
+		case "/api/v3/members/uuid-bob":
+			_, _ = fmt.Fprint(w, `{"id":"uuid-bob","profile":{"name":"Bob","display_name":"Bob"}}`)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	comments, err := client.ListComments(context.Background(), "42")
+
+	require.NoError(t, err)
+	require.Len(t, comments, 2)
+
+	assert.Equal(t, "101", comments[0].ID)
+	assert.Equal(t, "Alice", comments[0].Author)
+	assert.Equal(t, "First comment", comments[0].Body)
+
+	assert.Equal(t, "102", comments[1].ID)
+	assert.Equal(t, "Bob", comments[1].Author)
+	assert.Equal(t, "Second comment", comments[1].Body)
+}
+
+func TestListComments_empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	comments, err := client.ListComments(context.Background(), "42")
+
+	require.NoError(t, err)
+	assert.Empty(t, comments)
+}
+
+func TestDoRequest_authHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "my-secret-token", r.Header.Get("Shortcut-Token"))
+		_, _ = fmt.Fprint(w, `{"id":1,"name":"Test","story_type":"feature","workflow_state_id":500,"owner_ids":[],"requested_by_id":""}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "my-secret-token")
+	// Pre-populate state cache to avoid extra requests.
+	client.states = map[int64]string{500: "To Do"}
+	client.stateTypes = map[int64]string{500: "unstarted"}
+	_, err := client.GetIssue(context.Background(), "1")
+
+	require.NoError(t, err)
+}
+
+func Test_parseStoryID(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		wantID  int64
+		wantErr string
+	}{
+		{name: "valid", key: "42", wantID: 42},
+		{name: "large number", key: "123456", wantID: 123456},
+		{name: "not a number", key: "abc", wantErr: "invalid story ID"},
+		{name: "empty", key: "", wantErr: "invalid story ID"},
+		{name: "float", key: "1.5", wantErr: "invalid story ID"},
+		{name: "negative", key: "-1", wantErr: "invalid story ID"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, err := parseStoryID(tt.key)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, id)
+		})
+	}
+}
+
+func TestResolveStateName_caching(t *testing.T) {
+	fetchCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			fetchCount++
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"}
+			]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	// First call fetches workflows
+	name1, err := client.resolveStateName(context.Background(), 500)
+	require.NoError(t, err)
+	assert.Equal(t, "To Do", name1)
+
+	// Second call uses cache
+	name2, err := client.resolveStateName(context.Background(), 501)
+	require.NoError(t, err)
+	assert.Equal(t, "In Progress", name2)
+
+	// Workflows should only be fetched once
+	assert.Equal(t, 1, fetchCount)
+
+	// Unknown state ID returns Unknown(id)
+	name3, err := client.resolveStateName(context.Background(), 999)
+	require.NoError(t, err)
+	assert.Equal(t, "Unknown(999)", name3)
+}
+
+func TestResolveMemberName_caching(t *testing.T) {
+	fetchCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/members/uuid-alice" {
+			fetchCount++
+			_, _ = fmt.Fprint(w, `{"id":"uuid-alice","profile":{"name":"Alice Smith","display_name":"Alice"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	// First call fetches member
+	name1, err := client.resolveMemberName(context.Background(), "uuid-alice")
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", name1)
+
+	// Second call uses cache
+	name2, err := client.resolveMemberName(context.Background(), "uuid-alice")
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", name2)
+
+	// Member should only be fetched once
+	assert.Equal(t, 1, fetchCount)
+
+	// Empty member ID returns empty string
+	name3, err := client.resolveMemberName(context.Background(), "")
+	require.NoError(t, err)
+	assert.Equal(t, "", name3)
+}
+
+func TestResolveMemberName_fallbackToName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"id":"uuid-x","profile":{"name":"Full Name","display_name":""}}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	name, err := client.resolveMemberName(context.Background(), "uuid-x")
+	require.NoError(t, err)
+	assert.Equal(t, "Full Name", name)
+}
