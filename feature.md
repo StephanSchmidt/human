@@ -7,6 +7,8 @@
   - GitHub — issue keys `owner/repo#<number>` (e.g. `octocat/hello-world#42`), project keys `owner/repo`
   - GitLab — issue keys `namespace/project#<IID>` (e.g. `mygroup/myproject#42`), project keys `namespace/project`
   - Linear — issue keys `<TEAM>-<number>` (e.g. `ENG-123`), project keys uppercase (e.g. `ENG`)
+  - Azure DevOps — issue keys `<Project>/<ID>` (e.g. `Human/42`), project keys are project names
+  - Shortcut — issue keys are numeric story IDs (e.g. `123`), project keys are project names
 - **Auto-detection** — tracker type is inferred from issue key format when possible (GitHub keys containing `/` and `#` are globally unique; other trackers require `--tracker` when multiple types are configured)
 - **Commands**
   - `issues list` — list issues for a project (requires `--project`)

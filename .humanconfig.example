@@ -18,3 +18,8 @@ linears:
   - name: work
     # url: https://api.linear.app  # optional, this is the default
     # token comes from env: export LINEAR_WORK_TOKEN=lin_xxx
+
+shortcuts:
+  - name: work
+    # url: https://api.app.shortcut.com  # optional, this is the default
+    # token comes from env: export SHORTCUT_WORK_TOKEN=xxx

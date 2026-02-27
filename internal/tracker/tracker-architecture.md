@@ -3,13 +3,19 @@
 ## Dependency Graph
 
 ```
-main.go ──→ tracker  (Provider, Instance, Resolve)
-main.go ──→ jira     ──→ tracker  (Instance)
-                     ──→ config   (UnmarshalSection)
-main.go ──→ github   ──→ tracker  (Instance)
-                     ──→ config   (UnmarshalSection)
-main.go ──→ linear   ──→ tracker  (Instance)
-                     ──→ config   (UnmarshalSection)
+main.go ──→ tracker     (Provider, Instance, Resolve)
+main.go ──→ jira        ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
+main.go ──→ github      ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
+main.go ──→ gitlab      ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
+main.go ──→ linear      ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
+main.go ──→ azuredevops ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
+main.go ──→ shortcut    ──→ tracker  (Instance)
+                        ──→ config   (UnmarshalSection)
 ```
 
 `config` is a leaf package — no tracker types, no provider knowledge.
