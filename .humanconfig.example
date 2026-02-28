@@ -2,24 +2,29 @@ jiras:
   - name: myorg
     url: https://yourorg.atlassian.net
     user: you@example.com
+    description: "Product backlog and sprint planning for the main product"
     # key comes from env: export JIRA_MYORG_KEY=your-api-token
 
 githubs:
   - name: personal
+    description: "Open-source side projects and personal repos"
     # url: https://api.github.com  # optional, this is the default
     # token comes from env: export GITHUB_PERSONAL_TOKEN=ghp_xxx
 
 gitlabs:
   - name: work
+    description: "Internal engineering projects and CI/CD pipelines"
     # url: https://gitlab.com  # optional, this is the default
     # token comes from env: export GITLAB_WORK_TOKEN=glpat-xxx
 
 linears:
   - name: work
+    description: "Engineering team issue tracking and roadmap"
     # url: https://api.linear.app  # optional, this is the default
     # token comes from env: export LINEAR_WORK_TOKEN=lin_xxx
 
 shortcuts:
   - name: work
+    description: "Product development stories and epics"
     # url: https://api.app.shortcut.com  # optional, this is the default
     # token comes from env: export SHORTCUT_WORK_TOKEN=xxx

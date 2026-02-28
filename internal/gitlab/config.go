@@ -10,9 +10,10 @@ import (
 
 // Config holds the configuration for a single GitLab instance.
 type Config struct {
-	Name  string `mapstructure:"name"`
-	URL   string `mapstructure:"url"`
-	Token string `mapstructure:"token"`
+	Name        string `mapstructure:"name"`
+	URL         string `mapstructure:"url"`
+	Token       string `mapstructure:"token"`
+	Description string `mapstructure:"description"`
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -48,10 +49,11 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 		}
 
 		instances = append(instances, tracker.Instance{
-			Name:     cfg.Name,
-			Kind:     "gitlab",
-			URL:      cfg.URL,
-			Provider: New(cfg.URL, cfg.Token),
+			Name:        cfg.Name,
+			Kind:        "gitlab",
+			URL:         cfg.URL,
+			Description: cfg.Description,
+			Provider:    New(cfg.URL, cfg.Token),
 		})
 	}
 	return instances, nil

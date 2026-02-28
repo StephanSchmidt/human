@@ -64,10 +64,11 @@ type TrackerCmd struct {
 
 // trackerEntry is the JSON output structure for a single tracker instance.
 type trackerEntry struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	URL  string `json:"url"`
-	User string `json:"user"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	URL         string `json:"url"`
+	User        string `json:"user"`
+	Description string `json:"description"`
 }
 
 // TrackerListCmd prints all configured tracker instances.
@@ -90,7 +91,7 @@ func (cmd *TrackerListCmd) Run() error {
 
 	entries := make([]trackerEntry, len(instances))
 	for i, inst := range instances {
-		entries[i] = trackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User}
+		entries[i] = trackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Description: inst.Description}
 	}
 
 	if cmd.Table {
@@ -112,9 +113,9 @@ func printTrackerTable(out io.Writer, entries []trackerEntry) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER")
+	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER\tDESCRIPTION")
 	for _, e := range entries {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User, e.Description)
 	}
 	return w.Flush()
 }
@@ -311,6 +312,13 @@ func (cmd *DeleteCmd) Run() error {
 
 var defaultHelpPrinter = kong.DefaultHelpPrinter
 
+// helpInstanceLoader is the function used by helpPrinter to load tracker
+// instances.  It defaults to loadAllInstances(".") and can be overridden
+// in tests.
+var helpInstanceLoader = func() ([]tracker.Instance, error) {
+	return loadAllInstances(".")
+}
+
 func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	if err := defaultHelpPrinter(options, ctx); err != nil {
 		return err
@@ -322,7 +330,35 @@ func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
 	}
 
 	printExamples(ctx.Stdout)
+	printConnectedTrackers(ctx.Stdout)
 	return nil
+}
+
+// printConnectedTrackers appends a "Connected trackers:" section to the help
+// output.  Errors are silently ignored so that help always works.
+func printConnectedTrackers(w io.Writer) {
+	instances, err := helpInstanceLoader()
+	if err != nil {
+		return
+	}
+	if len(instances) == 0 {
+		_, _ = fmt.Fprintln(w, "Connected trackers: none")
+		_, _ = fmt.Fprintln(w, "  Configure trackers in .humanconfig.yaml")
+		return
+	}
+	_, _ = fmt.Fprintln(w, "Connected trackers:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, inst := range instances {
+		line := fmt.Sprintf("  %s\t%s\t%s", inst.Name, inst.Kind, inst.URL)
+		if inst.User != "" {
+			line += "\t" + inst.User
+		}
+		if inst.Description != "" {
+			line += "\t" + inst.Description
+		}
+		_, _ = fmt.Fprintln(tw, line)
+	}
+	_ = tw.Flush()
 }
 
 func printExamples(w io.Writer) {

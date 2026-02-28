@@ -10,10 +10,11 @@ import (
 
 // Config holds the configuration for a single Jira instance.
 type Config struct {
-	Name string `mapstructure:"name"`
-	URL  string `mapstructure:"url"`
-	User string `mapstructure:"user"`
-	Key  string `mapstructure:"key"`
+	Name        string `mapstructure:"name"`
+	URL         string `mapstructure:"url"`
+	User        string `mapstructure:"user"`
+	Key         string `mapstructure:"key"`
+	Description string `mapstructure:"description"`
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -45,11 +46,12 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 		}
 
 		instances = append(instances, tracker.Instance{
-			Name:     cfg.Name,
-			Kind:     "jira",
-			URL:      cfg.URL,
-			User:     cfg.User,
-			Provider: New(cfg.URL, cfg.User, cfg.Key),
+			Name:        cfg.Name,
+			Kind:        "jira",
+			URL:         cfg.URL,
+			User:        cfg.User,
+			Description: cfg.Description,
+			Provider:    New(cfg.URL, cfg.User, cfg.Key),
 		})
 	}
 	return instances, nil

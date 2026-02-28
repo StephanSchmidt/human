@@ -28,11 +28,17 @@ func TestAuditLogPath(t *testing.T) {
 
 func TestHelpPrinter_RootLevel(t *testing.T) {
 	orig := defaultHelpPrinter
-	t.Cleanup(func() { defaultHelpPrinter = orig })
+	origLoader := helpInstanceLoader
+	t.Cleanup(func() { defaultHelpPrinter = orig; helpInstanceLoader = origLoader })
 
 	defaultHelpPrinter = func(_ kong.HelpOptions, ctx *kong.Context) error {
 		_, _ = fmt.Fprintln(ctx.Stdout, "default help")
 		return nil
+	}
+	helpInstanceLoader = func() ([]tracker.Instance, error) {
+		return []tracker.Instance{
+			{Name: "work", Kind: "jira", URL: "https://work.atlassian.net", User: "me@work.com", Description: "Sprint planning"},
+		}, nil
 	}
 
 	var buf bytes.Buffer
@@ -46,6 +52,10 @@ func TestHelpPrinter_RootLevel(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "default help")
 	assert.Contains(t, out, "Examples:")
+	assert.Contains(t, out, "Connected trackers:")
+	assert.Contains(t, out, "work")
+	assert.Contains(t, out, "jira")
+	assert.Contains(t, out, "Sprint planning")
 }
 
 func TestHelpPrinter_SubCommand(t *testing.T) {
@@ -126,6 +136,62 @@ func TestPrintExamples_startsWithBlankLine(t *testing.T) {
 	var buf bytes.Buffer
 	printExamples(&buf)
 	assert.True(t, strings.HasPrefix(buf.String(), "\n"), "output should start with a blank line separator")
+}
+
+func TestPrintConnectedTrackers_withInstances(t *testing.T) {
+	orig := helpInstanceLoader
+	t.Cleanup(func() { helpInstanceLoader = orig })
+
+	helpInstanceLoader = func() ([]tracker.Instance, error) {
+		return []tracker.Instance{
+			{Name: "work", Kind: "jira", URL: "https://work.atlassian.net", User: "me@work.com", Description: "Sprint planning"},
+			{Name: "personal", Kind: "github", URL: "https://api.github.com", Description: "OSS projects"},
+		}, nil
+	}
+
+	var buf bytes.Buffer
+	printConnectedTrackers(&buf)
+
+	out := buf.String()
+	assert.Contains(t, out, "Connected trackers:")
+	assert.Contains(t, out, "work")
+	assert.Contains(t, out, "jira")
+	assert.Contains(t, out, "https://work.atlassian.net")
+	assert.Contains(t, out, "me@work.com")
+	assert.Contains(t, out, "Sprint planning")
+	assert.Contains(t, out, "personal")
+	assert.Contains(t, out, "github")
+	assert.Contains(t, out, "OSS projects")
+}
+
+func TestPrintConnectedTrackers_empty(t *testing.T) {
+	orig := helpInstanceLoader
+	t.Cleanup(func() { helpInstanceLoader = orig })
+
+	helpInstanceLoader = func() ([]tracker.Instance, error) {
+		return nil, nil
+	}
+
+	var buf bytes.Buffer
+	printConnectedTrackers(&buf)
+
+	out := buf.String()
+	assert.Contains(t, out, "Connected trackers: none")
+	assert.Contains(t, out, ".humanconfig.yaml")
+}
+
+func TestPrintConnectedTrackers_error(t *testing.T) {
+	orig := helpInstanceLoader
+	t.Cleanup(func() { helpInstanceLoader = orig })
+
+	helpInstanceLoader = func() ([]tracker.Instance, error) {
+		return nil, fmt.Errorf("config error")
+	}
+
+	var buf bytes.Buffer
+	printConnectedTrackers(&buf)
+
+	assert.Empty(t, buf.String(), "errors should be silently ignored")
 }
 
 // --- mock provider ---
@@ -421,7 +487,7 @@ func TestPrintIssuesTable(t *testing.T) {
 }
 
 func TestTrackerEntry_JSONFields(t *testing.T) {
-	entry := trackerEntry{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice"}
+	entry := trackerEntry{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice", Description: "Sprint planning"}
 
 	data, err := json.Marshal(entry)
 	require.NoError(t, err)
@@ -436,6 +502,7 @@ func TestTrackerEntry_JSONFields(t *testing.T) {
 	assert.Equal(t, "jira", parsed["type"])
 	assert.Equal(t, "https://example.atlassian.net", parsed["url"])
 	assert.Equal(t, "alice", parsed["user"])
+	assert.Equal(t, "Sprint planning", parsed["description"])
 }
 
 // --- setProvider / setOutput tests ---
@@ -802,6 +869,7 @@ func TestTrackerListCmd_Run_JSON(t *testing.T) {
     url: https://work.atlassian.net
     user: me@work.com
     key: tok1
+    description: Sprint planning
 `)
 
 	var buf bytes.Buffer
@@ -813,6 +881,7 @@ func TestTrackerListCmd_Run_JSON(t *testing.T) {
 	assert.Contains(t, out, "// Configured issue trackers")
 	assert.Contains(t, out, `"name": "work"`)
 	assert.Contains(t, out, `"type": "jira"`)
+	assert.Contains(t, out, `"description": "Sprint planning"`)
 }
 
 func TestTrackerListCmd_Run_Table(t *testing.T) {
@@ -822,6 +891,7 @@ func TestTrackerListCmd_Run_Table(t *testing.T) {
     url: https://work.atlassian.net
     user: me@work.com
     key: tok1
+    description: Sprint planning
 `)
 
 	var buf bytes.Buffer
@@ -831,8 +901,10 @@ func TestTrackerListCmd_Run_Table(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "DESCRIPTION")
 	assert.Contains(t, out, "work")
 	assert.Contains(t, out, "jira")
+	assert.Contains(t, out, "Sprint planning")
 }
 
 func TestTrackerListCmd_Run_empty(t *testing.T) {
