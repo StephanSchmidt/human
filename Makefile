@@ -45,6 +45,9 @@ upgrade-deps:
 	go mod tidy
 	go tool gotestsum ./...
 
+tokens:
+	@find . -name '*.go' ! -path './vendor/*' -exec cat {} + | wc -w | awk '{printf "%d words (~%d tokens)\n", $$1, int($$1 * 1.3)}'
+
 release:
 	@test -z "$$(git status --porcelain)" || (echo "error: working tree is dirty" && exit 1)
 	@echo "Tagging $(VERSION)..."
