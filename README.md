@@ -97,35 +97,35 @@ Commands output JSON by default for easy piping to scripts and LLMs. Use `--tabl
 
 ```bash
 # List issues (JSON by default)
-human issues list --project=KAN                    # Jira
-human issues list --project=octocat/hello-world    # GitHub
-human issues list --project=mygroup/myproject      # GitLab
-human issues list --project=ENG                    # Linear
-human issues list --project=Human                  # Azure DevOps
-human issues list --project=MyProject              # Shortcut
+human jira issues list --project=KAN                    # Jira
+human github issues list --project=octocat/hello-world  # GitHub
+human gitlab issues list --project=mygroup/myproject    # GitLab
+human linear issues list --project=ENG                  # Linear
+human azuredevops issues list --project=Human           # Azure DevOps
+human shortcut issues list --project=MyProject          # Shortcut
 
 # Human-readable table
-human issues list --project=KAN --table
+human jira issues list --project=KAN --table
 
 # Get a single issue as markdown
-human issue get KAN-1
-human issue get octocat/hello-world#42
-human issue get mygroup/myproject#42
-human issue get ENG-123
-human issue get Human/42                           # Azure DevOps
-human issue get 123                                # Shortcut
+human jira issue get KAN-1
+human github issue get octocat/hello-world#42
+human gitlab issue get mygroup/myproject#42
+human linear issue get ENG-123
+human azuredevops issue get Human/42                    # Azure DevOps
+human shortcut issue get 123                            # Shortcut
 
 # Create an issue
-human issue create --project=ENG "Implement feature"
+human linear issue create --project=ENG "Implement feature"
 
 # Add a comment to an issue
-human issue comment add KAN-1 "This is done"
+human jira issue comment add KAN-1 "This is done"
 
 # List comments on an issue
-human issue comment list KAN-1
+human jira issue comment list KAN-1
 
 # Use a named tracker instance from .humanconfig.yaml
-human --tracker=work issues list --project=KAN
+human --tracker=work jira issues list --project=KAN
 ```
 
 ## Setup
