@@ -754,3 +754,58 @@ func TestInstanceFromFlags_noFlags(t *testing.T) {
 	inst := instanceFromFlags(cmd)
 	assert.Nil(t, inst)
 }
+
+// --- tracker find tests ---
+
+func TestRunTrackerFindWithInstances_JSON(t *testing.T) {
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", Provider: &mockProvider{
+			getIssueFn: func(_ context.Context, _ string) (*tracker.Issue, error) {
+				return &tracker.Issue{Key: "KAN-42"}, nil
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
+	require.NoError(t, err)
+
+	var result map[string]string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	assert.Equal(t, "jira", result["provider"])
+	assert.Equal(t, "KAN", result["project"])
+	assert.Equal(t, "KAN-42", result["key"])
+}
+
+func TestRunTrackerFindWithInstances_Table(t *testing.T) {
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", Provider: &mockProvider{
+			getIssueFn: func(_ context.Context, _ string) (*tracker.Issue, error) {
+				return &tracker.Issue{Key: "KAN-42"}, nil
+			},
+		}},
+	}
+
+	var buf bytes.Buffer
+	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, true)
+	require.NoError(t, err)
+
+	out := buf.String()
+	assert.Contains(t, out, "PROVIDER")
+	assert.Contains(t, out, "PROJECT")
+	assert.Contains(t, out, "KEY")
+	assert.Contains(t, out, "jira")
+	assert.Contains(t, out, "KAN")
+	assert.Contains(t, out, "KAN-42")
+}
+
+func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "github", Provider: &mockProvider{}},
+	}
+
+	var buf bytes.Buffer
+	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured tracker matches key format")
+}

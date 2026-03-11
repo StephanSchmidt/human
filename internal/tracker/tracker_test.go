@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,19 @@ import (
 
 // stubProvider satisfies Provider with no-op methods.
 type stubProvider struct{}
+
+// fakeProvider is a Provider whose GetIssue can be configured to succeed or fail.
+type fakeProvider struct {
+	stubProvider
+	getIssueErr error
+}
+
+func (f fakeProvider) GetIssue(_ context.Context, _ string) (*Issue, error) {
+	if f.getIssueErr != nil {
+		return nil, f.getIssueErr
+	}
+	return &Issue{Key: "found"}, nil
+}
 
 func (stubProvider) ListIssues(context.Context, ListOptions) ([]Issue, error)     { return nil, nil }
 func (stubProvider) GetIssue(context.Context, string) (*Issue, error)             { return nil, nil }
@@ -239,4 +253,125 @@ func TestResolve_keyHintNonGitHubSingleKind(t *testing.T) {
 	inst, err := Resolve("", instances, "KAN-1")
 	require.NoError(t, err)
 	assert.Equal(t, "work", inst.Name)
+}
+
+// --- DetectCandidateKinds tests ---
+
+func TestDetectCandidateKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want []string
+	}{
+		{name: "jira/linear key", key: "KAN-42", want: []string{"jira", "linear"}},
+		{name: "another jira/linear", key: "PROJ-1", want: []string{"jira", "linear"}},
+		{name: "github issue", key: "octocat/repo#42", want: []string{"github", "gitlab"}},
+		{name: "github repo", key: "octocat/repo", want: []string{"github", "gitlab"}},
+		{name: "azure devops", key: "Project/42", want: []string{"azuredevops"}},
+		{name: "numeric shortcut", key: "123", want: []string{"shortcut"}},
+		{name: "empty", key: "", want: nil},
+		{name: "unknown", key: "!!!invalid!!!", want: nil},
+		{name: "lowercase not jira", key: "kan-42", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectCandidateKinds(tt.key)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// --- ExtractProject tests ---
+
+func TestExtractProject(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{name: "jira key", key: "KAN-42", want: "KAN"},
+		{name: "linear key", key: "ENG-123", want: "ENG"},
+		{name: "github issue", key: "octocat/repo#42", want: "octocat/repo"},
+		{name: "github repo", key: "octocat/repo", want: "octocat/repo"},
+		{name: "azure devops", key: "Project/42", want: "Project"},
+		{name: "shortcut numeric", key: "123", want: ""},
+		{name: "unknown", key: "???", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ExtractProject(tt.key))
+		})
+	}
+}
+
+// --- FindTracker tests ---
+
+func TestFindTracker_singleConfigured(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	result, err := FindTracker(context.Background(), "KAN-42", instances)
+	require.NoError(t, err)
+	assert.Equal(t, "jira", result.Provider)
+	assert.Equal(t, "KAN", result.Project)
+	assert.Equal(t, "KAN-42", result.Key)
+}
+
+func TestFindTracker_ambiguousOneKind(t *testing.T) {
+	// Both Jira instances configured — still only one kind, no probe needed.
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+		{Name: "other", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	result, err := FindTracker(context.Background(), "KAN-42", instances)
+	require.NoError(t, err)
+	assert.Equal(t, "jira", result.Provider)
+}
+
+func TestFindTracker_ambiguousProbeSucceeds(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: fakeProvider{getIssueErr: fmt.Errorf("not found")}},
+		{Name: "team", Kind: "linear", Provider: fakeProvider{}}, // succeeds
+	}
+
+	result, err := FindTracker(context.Background(), "KAN-42", instances)
+	require.NoError(t, err)
+	assert.Equal(t, "linear", result.Provider)
+	assert.Equal(t, "KAN", result.Project)
+}
+
+func TestFindTracker_ambiguousProbeAllFail(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: fakeProvider{getIssueErr: fmt.Errorf("not found")}},
+		{Name: "team", Kind: "linear", Provider: fakeProvider{getIssueErr: fmt.Errorf("not found")}},
+	}
+
+	_, err := FindTracker(context.Background(), "KAN-42", instances)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured tracker recognized the key")
+}
+
+func TestFindTracker_noMatch(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "github", Provider: stubProvider{}},
+	}
+
+	// KAN-42 → jira/linear candidates, but only github configured
+	_, err := FindTracker(context.Background(), "KAN-42", instances)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured tracker matches key format")
+}
+
+func TestFindTracker_unrecognizedFormat(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	_, err := FindTracker(context.Background(), "!!!invalid", instances)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unrecognized key format")
 }

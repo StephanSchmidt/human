@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/stephanschmidt/human/errors"
@@ -15,6 +16,138 @@ var githubIssueRe = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#\d+$`)
 
 // githubRepoRe matches GitHub project keys like "owner/repo".
 var githubRepoRe = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
+
+// jiraLinearIssueRe matches Jira/Linear issue keys like "KAN-42" or "ENG-123".
+var jiraLinearIssueRe = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+
+// numericRe matches purely numeric keys like "123" (Shortcut).
+var numericRe = regexp.MustCompile(`^\d+$`)
+
+// azureDevOpsRe matches Azure DevOps work item keys like "Project/42".
+var azureDevOpsRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]*/\d+$`)
+
+// DetectCandidateKinds returns all tracker kinds whose key format matches the
+// given key. The order is deterministic: azuredevops is checked before
+// github/gitlab repo format since "Word/N" is a subset of "owner/repo".
+func DetectCandidateKinds(key string) []string {
+	if key == "" {
+		return nil
+	}
+
+	var kinds []string
+
+	if jiraLinearIssueRe.MatchString(key) {
+		kinds = append(kinds, "jira", "linear")
+	}
+
+	if githubIssueRe.MatchString(key) {
+		kinds = append(kinds, "github", "gitlab")
+	}
+
+	// Check azureDevOpsRe before githubRepoRe — "Project/42" matches both.
+	if azureDevOpsRe.MatchString(key) {
+		kinds = append(kinds, "azuredevops")
+	} else if githubRepoRe.MatchString(key) {
+		kinds = append(kinds, "github", "gitlab")
+	}
+
+	if numericRe.MatchString(key) {
+		kinds = append(kinds, "shortcut")
+	}
+
+	return kinds
+}
+
+// ExtractProject extracts the project identifier from a key.
+//
+//	"KAN-42"              → "KAN"
+//	"octocat/repo#42"     → "octocat/repo"
+//	"octocat/repo"        → "octocat/repo"
+//	"Project/42"          → "Project"
+//	"123"                 → ""
+func ExtractProject(key string) string {
+	if idx := strings.LastIndex(key, "#"); idx >= 0 {
+		return key[:idx]
+	}
+	if jiraLinearIssueRe.MatchString(key) {
+		return key[:strings.LastIndex(key, "-")]
+	}
+	if azureDevOpsRe.MatchString(key) {
+		return key[:strings.LastIndex(key, "/")]
+	}
+	if githubRepoRe.MatchString(key) {
+		return key
+	}
+	return ""
+}
+
+// FindResult holds the outcome of FindTracker.
+type FindResult struct {
+	Provider string `json:"provider"`
+	Project  string `json:"project"`
+	Key      string `json:"key"`
+}
+
+// FindTracker determines which configured tracker owns the given key.
+//
+// Resolution strategy:
+//  1. Match key format against regexes → candidate kinds
+//  2. Filter candidates against configured instances
+//  3. If one kind remains → return it (no API call)
+//  4. If ambiguous → probe each instance with GetIssue until one succeeds
+func FindTracker(ctx context.Context, key string, instances []Instance) (*FindResult, error) {
+	candidates := DetectCandidateKinds(key)
+	if len(candidates) == 0 {
+		return nil, errors.WithDetails("unrecognized key format", "key", key)
+	}
+
+	// Filter to kinds that are actually configured.
+	candidateSet := make(map[string]bool, len(candidates))
+	for _, k := range candidates {
+		candidateSet[k] = true
+	}
+
+	var matching []Instance
+	seenKinds := make(map[string]bool)
+	for _, inst := range instances {
+		if candidateSet[inst.Kind] {
+			matching = append(matching, inst)
+			seenKinds[inst.Kind] = true
+		}
+	}
+
+	if len(matching) == 0 {
+		return nil, errors.WithDetails("no configured tracker matches key format", "key", key)
+	}
+
+	// If all matching instances are the same kind, no ambiguity.
+	if len(seenKinds) == 1 {
+		kind := matching[0].Kind
+		return &FindResult{
+			Provider: kind,
+			Project:  ExtractProject(key),
+			Key:      key,
+		}, nil
+	}
+
+	// Ambiguous — probe each instance.
+	return probeInstances(ctx, key, matching)
+}
+
+// probeInstances tries GetIssue on each instance and returns the first success.
+func probeInstances(ctx context.Context, key string, instances []Instance) (*FindResult, error) {
+	for _, inst := range instances {
+		_, err := inst.Provider.GetIssue(ctx, key)
+		if err == nil {
+			return &FindResult{
+				Provider: inst.Kind,
+				Project:  ExtractProject(key),
+				Key:      key,
+			}, nil
+		}
+	}
+	return nil, errors.WithDetails("no configured tracker recognized the key", "key", key)
+}
 
 // ValidateURL checks that rawURL is a valid HTTP(S) URL.
 // This guards against SSRF by rejecting non-HTTP schemes.

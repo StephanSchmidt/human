@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,6 +78,57 @@ func printTrackerTable(out io.Writer, entries []trackerEntry) error {
 	for _, e := range entries {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User, e.Description)
 	}
+	return w.Flush()
+}
+
+// --- tracker find ---
+
+// findResultEntry is the JSON output structure for tracker find.
+type findResultEntry struct {
+	Provider string `json:"provider"`
+	Project  string `json:"project"`
+	Key      string `json:"key"`
+}
+
+func runTrackerFind(ctx context.Context, out io.Writer, dir, key string, table bool) error {
+	if dir == "" {
+		dir = "."
+	}
+	instances, err := loadAllInstances(dir)
+	if err != nil {
+		return err
+	}
+	return runTrackerFindWithInstances(ctx, out, key, instances, table)
+}
+
+func runTrackerFindWithInstances(ctx context.Context, out io.Writer, key string, instances []tracker.Instance, table bool) error {
+	result, err := tracker.FindTracker(ctx, key, instances)
+	if err != nil {
+		return err
+	}
+
+	entry := findResultEntry{
+		Provider: result.Provider,
+		Project:  result.Project,
+		Key:      result.Key,
+	}
+
+	if table {
+		return printFindTable(out, entry)
+	}
+	return printFindJSON(out, entry)
+}
+
+func printFindJSON(w io.Writer, entry findResultEntry) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(entry)
+}
+
+func printFindTable(out io.Writer, entry findResultEntry) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "PROVIDER\tPROJECT\tKEY")
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", entry.Provider, entry.Project, entry.Key)
 	return w.Flush()
 }
 
@@ -412,7 +464,18 @@ func buildTrackerCmd() *cobra.Command {
 	}
 	listCmd.Flags().BoolVar(&table, "table", false, "Output as human-readable table instead of JSON")
 
-	trackerCmd.AddCommand(listCmd)
+	var findTable bool
+	findCmd := &cobra.Command{
+		Use:   "find KEY",
+		Short: "Find which tracker owns a key",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTrackerFind(cmd.Context(), cmd.OutOrStdout(), ".", args[0], findTable)
+		},
+	}
+	findCmd.Flags().BoolVar(&findTable, "table", false, "Output as human-readable table instead of JSON")
+
+	trackerCmd.AddCommand(listCmd, findCmd)
 	return trackerCmd
 }
 
