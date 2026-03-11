@@ -12,12 +12,13 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-**Human in the loop —** Issue tracker CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut with output as JSON and markdown.
+**Human in the loop —** Issue tracker and tools CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Searches and reads content from Notion. Output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut** — no tool-switching for the AI
+- **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, and Notion** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
 - **Claude Code skills** turn PM tickets into implementation plans and bug analyses
 - **Definition of Ready checks** AI catches incomplete tickets before coding starts
+- **Notion integration** search workspace, read pages, query databases for context
 
 ### Why
 
@@ -126,6 +127,15 @@ human jira issue comment list KAN-1
 
 # Use a named tracker instance from .humanconfig.yaml
 human --tracker=work jira issues list --project=KAN
+
+# Notion — search, read pages, query databases
+human notion search "quarterly report"
+human notion page get <page-id>
+human notion databases list --table
+human notion database query <database-id> --table
+
+# Use a named Notion instance
+human notion --notion=work search "meeting notes"
 ```
 
 ## Setup
@@ -143,4 +153,27 @@ make build
 
 ## Configuration
 
-See [documentation.md](documentation.md) for configuration details including `.humanconfig.yaml` setup, environment variables, and settings resolution.
+Add trackers and tools to `.humanconfig.yaml`:
+
+```yaml
+# Issue trackers
+jiras:
+  - name: work
+    url: https://work.atlassian.net
+    user: me@work.com
+    key: your-api-token
+
+githubs:
+  - name: oss
+    token: ghp_abc123
+
+# Tools
+notions:
+  - name: work
+    token: ntn_abc123
+    description: Company workspace
+```
+
+Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
+
+See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
