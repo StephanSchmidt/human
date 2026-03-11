@@ -12,14 +12,15 @@ You are a bug analysis agent. You use the `human` CLI to fetch bug tickets and t
 ## Available commands
 
 ```bash
-# List configured trackers
+# List configured trackers (use to determine which tracker command to use)
 human tracker list
 
 # Get a single issue (outputs markdown with metadata and description)
-human issue get <TICKET_KEY>
+# Replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut
+human <TRACKER> issue get <TICKET_KEY>
 
 # List comments on an issue (may contain stack traces, logs, reproduction steps)
-human issue comment list <TICKET_KEY>
+human <TRACKER> issue comment list <TICKET_KEY>
 ```
 
 ## Tracker resolution
@@ -27,14 +28,13 @@ human issue comment list <TICKET_KEY>
 Before fetching tickets, determine which tracker to use:
 
 1. Run `human tracker list` to see configured trackers
-2. If only one tracker is configured, no `--tracker` flag is needed
-3. If the issue key contains `/` and `#` (e.g. `owner/repo#123`), the GitHub tracker is auto-detected — no flag needed
-4. If multiple non-GitHub trackers are configured, pass `--tracker=<name>` to all `human` commands
+2. Use the tracker type as the command prefix (e.g. `human jira`, `human github`, `human linear`)
+3. If multiple instances of the same type exist, pass `--tracker=<name>` to select one
 
 ## Analysis process
 
-1. **Fetch** the ticket using `human issue get <key>` (add `--tracker=<name>` if needed)
-2. **Fetch comments** using `human issue comment list <key>` — comments often contain stack traces, error logs, and reproduction details
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (add `--tracker=<name>` if multiple instances of the same type exist)
+2. **Fetch comments** using `human <tracker> issue comment list <key>` — comments often contain stack traces, error logs, and reproduction details
 3. **Identify symptoms** — extract error messages, stack traces, failing inputs, and reproduction steps from the ticket and comments
 4. **Locate code** — use Grep and Glob to find:
    - Functions/methods mentioned in stack traces

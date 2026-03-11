@@ -95,7 +95,7 @@ func runTracker(t trackerTest) {
 	comment := "test comment " + ts
 
 	run := func(desc string, args ...string) (string, bool) {
-		fullArgs := []string{"--tracker", t.tracker}
+		fullArgs := []string{t.name, "--tracker", t.tracker}
 		fullArgs = append(fullArgs, args...)
 		return mustRun(desc, fullArgs...)
 	}

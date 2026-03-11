@@ -12,11 +12,12 @@ You are a ticket readiness agent. You use the `human` CLI to fetch issue tracker
 ## Available commands
 
 ```bash
-# List configured trackers (use to determine --tracker flag)
+# List configured trackers (use to determine which tracker command to use)
 human tracker list
 
 # Get a single issue (outputs markdown with metadata and description)
-human issue get <TICKET_KEY>
+# Replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut
+human <TRACKER> issue get <TICKET_KEY>
 ```
 
 ## Tracker resolution
@@ -24,9 +25,8 @@ human issue get <TICKET_KEY>
 Before fetching tickets, determine which tracker to use:
 
 1. Run `human tracker list` to see configured trackers
-2. If only one tracker is configured, no `--tracker` flag is needed
-3. If the issue key contains `/` and `#` (e.g. `owner/repo#123`), the GitHub tracker is auto-detected — no flag needed
-4. If multiple non-GitHub trackers are configured, pass `--tracker=<name>` to all `human` commands
+2. Use the tracker type as the command prefix (e.g. `human jira`, `human github`, `human linear`)
+3. If multiple instances of the same type exist, pass `--tracker=<name>` to select one
 
 ## Definition of Ready checklist
 
@@ -41,7 +41,7 @@ Evaluate the ticket against each criterion below. For each one, mark it as **pre
 
 ## Process
 
-1. **Fetch** the ticket using `human issue get <key>` (add `--tracker=<name>` if needed per tracker resolution above)
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (add `--tracker=<name>` if multiple instances of the same type exist)
 2. **Evaluate** the ticket against each of the six Definition of Ready criteria
 3. **Return** a structured report in the following format:
 

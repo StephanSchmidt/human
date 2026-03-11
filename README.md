@@ -79,6 +79,12 @@ Or with Homebrew:
 brew install stephanschmidt/tap/human
 ```
 
+Or with [mise](https://mise.jdx.dev):
+
+```bash
+mise use -g github:StephanSchmidt/human
+```
+
 Or with Go:
 
 ```bash

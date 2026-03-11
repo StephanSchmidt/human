@@ -1,18 +1,16 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/tabwriter"
 
-	"github.com/alecthomas/kong"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/cobra"
 
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/azuredevops"
@@ -31,36 +29,7 @@ var (
 	date    = "unknown"
 )
 
-// CLI is the top-level Kong struct with global flags.
-type CLI struct {
-	Version       kong.VersionFlag `kong:"help='Print version information'"`
-	TrackerName   string           `kong:"name='tracker',help='Named tracker from .humanconfig (resolves type automatically)'"`
-	JiraKey       string           `kong:"env='JIRA_KEY',help='Jira API token'"`
-	JiraURL       string           `kong:"env='JIRA_URL',help='Jira base URL'"`
-	JiraUser      string           `kong:"env='JIRA_USER',help='Jira user email'"`
-	GitHubToken   string           `kong:"env='GITHUB_TOKEN',help='GitHub personal access token'"`
-	GitHubURL     string           `kong:"env='GITHUB_URL',help='GitHub API base URL'"`
-	GitLabToken   string           `kong:"env='GITLAB_TOKEN',help='GitLab private token'"`
-	GitLabURL     string           `kong:"env='GITLAB_URL',help='GitLab base URL'"`
-	LinearToken   string           `kong:"env='LINEAR_TOKEN',help='Linear API key'"`
-	LinearURL     string           `kong:"env='LINEAR_URL',help='Linear API base URL'"`
-	AzureToken    string           `kong:"env='AZURE_TOKEN',help='Azure DevOps PAT token'"`
-	AzureURL      string           `kong:"env='AZURE_URL',help='Azure DevOps base URL'"`
-	AzureOrg      string           `kong:"env='AZURE_ORG',help='Azure DevOps organization'"`
-	ShortcutToken string           `kong:"env='SHORTCUT_TOKEN',help='Shortcut API token'"`
-	ShortcutURL   string           `kong:"env='SHORTCUT_URL',help='Shortcut API base URL'"`
-	Issues        IssuesCmd        `kong:"cmd,help='Bulk issue operations'"`
-	Issue         IssueCmd         `kong:"cmd,help='Single issue operations'"`
-	Install       InstallCmd       `kong:"cmd,help='Install agent integrations'"`
-	Tracker       TrackerCmd       `kong:"cmd,help='Manage tracker connections'"`
-}
-
 // --- tracker list ---
-
-// TrackerCmd groups tracker subcommands.
-type TrackerCmd struct {
-	List TrackerListCmd `kong:"cmd,help='List configured tracker instances (JSON)'"`
-}
 
 // trackerEntry is the JSON output structure for a single tracker instance.
 type trackerEntry struct {
@@ -71,16 +40,7 @@ type trackerEntry struct {
 	Description string `json:"description"`
 }
 
-// TrackerListCmd prints all configured tracker instances.
-type TrackerListCmd struct {
-	Table bool      `kong:"help='Output as human-readable table instead of JSON'"`
-	Dir   string    `kong:"-"`
-	Out   io.Writer `kong:"-"`
-}
-
-// Run lists configured tracker instances.
-func (cmd *TrackerListCmd) Run() error {
-	dir := cmd.Dir
+func runTrackerList(out io.Writer, dir string, table bool) error {
 	if dir == "" {
 		dir = "."
 	}
@@ -94,10 +54,10 @@ func (cmd *TrackerListCmd) Run() error {
 		entries[i] = trackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Description: inst.Description}
 	}
 
-	if cmd.Table {
-		return printTrackerTable(cmd.Out, entries)
+	if table {
+		return printTrackerTable(out, entries)
 	}
-	return printTrackerJSON(cmd.Out, entries)
+	return printTrackerJSON(out, entries)
 }
 
 func printTrackerJSON(w io.Writer, entries []trackerEntry) error {
@@ -120,218 +80,13 @@ func printTrackerTable(out io.Writer, entries []trackerEntry) error {
 	return w.Flush()
 }
 
-// --- install ---
-
-// InstallCmd installs agent integrations.
-type InstallCmd struct {
-	Agent    string `kong:"required,enum='claude',help='Agent to install (claude)'"`
-	Personal bool   `kong:"help='Install to ~/.claude/ (personal) instead of .claude/ (project)'"`
-}
-
-// Run executes the install command.
-func (cmd *InstallCmd) Run() error {
-	switch cmd.Agent {
-	case "claude":
-		fmt.Println("Installing Claude Code files...")
-		if err := claude.Install(os.Stdout, claude.OSFileWriter{}, cmd.Personal); err != nil {
-			return err
-		}
-		fmt.Println("Done. Skill: /human-plan <ticket-key>")
-	}
-	return nil
-}
-
-// --- issues list ---
-
-type IssuesCmd struct {
-	List ListCmd `kong:"cmd,help='List project issues (JSON)'"`
-}
-
-type ListCmd struct {
-	Project  string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
-	All      bool             `kong:"help='Include all issues (default: open only)'"`
-	Table    bool             `kong:"help='Output as human-readable table instead of JSON'"`
-	Provider tracker.Provider `kong:"-"`
-	Out      io.Writer        `kong:"-"`
-}
-
-func (cmd *ListCmd) Run() error {
-	issues, err := cmd.Provider.ListIssues(context.TODO(), tracker.ListOptions{
-		Project:    cmd.Project,
-		MaxResults: 50,
-		IncludeAll: cmd.All,
-	})
-	if err != nil {
-		return err
-	}
-
-	if cmd.Table {
-		return printIssuesTable(cmd.Out, issues)
-	}
-	return printIssuesJSON(cmd.Out, issues)
-}
-
-func printIssuesJSON(w io.Writer, issues []tracker.Issue) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(issues)
-}
-
-func printIssuesTable(out io.Writer, issues []tracker.Issue) error {
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tSUMMARY")
-	for _, issue := range issues {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", issue.Key, issue.Status, issue.Summary)
-	}
-	return w.Flush()
-}
-
-// --- issue get ---
-
-type IssueCmd struct {
-	Get     GetCmd     `kong:"cmd,help='Get a single issue with metadata and description as markdown'"`
-	Create  CreateCmd  `kong:"cmd,help='Create a new issue in a project'"`
-	Delete  DeleteCmd  `kong:"cmd,help='Delete (or close) an issue by key'"`
-	Comment CommentCmd `kong:"cmd,help='Comment operations on an issue'"`
-}
-
-type CommentCmd struct {
-	Add  AddCommentCmd   `kong:"cmd,help='Add a comment to an issue'"`
-	List ListCommentsCmd `kong:"cmd,help='List comments on an issue'"`
-}
-
-type AddCommentCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key'"`
-	Body     string           `kong:"arg,required,help='Comment body (markdown)'"`
-	Provider tracker.Provider `kong:"-"`
-	Out      io.Writer        `kong:"-"`
-}
-
-func (cmd *AddCommentCmd) Run() error {
-	comment, err := cmd.Provider.AddComment(context.TODO(), cmd.Key, cmd.Body)
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(cmd.Out, "%s\t%s\n", comment.ID, comment.Body)
-	return nil
-}
-
-type ListCommentsCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key'"`
-	Provider tracker.Provider `kong:"-"`
-	Out      io.Writer        `kong:"-"`
-}
-
-func (cmd *ListCommentsCmd) Run() error {
-	comments, err := cmd.Provider.ListComments(context.TODO(), cmd.Key)
-	if err != nil {
-		return err
-	}
-	enc := json.NewEncoder(cmd.Out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(comments)
-}
-
-type GetCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, GitLab: group/project#42, Linear: ENG-123)'"`
-	Provider tracker.Provider `kong:"-"`
-	Out      io.Writer        `kong:"-"`
-}
-
-func (cmd *GetCmd) Run() error {
-	issue, err := cmd.Provider.GetIssue(context.TODO(), cmd.Key)
-	if err != nil {
-		return err
-	}
-
-	displayOrNone := func(s string) string {
-		if s == "" {
-			return "None"
-		}
-		return s
-	}
-
-	w := cmd.Out
-	_, _ = fmt.Fprintf(w, "# %s: %s\n\n", issue.Key, issue.Summary)
-	_, _ = fmt.Fprintln(w, "| Field    | Value       |")
-	_, _ = fmt.Fprintln(w, "|----------|-------------|")
-	_, _ = fmt.Fprintf(w, "| Status   | %s |\n", issue.Status)
-	_, _ = fmt.Fprintf(w, "| Priority | %s |\n", displayOrNone(issue.Priority))
-	_, _ = fmt.Fprintf(w, "| Assignee | %s |\n", displayOrNone(issue.Assignee))
-	_, _ = fmt.Fprintf(w, "| Reporter | %s |\n", displayOrNone(issue.Reporter))
-
-	if issue.Description != "" {
-		_, _ = fmt.Fprintf(w, "\n## Description\n\n%s", issue.Description)
-	}
-
-	return nil
-}
-
-// --- issue create ---
-
-type CreateCmd struct {
-	Project     string           `kong:"required,help='Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)'"`
-	Type        string           `kong:"default='Task',help='Issue type (Jira only, e.g. Task, Bug, Story)'"`
-	Summary     string           `kong:"arg,required,help='Issue summary'"`
-	Description string           `kong:"help='Issue description (markdown)'"`
-	Provider    tracker.Provider `kong:"-"`
-	Out         io.Writer        `kong:"-"`
-}
-
-func (cmd *CreateCmd) Run() error {
-	issue, err := cmd.Provider.CreateIssue(context.TODO(), &tracker.Issue{
-		Project:     cmd.Project,
-		Type:        cmd.Type,
-		Summary:     cmd.Summary,
-		Description: cmd.Description,
-	})
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(cmd.Out, "%s\t%s\n", issue.Key, issue.Summary)
-	return nil
-}
-
-// --- issue delete ---
-
-type DeleteCmd struct {
-	Key      string           `kong:"arg,required,help='Issue key (Jira: KAN-1, GitHub: owner/repo#123, GitLab: group/project#42, Linear: ENG-123)'"`
-	Provider tracker.Provider `kong:"-"`
-	Out      io.Writer        `kong:"-"`
-}
-
-func (cmd *DeleteCmd) Run() error {
-	if err := cmd.Provider.DeleteIssue(context.TODO(), cmd.Key); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(cmd.Out, "Deleted %s\n", cmd.Key)
-	return nil
-}
-
 // --- help ---
 
-var defaultHelpPrinter = kong.DefaultHelpPrinter
-
-// helpInstanceLoader is the function used by helpPrinter to load tracker
-// instances.  It defaults to loadAllInstances(".") and can be overridden
-// in tests.
+// helpInstanceLoader is the function used by the root help template to load
+// tracker instances.  It defaults to loadAllInstances(".") and can be
+// overridden in tests.
 var helpInstanceLoader = func() ([]tracker.Instance, error) {
 	return loadAllInstances(".")
-}
-
-func helpPrinter(options kong.HelpOptions, ctx *kong.Context) error {
-	if err := defaultHelpPrinter(options, ctx); err != nil {
-		return err
-	}
-
-	// Append examples only for root-level help.
-	if ctx.Command() != "" {
-		return nil
-	}
-
-	printExamples(ctx.Stdout)
-	printConnectedTrackers(ctx.Stdout)
-	return nil
 }
 
 // printConnectedTrackers appends a "Connected trackers:" section to the help
@@ -363,94 +118,35 @@ func printConnectedTrackers(w io.Writer) {
 
 func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Command pattern:")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issues list --project=<PROJECT>   List issues (JSON)")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  get <KEY>                  Get issue (markdown)")
+	_, _ = fmt.Fprintln(w, `  human <tracker> issue  create --project=<P> "S"   Create issue`)
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Delete/close issue")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment add <KEY> <BODY>   Add comment")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment list <KEY>         List comments")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Project key and issue key formats by tracker:")
+	_, _ = fmt.Fprintln(w, "  jira        --project=KAN                  issue key: KAN-1")
+	_, _ = fmt.Fprintln(w, "  github      --project=octocat/hello-world  issue key: octocat/hello-world#42")
+	_, _ = fmt.Fprintln(w, "  gitlab      --project=mygroup/myproject    issue key: mygroup/myproject#42")
+	_, _ = fmt.Fprintln(w, "  linear      --project=ENG                  issue key: ENG-123")
+	_, _ = fmt.Fprintln(w, "  azuredevops --project=MyProject             issue key: 42")
+	_, _ = fmt.Fprintln(w, "  shortcut    --project=MyProject             issue key: 123")
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Examples:")
-	_, _ = fmt.Fprintln(w, "  # List Jira issues (JSON)")
-	_, _ = fmt.Fprintln(w, "  human issues list --project=KAN")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # List GitHub issues (JSON)")
-	_, _ = fmt.Fprintln(w, "  human issues list --project=octocat/hello-world")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Get a single issue as markdown")
-	_, _ = fmt.Fprintln(w, "  human issue get KAN-1")
-	_, _ = fmt.Fprintln(w, "  human issue get octocat/hello-world#42")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Create a new issue")
-	_, _ = fmt.Fprintln(w, `  human issue create --project=KAN "Implement login page"`)
-	_, _ = fmt.Fprintln(w, `  human issue create --project=octocat/hello-world "Fix bug"`)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # List GitLab issues (JSON)")
-	_, _ = fmt.Fprintln(w, "  human issues list --project=mygroup/myproject")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Get a GitLab issue as markdown")
-	_, _ = fmt.Fprintln(w, "  human issue get mygroup/myproject#42")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Create a GitLab issue")
-	_, _ = fmt.Fprintln(w, `  human issue create --project=mygroup/myproject "Fix bug"`)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # List Linear issues (JSON)")
-	_, _ = fmt.Fprintln(w, "  human issues list --project=ENG")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Get a Linear issue as markdown")
-	_, _ = fmt.Fprintln(w, "  human issue get ENG-123")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Create a Linear issue")
-	_, _ = fmt.Fprintln(w, `  human issue create --project=ENG "Implement feature"`)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # List Shortcut stories (JSON)")
-	_, _ = fmt.Fprintln(w, "  human issues list --project=MyProject")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Get a Shortcut story as markdown")
-	_, _ = fmt.Fprintln(w, "  human issue get 123")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Create a Shortcut story")
-	_, _ = fmt.Fprintln(w, `  human issue create --project=MyProject "Implement feature"`)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Delete an issue")
-	_, _ = fmt.Fprintln(w, "  human issue delete KAN-1")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # List configured trackers (JSON)")
+	_, _ = fmt.Fprintln(w, "  human jira issues list --project=KAN")
+	_, _ = fmt.Fprintln(w, "  human jira issue get KAN-1")
+	_, _ = fmt.Fprintln(w, `  human jira issue create --project=KAN "Implement login page"`)
+	_, _ = fmt.Fprintln(w, "  human github issues list --project=octocat/hello-world")
+	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
+	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1")
+	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Use a specific config by name")
-	_, _ = fmt.Fprintln(w, "  human --tracker=work issues list --project=KAN")
-	_, _ = fmt.Fprintln(w, "  human --tracker=personal issues list --project=octocat/hello-world")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "  # Install Claude Code skill and agent")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 }
 
-// keyHint returns the first issue-key or project-key visible on the CLI so
-// that Resolve can auto-detect the tracker kind from the key format.
-func keyHint(cli *CLI) string {
-	switch {
-	case cli.Issue.Get.Key != "":
-		return cli.Issue.Get.Key
-	case cli.Issue.Create.Project != "":
-		return cli.Issue.Create.Project
-	case cli.Issue.Delete.Key != "":
-		return cli.Issue.Delete.Key
-	case cli.Issues.List.Project != "":
-		return cli.Issues.List.Project
-	case cli.Issue.Comment.Add.Key != "":
-		return cli.Issue.Comment.Add.Key
-	case cli.Issue.Comment.List.Key != "":
-		return cli.Issue.Comment.List.Key
-	default:
-		return ""
-	}
-}
-
-// needsTrackerClient returns true for commands that require a tracker client.
-func needsTrackerClient(command string) bool {
-	switch {
-	case strings.HasPrefix(command, "install"):
-		return false
-	case strings.HasPrefix(command, "tracker"):
-		return false
-	default:
-		return true
-	}
-}
+// --- loadAllInstances / instanceFromFlags ---
 
 // loadAllInstances collects tracker instances from all provider configs.
 func loadAllInstances(dir string) ([]tracker.Instance, error) {
@@ -493,94 +189,93 @@ func loadAllInstances(dir string) ([]tracker.Instance, error) {
 	return append(all, sci...), nil
 }
 
-// instanceFromCLI builds a tracker instance from CLI flags, returning nil
-// when insufficient flags are provided.
-func instanceFromCLI(cli *CLI) *tracker.Instance {
-	if cli.JiraURL != "" && cli.JiraUser != "" && cli.JiraKey != "" {
+// instanceFromFlags builds a tracker instance from root persistent flags,
+// returning nil when insufficient flags are provided.
+func instanceFromFlags(cmd *cobra.Command) *tracker.Instance {
+	getFlag := func(name string) string {
+		v, _ := cmd.Root().PersistentFlags().GetString(name)
+		return v
+	}
+
+	jiraURL := getFlag("jira-url")
+	jiraUser := getFlag("jira-user")
+	jiraKey := getFlag("jira-key")
+	if jiraURL != "" && jiraUser != "" && jiraKey != "" {
 		return &tracker.Instance{
 			Kind:     "jira",
-			URL:      cli.JiraURL,
-			User:     cli.JiraUser,
-			Provider: jira.New(cli.JiraURL, cli.JiraUser, cli.JiraKey),
+			URL:      jiraURL,
+			User:     jiraUser,
+			Provider: jira.New(jiraURL, jiraUser, jiraKey),
 		}
 	}
-	if cli.GitHubToken != "" {
-		url := cli.GitHubURL
+
+	githubToken := getFlag("github-token")
+	if githubToken != "" {
+		url := getFlag("github-url")
 		if url == "" {
 			url = "https://api.github.com"
 		}
 		return &tracker.Instance{
 			Kind:     "github",
 			URL:      url,
-			Provider: github.New(url, cli.GitHubToken),
+			Provider: github.New(url, githubToken),
 		}
 	}
-	if cli.GitLabToken != "" {
-		url := cli.GitLabURL
+
+	gitlabToken := getFlag("gitlab-token")
+	if gitlabToken != "" {
+		url := getFlag("gitlab-url")
 		if url == "" {
 			url = "https://gitlab.com"
 		}
 		return &tracker.Instance{
 			Kind:     "gitlab",
 			URL:      url,
-			Provider: gitlab.New(url, cli.GitLabToken),
+			Provider: gitlab.New(url, gitlabToken),
 		}
 	}
-	if cli.LinearToken != "" {
-		url := cli.LinearURL
+
+	linearToken := getFlag("linear-token")
+	if linearToken != "" {
+		url := getFlag("linear-url")
 		if url == "" {
 			url = "https://api.linear.app"
 		}
 		return &tracker.Instance{
 			Kind:     "linear",
 			URL:      url,
-			Provider: linear.New(url, cli.LinearToken),
+			Provider: linear.New(url, linearToken),
 		}
 	}
-	if cli.AzureToken != "" && cli.AzureOrg != "" {
-		url := cli.AzureURL
+
+	azureToken := getFlag("azure-token")
+	azureOrg := getFlag("azure-org")
+	if azureToken != "" && azureOrg != "" {
+		url := getFlag("azure-url")
 		if url == "" {
 			url = "https://dev.azure.com"
 		}
 		return &tracker.Instance{
 			Kind:     "azuredevops",
 			URL:      url,
-			Provider: azuredevops.New(url, cli.AzureOrg, cli.AzureToken),
+			Provider: azuredevops.New(url, azureOrg, azureToken),
 		}
 	}
-	if cli.ShortcutToken != "" {
-		url := cli.ShortcutURL
+
+	shortcutToken := getFlag("shortcut-token")
+	if shortcutToken != "" {
+		url := getFlag("shortcut-url")
 		if url == "" {
 			url = "https://api.app.shortcut.com"
 		}
 		return &tracker.Instance{
 			Kind:     "shortcut",
 			URL:      url,
-			Provider: shortcut.New(url, cli.ShortcutToken),
+			Provider: shortcut.New(url, shortcutToken),
 		}
 	}
+
 	return nil
-}
-
-// setProvider sets the Provider field on all commands that need it.
-func setProvider(cli *CLI, p tracker.Provider) {
-	cli.Issues.List.Provider = p
-	cli.Issue.Get.Provider = p
-	cli.Issue.Create.Provider = p
-	cli.Issue.Delete.Provider = p
-	cli.Issue.Comment.Add.Provider = p
-	cli.Issue.Comment.List.Provider = p
-}
-
-// setOutput sets the Out writer on all commands that produce output.
-func setOutput(cli *CLI, w io.Writer) {
-	cli.Issues.List.Out = w
-	cli.Issue.Get.Out = w
-	cli.Issue.Create.Out = w
-	cli.Issue.Delete.Out = w
-	cli.Issue.Comment.Add.Out = w
-	cli.Issue.Comment.List.Out = w
-	cli.Tracker.List.Out = w
 }
 
 // auditLogPath returns the path to the audit log file (~/.human/audit.log),
@@ -595,56 +290,166 @@ func auditLogPath() string {
 	return filepath.Join(dir, "audit.log")
 }
 
+// --- newRootCmd builds the Cobra command tree ---
+
+func newRootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:   "human",
+		Short: "Unified CLI for issue trackers",
+		Long: `Unified CLI to list, read, create, delete, and comment on issues
+across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut.
+
+Use it to:
+  - fetch a ticket before planning implementation
+  - check what issues exist in a project
+  - create tickets for bugs or features you discover
+  - add comments with status updates or findings
+  - look up ticket details (status, assignee, description)
+
+All trackers share the same command structure:
+  human <tracker> issues list   — JSON array of issues
+  human <tracker> issue  get    — single issue as markdown
+  human <tracker> issue  create — create and return key
+  human <tracker> issue  delete — delete or close
+  human <tracker> issue  comment add/list — manage comments
+
+Configure trackers in .humanconfig.yaml or pass credentials via flags/env vars.`,
+		Version: version + " (" + commit + ") " + date,
+		// When no subcommand is given, run "tracker list".
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runTrackerList(cmd.OutOrStdout(), ".", false)
+		},
+		SilenceUsage: true,
+	}
+
+	// Override help to append examples and connected trackers.
+	defaultHelp := rootCmd.HelpFunc()
+	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		defaultHelp(cmd, args)
+		// Only append extras for root-level help.
+		if cmd != rootCmd {
+			return
+		}
+		w := cmd.OutOrStdout()
+		printExamples(w)
+		printConnectedTrackers(w)
+	})
+
+	// Global persistent flags.
+	pf := rootCmd.PersistentFlags()
+	pf.String("tracker", "", "Named tracker instance from .humanconfig")
+
+	// Credential flags — functional but hidden from help (use env vars or .humanconfig).
+	credFlags := []struct{ name, env, help string }{
+		{"jira-key", "JIRA_KEY", "Jira API token"},
+		{"jira-url", "JIRA_URL", "Jira base URL"},
+		{"jira-user", "JIRA_USER", "Jira user email"},
+		{"github-token", "GITHUB_TOKEN", "GitHub personal access token"},
+		{"github-url", "GITHUB_URL", "GitHub API base URL"},
+		{"gitlab-token", "GITLAB_TOKEN", "GitLab private token"},
+		{"gitlab-url", "GITLAB_URL", "GitLab base URL"},
+		{"linear-token", "LINEAR_TOKEN", "Linear API key"},
+		{"linear-url", "LINEAR_URL", "Linear API base URL"},
+		{"azure-token", "AZURE_TOKEN", "Azure DevOps PAT token"},
+		{"azure-url", "AZURE_URL", "Azure DevOps base URL"},
+		{"azure-org", "AZURE_ORG", "Azure DevOps organization"},
+		{"shortcut-token", "SHORTCUT_TOKEN", "Shortcut API token"},
+		{"shortcut-url", "SHORTCUT_URL", "Shortcut API base URL"},
+	}
+	for _, f := range credFlags {
+		pf.String(f.name, os.Getenv(f.env), f.help)
+		_ = pf.MarkHidden(f.name)
+	}
+
+	// --- Command groups ---
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "trackers", Title: "Issue Trackers:"},
+		&cobra.Group{ID: "utility", Title: "Utility:"},
+	)
+
+	// Hide the auto-generated completion command.
+	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+
+	// --- Provider commands (dynamic registration) ---
+	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}
+	for _, kind := range providers {
+		providerCmd := &cobra.Command{
+			Use:     kind,
+			Short:   kind + " issue tracker",
+			GroupID: "trackers",
+		}
+		for _, sub := range buildProviderCommands(kind) {
+			providerCmd.AddCommand(sub)
+		}
+		rootCmd.AddCommand(providerCmd)
+	}
+
+	// --- Static commands ---
+	trackerCmd := buildTrackerCmd()
+	trackerCmd.GroupID = "utility"
+	rootCmd.AddCommand(trackerCmd)
+
+	installCmd := buildInstallCmd()
+	installCmd.GroupID = "utility"
+	rootCmd.AddCommand(installCmd)
+
+	return rootCmd
+}
+
+func buildTrackerCmd() *cobra.Command {
+	trackerCmd := &cobra.Command{
+		Use:   "tracker",
+		Short: "Manage tracker connections",
+	}
+
+	var table bool
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List configured tracker instances (JSON)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runTrackerList(cmd.OutOrStdout(), ".", table)
+		},
+	}
+	listCmd.Flags().BoolVar(&table, "table", false, "Output as human-readable table instead of JSON")
+
+	trackerCmd.AddCommand(listCmd)
+	return trackerCmd
+}
+
+func buildInstallCmd() *cobra.Command {
+	var agent string
+	var personal bool
+
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install agent integrations",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			switch agent {
+			case "claude":
+				fmt.Println("Installing Claude Code files...")
+				if err := claude.Install(os.Stdout, claude.OSFileWriter{}, personal); err != nil {
+					return err
+				}
+				fmt.Println("Done. Skill: /human-plan <ticket-key>")
+			default:
+				return fmt.Errorf("unsupported agent: %s", agent)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&agent, "agent", "", "Agent to install (claude)")
+	_ = cmd.MarkFlagRequired("agent")
+	cmd.Flags().BoolVar(&personal, "personal", false, "Install to ~/.claude/ (personal) instead of .claude/ (project)")
+	return cmd
+}
+
 // --- main ---
 
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
-	// Show tracker list when invoked without arguments.
-	if len(os.Args) < 2 {
-		os.Args = append(os.Args, "tracker", "list")
-	}
-
-	var cli CLI
-	ctx := kong.Parse(&cli,
-		kong.Name("human"),
-		kong.Description("AI-powered issue tracker CLI.\nReads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Output is JSON and markdown."),
-		kong.Help(helpPrinter),
-		kong.UsageOnError(),
-		kong.Vars{"version": version + " (" + commit + ") " + date},
-	)
-
-	setOutput(&cli, os.Stdout)
-
-	if needsTrackerClient(ctx.Command()) {
-		instances, err := loadAllInstances(".")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
-
-		if inst := instanceFromCLI(&cli); inst != nil {
-			instances = append(instances, *inst)
-		}
-
-		instance, err := tracker.Resolve(cli.TrackerName, instances, keyHint(&cli))
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
-
-		auditPath := auditLogPath()
-		ap, auditErr := tracker.NewAuditProvider(instance.Provider, instance.Name, instance.Kind, auditPath)
-		if auditErr != nil {
-			fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
-			setProvider(&cli, instance.Provider)
-		} else {
-			defer func() { _ = ap.Close() }()
-			setProvider(&cli, ap)
-		}
-	}
-
-	if err := ctx.Run(); err != nil {
+	rootCmd := newRootCmd()
+	if err := rootCmd.Execute(); err != nil {
 		errors.LogError(err).Msg("command failed")
 		os.Exit(1)
 	}

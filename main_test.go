@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alecthomas/kong"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,33 +24,26 @@ func TestAuditLogPath(t *testing.T) {
 	assert.True(t, filepath.IsAbs(p), "expected absolute path, got %s", p)
 }
 
-// --- helpPrinter / printExamples tests ---
+// --- help / printExamples tests ---
 
-func TestHelpPrinter_RootLevel(t *testing.T) {
-	orig := defaultHelpPrinter
+func TestRootHelp_includesExamples(t *testing.T) {
+	cmd := newRootCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--help"})
+
 	origLoader := helpInstanceLoader
-	t.Cleanup(func() { defaultHelpPrinter = orig; helpInstanceLoader = origLoader })
-
-	defaultHelpPrinter = func(_ kong.HelpOptions, ctx *kong.Context) error {
-		_, _ = fmt.Fprintln(ctx.Stdout, "default help")
-		return nil
-	}
+	t.Cleanup(func() { helpInstanceLoader = origLoader })
 	helpInstanceLoader = func() ([]tracker.Instance, error) {
 		return []tracker.Instance{
 			{Name: "work", Kind: "jira", URL: "https://work.atlassian.net", User: "me@work.com", Description: "Sprint planning"},
 		}, nil
 	}
 
-	var buf bytes.Buffer
-	k, err := kong.New(&struct{}{}, kong.Writers(&buf, &buf))
+	err := cmd.Execute()
 	require.NoError(t, err)
-	kctx, err := k.Parse([]string{})
-	require.NoError(t, err)
-
-	require.NoError(t, helpPrinter(kong.HelpOptions{}, kctx))
 
 	out := buf.String()
-	assert.Contains(t, out, "default help")
 	assert.Contains(t, out, "Examples:")
 	assert.Contains(t, out, "Connected trackers:")
 	assert.Contains(t, out, "work")
@@ -58,48 +51,17 @@ func TestHelpPrinter_RootLevel(t *testing.T) {
 	assert.Contains(t, out, "Sprint planning")
 }
 
-func TestHelpPrinter_SubCommand(t *testing.T) {
-	orig := defaultHelpPrinter
-	t.Cleanup(func() { defaultHelpPrinter = orig })
-
-	defaultHelpPrinter = func(_ kong.HelpOptions, ctx *kong.Context) error {
-		_, _ = fmt.Fprintln(ctx.Stdout, "default help")
-		return nil
-	}
-
-	var cli struct {
-		Sub struct{} `cmd:"sub"`
-	}
+func TestSubcommandHelp_noExamples(t *testing.T) {
+	cmd := newRootCmd()
 	var buf bytes.Buffer
-	k, err := kong.New(&cli, kong.Writers(&buf, &buf))
-	require.NoError(t, err)
-	kctx, err := k.Parse([]string{"sub"})
-	require.NoError(t, err)
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"jira", "--help"})
 
-	require.NoError(t, helpPrinter(kong.HelpOptions{}, kctx))
+	err := cmd.Execute()
+	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "default help")
 	assert.NotContains(t, out, "Examples:")
-}
-
-func TestHelpPrinter_DefaultPrinterError(t *testing.T) {
-	orig := defaultHelpPrinter
-	t.Cleanup(func() { defaultHelpPrinter = orig })
-
-	defaultHelpPrinter = func(_ kong.HelpOptions, _ *kong.Context) error {
-		return fmt.Errorf("boom")
-	}
-
-	var buf bytes.Buffer
-	k, err := kong.New(&struct{}{}, kong.Writers(&buf, &buf))
-	require.NoError(t, err)
-	kctx, err := k.Parse([]string{})
-	require.NoError(t, err)
-
-	err = helpPrinter(kong.HelpOptions{}, kctx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "boom")
 }
 
 func TestPrintExamples(t *testing.T) {
@@ -108,27 +70,34 @@ func TestPrintExamples(t *testing.T) {
 
 	out := buf.String()
 
+	// Command pattern section.
+	assert.Contains(t, out, "Command pattern:")
+	assert.Contains(t, out, "human <tracker> issues list")
+	assert.Contains(t, out, "human <tracker> issue  get")
+	assert.Contains(t, out, "human <tracker> issue  create")
+	assert.Contains(t, out, "human <tracker> issue  delete")
+	assert.Contains(t, out, "human <tracker> issue  comment add")
+	assert.Contains(t, out, "human <tracker> issue  comment list")
+
+	// Key format reference table — all providers present.
+	assert.Contains(t, out, "jira")
+	assert.Contains(t, out, "github")
+	assert.Contains(t, out, "gitlab")
+	assert.Contains(t, out, "linear")
+	assert.Contains(t, out, "azuredevops")
+	assert.Contains(t, out, "shortcut")
+	assert.Contains(t, out, "KAN-1")
+	assert.Contains(t, out, "octocat/hello-world#42")
+	assert.Contains(t, out, "ENG-123")
+
+	// Concrete examples.
 	assert.Contains(t, out, "Examples:")
-
-	// Verify all provider examples are present.
-	assert.Contains(t, out, "human issues list --project=KAN", "Jira list example")
-	assert.Contains(t, out, "human issues list --project=octocat/hello-world", "GitHub list example")
-	assert.Contains(t, out, "human issues list --project=mygroup/myproject", "GitLab list example")
-	assert.Contains(t, out, "human issues list --project=ENG", "Linear list example")
-	assert.Contains(t, out, "human issues list --project=MyProject", "Shortcut list example")
-
-	// Verify get, create, delete examples.
-	assert.Contains(t, out, "human issue get KAN-1")
-	assert.Contains(t, out, "human issue get octocat/hello-world#42")
-	assert.Contains(t, out, "human issue get mygroup/myproject#42")
-	assert.Contains(t, out, "human issue get ENG-123")
-	assert.Contains(t, out, "human issue get 123", "Shortcut get example")
-	assert.Contains(t, out, `human issue create --project=KAN "Implement login page"`)
-	assert.Contains(t, out, "human issue delete KAN-1")
-
-	// Verify tracker and install examples.
+	assert.Contains(t, out, "human jira issues list --project=KAN")
+	assert.Contains(t, out, "human jira issue get KAN-1")
+	assert.Contains(t, out, `human jira issue create --project=KAN "Implement login page"`)
+	assert.Contains(t, out, "human github issues list --project=octocat/hello-world")
+	assert.Contains(t, out, "human jira issue delete KAN-1")
 	assert.Contains(t, out, "human tracker list")
-	assert.Contains(t, out, "human --tracker=work issues list --project=KAN")
 	assert.Contains(t, out, "human install --agent claude")
 }
 
@@ -229,188 +198,6 @@ func (m *mockProvider) AddComment(ctx context.Context, issueKey string, body str
 	return m.addCommentFn(ctx, issueKey, body)
 }
 
-// --- helper tests ---
-
-func TestKeyHint(t *testing.T) {
-	tests := []struct {
-		name string
-		cli  CLI
-		want string
-	}{
-		{
-			name: "issue get key",
-			cli:  CLI{Issue: IssueCmd{Get: GetCmd{Key: "KAN-1"}}},
-			want: "KAN-1",
-		},
-		{
-			name: "issue create project",
-			cli:  CLI{Issue: IssueCmd{Create: CreateCmd{Project: "octocat/hello-world"}}},
-			want: "octocat/hello-world",
-		},
-		{
-			name: "issue delete key",
-			cli:  CLI{Issue: IssueCmd{Delete: DeleteCmd{Key: "KAN-99"}}},
-			want: "KAN-99",
-		},
-		{
-			name: "issues list project",
-			cli:  CLI{Issues: IssuesCmd{List: ListCmd{Project: "ENG"}}},
-			want: "ENG",
-		},
-		{
-			name: "comment add key",
-			cli:  CLI{Issue: IssueCmd{Comment: CommentCmd{Add: AddCommentCmd{Key: "KAN-5"}}}},
-			want: "KAN-5",
-		},
-		{
-			name: "comment list key",
-			cli:  CLI{Issue: IssueCmd{Comment: CommentCmd{List: ListCommentsCmd{Key: "KAN-6"}}}},
-			want: "KAN-6",
-		},
-		{
-			name: "empty CLI returns empty",
-			cli:  CLI{},
-			want: "",
-		},
-		{
-			name: "priority order: issue get wins",
-			cli: CLI{
-				Issue:  IssueCmd{Get: GetCmd{Key: "KAN-1"}, Create: CreateCmd{Project: "KAN"}},
-				Issues: IssuesCmd{List: ListCmd{Project: "ENG"}},
-			},
-			want: "KAN-1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, keyHint(&tt.cli))
-		})
-	}
-}
-
-func TestNeedsTrackerClient(t *testing.T) {
-	tests := []struct {
-		command string
-		want    bool
-	}{
-		{"install", false},
-		{"install --agent claude", false},
-		{"tracker", false},
-		{"tracker list", false},
-		{"issues list", true},
-		{"issue get", true},
-		{"issue create", true},
-		{"issue delete", true},
-		{"issue comment add", true},
-		{"issue comment list", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.command, func(t *testing.T) {
-			assert.Equal(t, tt.want, needsTrackerClient(tt.command))
-		})
-	}
-}
-
-func TestInstanceFromCLI(t *testing.T) {
-	tests := []struct {
-		name     string
-		cli      CLI
-		wantNil  bool
-		wantKind string
-	}{
-		{
-			name:    "no flags returns nil",
-			cli:     CLI{},
-			wantNil: true,
-		},
-		{
-			name:     "jira full flags",
-			cli:      CLI{JiraURL: "https://example.atlassian.net", JiraUser: "alice@example.com", JiraKey: "token"},
-			wantKind: "jira",
-		},
-		{
-			name:    "jira partial flags returns nil",
-			cli:     CLI{JiraURL: "https://example.atlassian.net"},
-			wantNil: true,
-		},
-		{
-			name:     "github token only",
-			cli:      CLI{GitHubToken: "ghp_test"},
-			wantKind: "github",
-		},
-		{
-			name:     "github with custom URL",
-			cli:      CLI{GitHubToken: "ghp_test", GitHubURL: "https://github.example.com/api/v3"},
-			wantKind: "github",
-		},
-		{
-			name:     "gitlab token only",
-			cli:      CLI{GitLabToken: "glpat-test"},
-			wantKind: "gitlab",
-		},
-		{
-			name:     "gitlab with custom URL",
-			cli:      CLI{GitLabToken: "glpat-test", GitLabURL: "https://gitlab.example.com"},
-			wantKind: "gitlab",
-		},
-		{
-			name:     "linear token only",
-			cli:      CLI{LinearToken: "lin_test"},
-			wantKind: "linear",
-		},
-		{
-			name:     "linear with custom URL",
-			cli:      CLI{LinearToken: "lin_test", LinearURL: "https://custom.linear.app"},
-			wantKind: "linear",
-		},
-		{
-			name:     "jira takes priority over github",
-			cli:      CLI{JiraURL: "https://x.atlassian.net", JiraUser: "a@b.com", JiraKey: "key", GitHubToken: "ghp_test"},
-			wantKind: "jira",
-		},
-		{
-			name:     "azure devops token and org",
-			cli:      CLI{AzureToken: "pat-test", AzureOrg: "myorg"},
-			wantKind: "azuredevops",
-		},
-		{
-			name:    "azure devops token only returns nil",
-			cli:     CLI{AzureToken: "pat-test"},
-			wantNil: true,
-		},
-		{
-			name:     "azure devops with custom URL",
-			cli:      CLI{AzureToken: "pat-test", AzureOrg: "myorg", AzureURL: "https://custom.azure.com"},
-			wantKind: "azuredevops",
-		},
-		{
-			name:     "shortcut token only",
-			cli:      CLI{ShortcutToken: "tok-test"},
-			wantKind: "shortcut",
-		},
-		{
-			name:     "shortcut with custom URL",
-			cli:      CLI{ShortcutToken: "tok-test", ShortcutURL: "https://custom.shortcut.com"},
-			wantKind: "shortcut",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			inst := instanceFromCLI(&tt.cli)
-			if tt.wantNil {
-				assert.Nil(t, inst)
-				return
-			}
-			require.NotNil(t, inst)
-			assert.Equal(t, tt.wantKind, inst.Kind)
-			assert.NotNil(t, inst.Provider)
-		})
-	}
-}
-
 // --- print function tests ---
 
 func TestPrintTrackerJSON(t *testing.T) {
@@ -505,35 +292,6 @@ func TestTrackerEntry_JSONFields(t *testing.T) {
 	assert.Equal(t, "Sprint planning", parsed["description"])
 }
 
-// --- setProvider / setOutput tests ---
-
-func TestSetProvider(t *testing.T) {
-	p := &mockProvider{}
-	var cli CLI
-	setProvider(&cli, p)
-
-	assert.Equal(t, tracker.Provider(p), cli.Issues.List.Provider)
-	assert.Equal(t, tracker.Provider(p), cli.Issue.Get.Provider)
-	assert.Equal(t, tracker.Provider(p), cli.Issue.Create.Provider)
-	assert.Equal(t, tracker.Provider(p), cli.Issue.Delete.Provider)
-	assert.Equal(t, tracker.Provider(p), cli.Issue.Comment.Add.Provider)
-	assert.Equal(t, tracker.Provider(p), cli.Issue.Comment.List.Provider)
-}
-
-func TestSetOutput(t *testing.T) {
-	var buf bytes.Buffer
-	var cli CLI
-	setOutput(&cli, &buf)
-
-	assert.Equal(t, &buf, cli.Issues.List.Out)
-	assert.Equal(t, &buf, cli.Issue.Get.Out)
-	assert.Equal(t, &buf, cli.Issue.Create.Out)
-	assert.Equal(t, &buf, cli.Issue.Delete.Out)
-	assert.Equal(t, &buf, cli.Issue.Comment.Add.Out)
-	assert.Equal(t, &buf, cli.Issue.Comment.List.Out)
-	assert.Equal(t, &buf, cli.Tracker.List.Out)
-}
-
 // --- loadAllInstances tests ---
 
 func writeConfig(t *testing.T, dir, content string) {
@@ -594,9 +352,9 @@ func unsetAzureEnvs(t *testing.T) {
 	}
 }
 
-// --- Run() method tests ---
+// --- Business logic function tests ---
 
-func TestListCmd_Run_JSON(t *testing.T) {
+func TestRunListIssues_JSON(t *testing.T) {
 	issues := []tracker.Issue{
 		{Key: "KAN-1", Summary: "First", Status: "Open"},
 	}
@@ -610,13 +368,12 @@ func TestListCmd_Run_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCmd{Project: "KAN", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListIssues(context.Background(), p, &buf, "KAN", false, false)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
 }
 
-func TestListCmd_Run_All(t *testing.T) {
+func TestRunListIssues_All(t *testing.T) {
 	issues := []tracker.Issue{
 		{Key: "KAN-1", Summary: "Open", Status: "Open"},
 		{Key: "KAN-2", Summary: "Done", Status: "Done"},
@@ -629,14 +386,13 @@ func TestListCmd_Run_All(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCmd{Project: "KAN", All: true, Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListIssues(context.Background(), p, &buf, "KAN", true, false)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
 	assert.Contains(t, buf.String(), `"key": "KAN-2"`)
 }
 
-func TestListCmd_Run_Table(t *testing.T) {
+func TestRunListIssues_Table(t *testing.T) {
 	issues := []tracker.Issue{
 		{Key: "KAN-1", Summary: "First", Status: "Open"},
 	}
@@ -647,14 +403,13 @@ func TestListCmd_Run_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCmd{Project: "KAN", Table: true, Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListIssues(context.Background(), p, &buf, "KAN", false, true)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-1")
 	assert.Contains(t, buf.String(), "KEY")
 }
 
-func TestListCmd_Run_error(t *testing.T) {
+func TestRunListIssues_error(t *testing.T) {
 	p := &mockProvider{
 		listIssuesFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
 			return nil, fmt.Errorf("list failed")
@@ -662,12 +417,11 @@ func TestListCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCmd{Project: "KAN", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListIssues(context.Background(), p, &buf, "KAN", false, false)
 	assert.EqualError(t, err, "list failed")
 }
 
-func TestGetCmd_Run(t *testing.T) {
+func TestRunGetIssue(t *testing.T) {
 	issue := &tracker.Issue{
 		Key:         "KAN-1",
 		Summary:     "Test issue",
@@ -685,8 +439,7 @@ func TestGetCmd_Run(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &GetCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runGetIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -699,7 +452,7 @@ func TestGetCmd_Run(t *testing.T) {
 	assert.Contains(t, out, "Some description")
 }
 
-func TestGetCmd_Run_emptyFields(t *testing.T) {
+func TestRunGetIssue_emptyFields(t *testing.T) {
 	issue := &tracker.Issue{
 		Key:     "KAN-2",
 		Summary: "Minimal",
@@ -712,8 +465,7 @@ func TestGetCmd_Run_emptyFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &GetCmd{Key: "KAN-2", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runGetIssue(context.Background(), p, &buf, "KAN-2")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -723,7 +475,7 @@ func TestGetCmd_Run_emptyFields(t *testing.T) {
 	assert.NotContains(t, out, "## Description")
 }
 
-func TestGetCmd_Run_error(t *testing.T) {
+func TestRunGetIssue_error(t *testing.T) {
 	p := &mockProvider{
 		getIssueFn: func(_ context.Context, _ string) (*tracker.Issue, error) {
 			return nil, fmt.Errorf("get failed")
@@ -731,12 +483,11 @@ func TestGetCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &GetCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runGetIssue(context.Background(), p, &buf, "KAN-1")
 	assert.EqualError(t, err, "get failed")
 }
 
-func TestCreateCmd_Run(t *testing.T) {
+func TestRunCreateIssue(t *testing.T) {
 	p := &mockProvider{
 		createIssueFn: func(_ context.Context, issue *tracker.Issue) (*tracker.Issue, error) {
 			assert.Equal(t, "KAN", issue.Project)
@@ -747,14 +498,13 @@ func TestCreateCmd_Run(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &CreateCmd{Project: "KAN", Type: "Task", Summary: "New issue", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runCreateIssue(context.Background(), p, &buf, "KAN", "Task", "New issue", "")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-42")
 	assert.Contains(t, buf.String(), "New issue")
 }
 
-func TestCreateCmd_Run_error(t *testing.T) {
+func TestRunCreateIssue_error(t *testing.T) {
 	p := &mockProvider{
 		createIssueFn: func(_ context.Context, _ *tracker.Issue) (*tracker.Issue, error) {
 			return nil, fmt.Errorf("create failed")
@@ -762,12 +512,11 @@ func TestCreateCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &CreateCmd{Project: "KAN", Summary: "X", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runCreateIssue(context.Background(), p, &buf, "KAN", "Task", "X", "")
 	assert.EqualError(t, err, "create failed")
 }
 
-func TestDeleteCmd_Run(t *testing.T) {
+func TestRunDeleteIssue(t *testing.T) {
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, key string) error {
 			assert.Equal(t, "KAN-1", key)
@@ -776,13 +525,12 @@ func TestDeleteCmd_Run(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &DeleteCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runDeleteIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted KAN-1\n", buf.String())
 }
 
-func TestDeleteCmd_Run_error(t *testing.T) {
+func TestRunDeleteIssue_error(t *testing.T) {
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error {
 			return fmt.Errorf("delete failed")
@@ -790,12 +538,11 @@ func TestDeleteCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &DeleteCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runDeleteIssue(context.Background(), p, &buf, "KAN-1")
 	assert.EqualError(t, err, "delete failed")
 }
 
-func TestAddCommentCmd_Run(t *testing.T) {
+func TestRunAddComment(t *testing.T) {
 	p := &mockProvider{
 		addCommentFn: func(_ context.Context, issueKey string, body string) (*tracker.Comment, error) {
 			assert.Equal(t, "KAN-1", issueKey)
@@ -805,14 +552,13 @@ func TestAddCommentCmd_Run(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &AddCommentCmd{Key: "KAN-1", Body: "test comment", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runAddComment(context.Background(), p, &buf, "KAN-1", "test comment")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "c-1")
 	assert.Contains(t, buf.String(), "test comment")
 }
 
-func TestAddCommentCmd_Run_error(t *testing.T) {
+func TestRunAddComment_error(t *testing.T) {
 	p := &mockProvider{
 		addCommentFn: func(_ context.Context, _ string, _ string) (*tracker.Comment, error) {
 			return nil, fmt.Errorf("comment failed")
@@ -820,12 +566,11 @@ func TestAddCommentCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &AddCommentCmd{Key: "KAN-1", Body: "x", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runAddComment(context.Background(), p, &buf, "KAN-1", "x")
 	assert.EqualError(t, err, "comment failed")
 }
 
-func TestListCommentsCmd_Run(t *testing.T) {
+func TestRunListComments(t *testing.T) {
 	comments := []tracker.Comment{
 		{ID: "c-1", Author: "alice", Body: "hello"},
 		{ID: "c-2", Author: "bob", Body: "world"},
@@ -838,8 +583,7 @@ func TestListCommentsCmd_Run(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCommentsCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListComments(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -849,7 +593,7 @@ func TestListCommentsCmd_Run(t *testing.T) {
 	assert.Contains(t, out, "c-2")
 }
 
-func TestListCommentsCmd_Run_error(t *testing.T) {
+func TestRunListComments_error(t *testing.T) {
 	p := &mockProvider{
 		listCommentsFn: func(_ context.Context, _ string) ([]tracker.Comment, error) {
 			return nil, fmt.Errorf("list comments failed")
@@ -857,12 +601,11 @@ func TestListCommentsCmd_Run_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	cmd := &ListCommentsCmd{Key: "KAN-1", Provider: p, Out: &buf}
-	err := cmd.Run()
+	err := runListComments(context.Background(), p, &buf, "KAN-1")
 	assert.EqualError(t, err, "list comments failed")
 }
 
-func TestTrackerListCmd_Run_JSON(t *testing.T) {
+func TestRunTrackerList_JSON(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `jiras:
   - name: work
@@ -873,8 +616,7 @@ func TestTrackerListCmd_Run_JSON(t *testing.T) {
 `)
 
 	var buf bytes.Buffer
-	cmd := &TrackerListCmd{Dir: dir, Out: &buf}
-	err := cmd.Run()
+	err := runTrackerList(&buf, dir, false)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -884,7 +626,7 @@ func TestTrackerListCmd_Run_JSON(t *testing.T) {
 	assert.Contains(t, out, `"description": "Sprint planning"`)
 }
 
-func TestTrackerListCmd_Run_Table(t *testing.T) {
+func TestRunTrackerList_Table(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `jiras:
   - name: work
@@ -895,8 +637,7 @@ func TestTrackerListCmd_Run_Table(t *testing.T) {
 `)
 
 	var buf bytes.Buffer
-	cmd := &TrackerListCmd{Table: true, Dir: dir, Out: &buf}
-	err := cmd.Run()
+	err := runTrackerList(&buf, dir, true)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -907,12 +648,11 @@ func TestTrackerListCmd_Run_Table(t *testing.T) {
 	assert.Contains(t, out, "Sprint planning")
 }
 
-func TestTrackerListCmd_Run_empty(t *testing.T) {
+func TestRunTrackerList_empty(t *testing.T) {
 	dir := t.TempDir()
 
 	var buf bytes.Buffer
-	cmd := &TrackerListCmd{Dir: dir, Out: &buf}
-	err := cmd.Run()
+	err := runTrackerList(&buf, dir, false)
 	require.NoError(t, err)
 
 	// Empty list => prints JSON with empty array
@@ -920,7 +660,7 @@ func TestTrackerListCmd_Run_empty(t *testing.T) {
 	assert.Contains(t, out, "[]")
 }
 
-func TestTrackerListCmd_Run_defaultDir(t *testing.T) {
+func TestRunTrackerList_defaultDir(t *testing.T) {
 	// When Dir is empty, defaults to "." — use a clean temp dir to avoid
 	// picking up a real .humanconfig from the repo root.
 	dir := t.TempDir()
@@ -930,9 +670,87 @@ func TestTrackerListCmd_Run_defaultDir(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	var buf bytes.Buffer
-	cmd := &TrackerListCmd{Out: &buf}
-	err = cmd.Run()
+	err = runTrackerList(&buf, "", false)
 	require.NoError(t, err)
 	// Output should contain something (either trackers or empty)
 	assert.True(t, strings.Contains(buf.String(), "//") || strings.Contains(buf.String(), "[]"))
+}
+
+// --- newRootCmd tests ---
+
+func TestRootCmd_defaultRunsTrackerList(t *testing.T) {
+	// When invoked without args, root command runs "tracker list"
+	dir := t.TempDir()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	cmd := newRootCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+
+	err = cmd.Execute()
+	require.NoError(t, err)
+	// Should produce tracker list output (empty list)
+	assert.Contains(t, buf.String(), "[]")
+}
+
+func TestRootCmd_hasProviderSubcommands(t *testing.T) {
+	cmd := newRootCmd()
+	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}
+	for _, name := range providers {
+		found := false
+		for _, sub := range cmd.Commands() {
+			if sub.Use == name {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected provider subcommand: %s", name)
+	}
+}
+
+func TestRootCmd_hasStaticSubcommands(t *testing.T) {
+	cmd := newRootCmd()
+	for _, name := range []string{"tracker", "install"} {
+		found := false
+		for _, sub := range cmd.Commands() {
+			if sub.Use == name {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "expected static subcommand: %s", name)
+	}
+}
+
+func TestProviderCmd_hasIssueSubcommands(t *testing.T) {
+	cmd := newRootCmd()
+	var jiraCmd *cobra.Command
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "jira" {
+			jiraCmd = sub
+			break
+		}
+	}
+	require.NotNil(t, jiraCmd)
+
+	subNames := make(map[string]bool)
+	for _, sub := range jiraCmd.Commands() {
+		subNames[sub.Use] = true
+	}
+	assert.True(t, subNames["issues"], "expected 'issues' subcommand")
+	assert.True(t, subNames["issue"], "expected 'issue' subcommand")
+}
+
+// --- instanceFromFlags tests ---
+
+func TestInstanceFromFlags_noFlags(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{})
+	_ = cmd.Execute()
+	inst := instanceFromFlags(cmd)
+	assert.Nil(t, inst)
 }

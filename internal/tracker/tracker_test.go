@@ -18,6 +18,49 @@ func (stubProvider) ListComments(context.Context, string) ([]Comment, error)    
 func (stubProvider) AddComment(context.Context, string, string) (*Comment, error) { return nil, nil }
 func (stubProvider) DeleteIssue(context.Context, string) error                    { return nil }
 
+func TestResolveByKind_found(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+		{Name: "personal", Kind: "github", Provider: stubProvider{}},
+	}
+
+	inst, err := ResolveByKind("github", instances, "")
+	require.NoError(t, err)
+	assert.Equal(t, "personal", inst.Name)
+	assert.Equal(t, "github", inst.Kind)
+}
+
+func TestResolveByKind_notFound(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	_, err := ResolveByKind("github", instances, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no tracker of kind configured")
+}
+
+func TestResolveByKind_withName(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+		{Name: "hobby", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	inst, err := ResolveByKind("jira", instances, "hobby")
+	require.NoError(t, err)
+	assert.Equal(t, "hobby", inst.Name)
+}
+
+func TestResolveByKind_nameNotFound(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: stubProvider{}},
+	}
+
+	_, err := ResolveByKind("jira", instances, "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tracker name not found for kind")
+}
+
 func TestResolve_byName(t *testing.T) {
 	instances := []Instance{
 		{Name: "work", Kind: "jira", Provider: stubProvider{}},

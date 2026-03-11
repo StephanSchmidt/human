@@ -146,6 +146,29 @@ func Resolve(name string, instances []Instance, keyHint string) (*Instance, erro
 	return resolveAutoDetect(instances, keyHint)
 }
 
+// ResolveByKind returns the first instance matching the given tracker kind.
+// When name is non-empty, it further filters to that named instance.
+func ResolveByKind(kind string, instances []Instance, name string) (*Instance, error) {
+	var filtered []Instance
+	for _, inst := range instances {
+		if inst.Kind == kind {
+			filtered = append(filtered, inst)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, errors.WithDetails("no tracker of kind configured", "kind", kind)
+	}
+	if name != "" {
+		for i := range filtered {
+			if filtered[i].Name == name {
+				return &filtered[i], nil
+			}
+		}
+		return nil, errors.WithDetails("tracker name not found for kind", "name", name, "kind", kind)
+	}
+	return &filtered[0], nil
+}
+
 // resolveByName finds exactly one instance with the given name.
 func resolveByName(name string, instances []Instance) (*Instance, error) {
 	var matches []*Instance
