@@ -28,3 +28,22 @@ shortcuts:
     description: "Product development stories and epics"
     # url: https://api.app.shortcut.com  # optional, this is the default
     # token comes from env: export SHORTCUT_WORK_TOKEN=xxx
+
+notions:
+  - name: work
+    description: "Company workspace for docs and databases"
+    # url: https://api.notion.com  # optional, this is the default
+    # token comes from env: export NOTION_WORK_TOKEN=ntn_xxx
+
+figmas:
+  - name: design
+    description: "Product design files and components"
+    # url: https://api.figma.com  # optional, this is the default
+    # token comes from env: export FIGMA_DESIGN_TOKEN=figd_xxx
+
+amplitudes:
+  - name: product
+    url: https://amplitude.com  # US default; https://analytics.eu.amplitude.com for EU
+    description: "Product analytics data"
+    # key comes from env: export AMPLITUDE_PRODUCT_KEY=your-api-key
+    # secret comes from env: export AMPLITUDE_PRODUCT_SECRET=your-secret-key

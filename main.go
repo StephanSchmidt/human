@@ -16,6 +16,7 @@ import (
 	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/azuredevops"
 	"github.com/stephanschmidt/human/internal/claude"
+	"github.com/stephanschmidt/human/internal/daemon"
 	"github.com/stephanschmidt/human/internal/github"
 	"github.com/stephanschmidt/human/internal/gitlab"
 	"github.com/stephanschmidt/human/internal/jira"
@@ -196,8 +197,15 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
 	_, _ = fmt.Fprintln(w, "  human notion search \"quarterly report\"")
 	_, _ = fmt.Fprintln(w, "  human notion page get <page-id>")
+	_, _ = fmt.Fprintln(w, "  human figma file get <file-key>")
+	_, _ = fmt.Fprintln(w, "  human figma file comments <file-key>")
+	_, _ = fmt.Fprintln(w, "  human amplitude events list")
+	_, _ = fmt.Fprintln(w, "  human amplitude cohorts list")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
+	_, _ = fmt.Fprintln(w, "  human daemon start")
+	_, _ = fmt.Fprintln(w, "  human daemon token")
+	_, _ = fmt.Fprintln(w, "  human daemon status")
 }
 
 // --- loadAllInstances / instanceFromFlags ---
@@ -352,7 +360,8 @@ func newRootCmd() *cobra.Command {
 		Short: "Unified CLI for issue trackers and tools",
 		Long: `Unified CLI to list, read, create, delete, and comment on issues
 across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut.
-Search and read content from Notion workspaces.
+Search and read content from Notion workspaces. Browse Figma designs.
+Queries Amplitude product analytics.
 
 Use it to:
   - fetch a ticket before planning implementation
@@ -361,6 +370,8 @@ Use it to:
   - add comments with status updates or findings
   - look up ticket details (status, assignee, description)
   - search Notion for meeting notes, specs, and docs
+  - browse Figma files, components, and comments
+  - query Amplitude events, funnels, retention, and cohorts
 
 All trackers share the same command structure:
   human <tracker> issues list   — JSON array of issues
@@ -374,6 +385,11 @@ Tools:
   human notion page get ID      — page content as markdown
   human notion database query ID — query database rows
   human notion databases list   — list shared databases
+  human figma file get KEY      — file metadata and pages
+  human figma file comments KEY — design feedback
+  human figma file components KEY — published components
+  human amplitude events list   — event types with active users
+  human amplitude cohorts list  — behavioral cohorts
 
 Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/env vars.`,
 		Version: version + " (" + commit + ") " + date,
@@ -452,6 +468,16 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	notionCmd.GroupID = "tools"
 	rootCmd.AddCommand(notionCmd)
 
+	// --- Figma (tools) ---
+	figmaCmd := buildFigmaCommands()
+	figmaCmd.GroupID = "tools"
+	rootCmd.AddCommand(figmaCmd)
+
+	// --- Amplitude (tools) ---
+	amplitudeCmd := buildAmplitudeCommands()
+	amplitudeCmd.GroupID = "tools"
+	rootCmd.AddCommand(amplitudeCmd)
+
 	// --- Static commands ---
 	trackerCmd := buildTrackerCmd()
 	trackerCmd.GroupID = "utility"
@@ -460,6 +486,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	installCmd := buildInstallCmd()
 	installCmd.GroupID = "utility"
 	rootCmd.AddCommand(installCmd)
+
+	daemonCmd := buildDaemonCmd()
+	daemonCmd.GroupID = "utility"
+	rootCmd.AddCommand(daemonCmd)
 
 	return rootCmd
 }
@@ -522,10 +552,38 @@ func buildInstallCmd() *cobra.Command {
 	return cmd
 }
 
+// isDaemonSubcommand returns true if args start with "daemon", so that daemon
+// management commands (token, start, status) always execute locally.
+func isDaemonSubcommand(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if len(a) > 0 && a[0] == '-' {
+			continue // skip flags
+		}
+		return a == "daemon"
+	}
+	return false
+}
+
 // --- main ---
 
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
+
+	// Client mode: forward to daemon if configured.
+	// Skip forwarding for "daemon" subcommands — they must run locally.
+	args := os.Args[1:] //nolint:nilaway // os.Args is always set in main
+	if addr := os.Getenv("HUMAN_DAEMON_ADDR"); addr != "" && !isDaemonSubcommand(args) {
+		token := os.Getenv("HUMAN_DAEMON_TOKEN")
+		exitCode, err := daemon.RunRemote(addr, token, args, version)
+		if err != nil {
+			errors.LogError(err).Msg("remote execution failed")
+			os.Exit(1)
+		}
+		os.Exit(exitCode)
+	}
 
 	rootCmd := newRootCmd()
 	if err := rootCmd.Execute(); err != nil {

@@ -12,13 +12,15 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-**Human in the loop —** Issue tracker and tools CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Searches and reads content from Notion. Output as JSON and markdown.
+**Human in the loop —** Issue tracker and tools CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Searches and reads content from Notion. Browses Figma designs. Queries Amplitude product analytics. Output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, and Notion** — no tool-switching for the AI
+- **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude** — no tool-switching for the AI
 - **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
 - **Claude Code skills** turn PM tickets into implementation plans and bug analyses
 - **Definition of Ready checks** AI catches incomplete tickets before coding starts
 - **Notion integration** search workspace, read pages, query databases for context
+- **Figma integration** browse files, inspect components, read design comments, export images
+- **Amplitude integration** query event analytics, funnels, retention, cohorts
 
 ### Why
 
@@ -136,7 +138,65 @@ human notion database query <database-id> --table
 
 # Use a named Notion instance
 human notion --notion=work search "meeting notes"
+
+# Figma — browse files, inspect nodes, read comments
+human figma file get <file-key>
+human figma file comments <file-key>
+human figma file components <file-key>
+human figma file nodes <file-key> --ids=0:1,1:2
+human figma file image <file-key> --ids=0:1
+human figma projects list --team=<team-id>
+human figma project files <project-id>
+
+# Use a named Figma instance
+human figma --figma=design file get <file-key>
+
+# Amplitude — product analytics
+human amplitude events list
+human amplitude events query --event=_active --start=20260301 --end=20260311
+human amplitude taxonomy events
+human amplitude funnel --events=signup,purchase --start=20260301 --end=20260311
+human amplitude retention --start-event=signup --return-event=login --start=20260301 --end=20260311
+human amplitude user search alice@example.com
+human amplitude cohorts list
+
+# Use a named Amplitude instance
+human amplitude --amplitude=product events list
 ```
+
+## Devcontainer / Remote mode
+
+AI agents running inside devcontainers need access to issue trackers, Notion, Figma, and Amplitude, but credentials should stay on the host. The daemon mode splits `human` into two roles: a **daemon** on the host (holds credentials, executes commands) and a **client** inside the container (forwards CLI args, prints results).
+
+On the host:
+
+```bash
+human daemon start          # prints token, listens on :19285
+human daemon token          # print token for copy/paste
+human daemon status         # check if daemon is reachable
+```
+
+In `devcontainer.json`:
+
+```json
+{
+  "forwardPorts": [19285],
+  "remoteEnv": {
+    "HUMAN_DAEMON_ADDR": "localhost:19285",
+    "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>"
+  }
+}
+```
+
+Inside the container, all commands work transparently:
+
+```bash
+human jira issues list --project=KAN       # forwarded to host daemon
+human figma file get ABC123                # forwarded to host daemon
+human notion search "quarterly report"     # forwarded to host daemon
+```
+
+When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode (the default, no change from previous behavior).
 
 ## Setup
 
@@ -172,8 +232,23 @@ notions:
   - name: work
     token: ntn_abc123
     description: Company workspace
+
+figmas:
+  - name: design
+    token: figd_abc123
+    description: Product design team
+
+amplitudes:
+  - name: product
+    url: https://analytics.eu.amplitude.com  # EU; US default: https://amplitude.com
+    description: Product analytics
+    # key + secret from env
 ```
 
 Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
+
+Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) or `FIGMA_<NAME>_TOKEN` (per-instance).
+
+Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
 
 See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.

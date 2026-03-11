@@ -99,6 +99,9 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human jira issue delete KAN-1")
 	assert.Contains(t, out, "human tracker list")
 	assert.Contains(t, out, "human install --agent claude")
+	assert.Contains(t, out, "human daemon start")
+	assert.Contains(t, out, "human daemon token")
+	assert.Contains(t, out, "human daemon status")
 }
 
 func TestPrintExamples_startsWithBlankLine(t *testing.T) {
@@ -714,7 +717,7 @@ func TestRootCmd_hasProviderSubcommands(t *testing.T) {
 
 func TestRootCmd_hasStaticSubcommands(t *testing.T) {
 	cmd := newRootCmd()
-	for _, name := range []string{"tracker", "install"} {
+	for _, name := range []string{"tracker", "install", "daemon"} {
 		found := false
 		for _, sub := range cmd.Commands() {
 			if sub.Use == name {
@@ -797,6 +800,26 @@ func TestRunTrackerFindWithInstances_Table(t *testing.T) {
 	assert.Contains(t, out, "jira")
 	assert.Contains(t, out, "KAN")
 	assert.Contains(t, out, "KAN-42")
+}
+
+func TestIsDaemonSubcommand(t *testing.T) {
+	tests := []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"daemon", "token"}, true},
+		{[]string{"daemon", "start"}, true},
+		{[]string{"daemon"}, true},
+		{[]string{"--verbose", "daemon", "token"}, true},
+		{[]string{"jira", "issues", "list"}, false},
+		{[]string{"--help"}, false},
+		{[]string{"--", "daemon"}, false},
+	}
+	for _, tt := range tests {
+		got := isDaemonSubcommand(tt.args)
+		assert.Equal(t, tt.want, got, "isDaemonSubcommand(%v)", tt.args)
+	}
 }
 
 func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {
