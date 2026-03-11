@@ -194,6 +194,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
 	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1")
 	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
+	_, _ = fmt.Fprintln(w, "  human notion search \"quarterly report\"")
+	_, _ = fmt.Fprintln(w, "  human notion page get <page-id>")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 }
@@ -347,9 +349,10 @@ func auditLogPath() string {
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "human",
-		Short: "Unified CLI for issue trackers",
+		Short: "Unified CLI for issue trackers and tools",
 		Long: `Unified CLI to list, read, create, delete, and comment on issues
 across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut.
+Search and read content from Notion workspaces.
 
 Use it to:
   - fetch a ticket before planning implementation
@@ -357,6 +360,7 @@ Use it to:
   - create tickets for bugs or features you discover
   - add comments with status updates or findings
   - look up ticket details (status, assignee, description)
+  - search Notion for meeting notes, specs, and docs
 
 All trackers share the same command structure:
   human <tracker> issues list   — JSON array of issues
@@ -365,7 +369,13 @@ All trackers share the same command structure:
   human <tracker> issue  delete — delete or close
   human <tracker> issue  comment add/list — manage comments
 
-Configure trackers in .humanconfig.yaml or pass credentials via flags/env vars.`,
+Tools:
+  human notion search QUERY     — search Notion workspace
+  human notion page get ID      — page content as markdown
+  human notion database query ID — query database rows
+  human notion databases list   — list shared databases
+
+Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/env vars.`,
 		Version: version + " (" + commit + ") " + date,
 		// When no subcommand is given, run "tracker list".
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -416,6 +426,7 @@ Configure trackers in .humanconfig.yaml or pass credentials via flags/env vars.`
 	// --- Command groups ---
 	rootCmd.AddGroup(
 		&cobra.Group{ID: "trackers", Title: "Issue Trackers:"},
+		&cobra.Group{ID: "tools", Title: "Tools:"},
 		&cobra.Group{ID: "utility", Title: "Utility:"},
 	)
 
@@ -435,6 +446,11 @@ Configure trackers in .humanconfig.yaml or pass credentials via flags/env vars.`
 		}
 		rootCmd.AddCommand(providerCmd)
 	}
+
+	// --- Notion (tools) ---
+	notionCmd := buildNotionCommands()
+	notionCmd.GroupID = "tools"
+	rootCmd.AddCommand(notionCmd)
 
 	// --- Static commands ---
 	trackerCmd := buildTrackerCmd()

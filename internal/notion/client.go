@@ -1,0 +1,378 @@
+package notion
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+
+	"github.com/stephanschmidt/human/errors"
+	"github.com/stephanschmidt/human/internal/tracker"
+)
+
+const notionVersion = "2022-06-28"
+
+// Client is a Notion API client.
+type Client struct {
+	baseURL string
+	token   string
+	version string
+	http    tracker.HTTPDoer
+}
+
+// New creates a Notion client with the given base URL and integration token.
+func New(baseURL, token string) *Client {
+	return &Client{
+		baseURL: baseURL,
+		token:   token,
+		version: notionVersion,
+		http:    http.DefaultClient,
+	}
+}
+
+// SetHTTPDoer replaces the HTTP client used for API requests.
+func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
+	c.http = doer
+}
+
+// Search searches the Notion workspace for pages and databases matching the query.
+func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, error) {
+	body, err := json.Marshal(searchRequest{
+		Query:    query,
+		PageSize: 100,
+	})
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling search request")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/search", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var paginated paginatedResponse[json.RawMessage]
+	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding search response")
+	}
+
+	var results []SearchResult
+	for _, raw := range paginated.Results {
+		var obj struct {
+			Object     string                    `json:"object"`
+			ID         string                    `json:"id"`
+			URL        string                    `json:"url"`
+			Properties map[string]notionProperty `json:"properties"`
+			Title      []notionRichText          `json:"title"`
+		}
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			continue
+		}
+
+		title := extractTitle(obj.Object, obj.Properties, obj.Title)
+		results = append(results, SearchResult{
+			ID:    obj.ID,
+			Title: title,
+			URL:   obj.URL,
+			Type:  obj.Object,
+		})
+	}
+	return results, nil
+}
+
+// GetPage fetches a page's content and returns it as markdown.
+func (c *Client) GetPage(ctx context.Context, pageID string) (string, error) {
+	// Fetch page metadata for the title.
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/pages/"+pageID, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var page notionPage
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding page response", "pageID", pageID)
+	}
+
+	title := extractTitle("page", page.Properties, nil)
+
+	// Fetch block children.
+	blocks, err := c.getBlockChildren(ctx, pageID, 0)
+	if err != nil {
+		return "", err
+	}
+
+	md := ""
+	if title != "" {
+		md = "# " + title + "\n\n"
+	}
+	md += BlocksToMarkdown(blocks)
+	return md, nil
+}
+
+// QueryDatabase queries a Notion database and returns its rows.
+func (c *Client) QueryDatabase(ctx context.Context, dbID string) ([]DatabaseRow, error) {
+	body, err := json.Marshal(databaseQueryRequest{PageSize: 100})
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling database query request")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/databases/"+dbID+"/query", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var paginated paginatedResponse[notionPage]
+	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding database query response", "databaseID", dbID)
+	}
+
+	var rows []DatabaseRow
+	for _, page := range paginated.Results {
+		props := make(map[string]string)
+		for name, prop := range page.Properties {
+			props[name] = propertyToString(prop)
+		}
+		rows = append(rows, DatabaseRow{
+			ID:         page.ID,
+			URL:        page.URL,
+			Properties: props,
+		})
+	}
+	return rows, nil
+}
+
+// ListDatabases lists all databases shared with the integration.
+func (c *Client) ListDatabases(ctx context.Context) ([]DatabaseEntry, error) {
+	body, err := json.Marshal(searchRequest{
+		Filter: &searchFilter{
+			Value:    "database",
+			Property: "object",
+		},
+		PageSize: 100,
+	})
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling databases list request")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/search", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var paginated paginatedResponse[notionDatabase]
+	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding databases list response")
+	}
+
+	var entries []DatabaseEntry
+	for _, db := range paginated.Results {
+		title := richTextPlain(db.Title)
+		entries = append(entries, DatabaseEntry{
+			ID:    db.ID,
+			Title: title,
+			URL:   db.URL,
+		})
+	}
+	return entries, nil
+}
+
+const maxBlockDepth = 3
+
+// getBlockChildren fetches all child blocks of a block, with recursive fetching
+// for nested blocks up to maxBlockDepth.
+func (c *Client) getBlockChildren(ctx context.Context, blockID string, depth int) ([]notionBlock, error) {
+	var allBlocks []notionBlock
+	cursor := ""
+
+	for {
+		path := "/v1/blocks/" + blockID + "/children?page_size=100"
+		if cursor != "" {
+			path += "&start_cursor=" + cursor
+		}
+
+		resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		var paginated paginatedResponse[notionBlock]
+		if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
+			_ = resp.Body.Close()
+			return nil, errors.WrapWithDetails(err, "decoding block children", "blockID", blockID)
+		}
+		_ = resp.Body.Close()
+
+		for i := range paginated.Results {
+			block := &paginated.Results[i]
+			if block.HasChildren && depth < maxBlockDepth {
+				children, err := c.getBlockChildren(ctx, block.ID, depth+1)
+				if err != nil {
+					return nil, err
+				}
+				block.Children = children
+			}
+			allBlocks = append(allBlocks, *block)
+		}
+
+		if !paginated.HasMore {
+			break
+		}
+		cursor = paginated.NextCursor
+	}
+
+	return allBlocks, nil
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	if err := tracker.ValidateURL(c.baseURL); err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
+	}
+
+	// Handle path that may include query parameters.
+	parsedPath, err := url.Parse(path)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "parsing path", "path", path)
+	}
+	u.Path = parsedPath.Path
+	u.RawQuery = parsedPath.RawQuery
+
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "creating request",
+			"method", method, "path", path)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Notion-Version", c.version)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "requesting Notion",
+			"method", method, "path", path)
+	}
+	if resp == nil {
+		return nil, errors.WithDetails("requesting Notion: nil response",
+			"method", method, "path", path)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		_ = resp.Body.Close()
+		return nil, errors.WithDetails(
+			fmt.Sprintf("notion %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
+			"statusCode", resp.StatusCode, "method", method, "path", path)
+	}
+	return resp, nil
+}
+
+// extractTitle extracts a title string from page properties or database title.
+func extractTitle(objType string, properties map[string]notionProperty, dbTitle []notionRichText) string {
+	if objType == "database" && len(dbTitle) > 0 {
+		return richTextPlain(dbTitle)
+	}
+	for _, prop := range properties {
+		if prop.Type == "title" && len(prop.Title) > 0 {
+			return richTextPlain(prop.Title)
+		}
+	}
+	return ""
+}
+
+// propertyConverters maps property types to their string conversion functions.
+var propertyConverters = map[string]func(notionProperty) string{
+	"title":        func(p notionProperty) string { return richTextPlain(p.Title) },
+	"rich_text":    func(p notionProperty) string { return richTextPlain(p.RichText) },
+	"number":       convertNumber,
+	"select":       convertSelect,
+	"status":       convertStatus,
+	"url":          func(p notionProperty) string { return derefString(p.URL) },
+	"checkbox":     convertCheckbox,
+	"date":         convertDate,
+	"email":        func(p notionProperty) string { return derefString(p.Email) },
+	"phone_number": func(p notionProperty) string { return derefString(p.Phone) },
+}
+
+// propertyToString converts a property value to a display string.
+func propertyToString(prop notionProperty) string {
+	if fn, ok := propertyConverters[prop.Type]; ok {
+		return fn(prop)
+	}
+	return ""
+}
+
+func convertNumber(p notionProperty) string {
+	if p.Number != nil {
+		return fmt.Sprintf("%g", *p.Number)
+	}
+	return ""
+}
+
+func convertSelect(p notionProperty) string {
+	if p.Select != nil {
+		return p.Select.Name
+	}
+	return ""
+}
+
+func convertStatus(p notionProperty) string {
+	if p.Status != nil {
+		return p.Status.Name
+	}
+	return ""
+}
+
+func convertCheckbox(p notionProperty) string {
+	if p.Checkbox == nil {
+		return ""
+	}
+	if *p.Checkbox {
+		return "true"
+	}
+	return "false"
+}
+
+func convertDate(p notionProperty) string {
+	if p.Date == nil {
+		return ""
+	}
+	if p.Date.End != "" {
+		return p.Date.Start + " - " + p.Date.End
+	}
+	return p.Date.Start
+}
+
+func derefString(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+// richTextPlain extracts plain text from a slice of rich text elements.
+func richTextPlain(texts []notionRichText) string {
+	var sb []string
+	for _, t := range texts {
+		sb = append(sb, t.PlainText)
+	}
+	return joinStrings(sb)
+}
+
+func joinStrings(ss []string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += ""
+		}
+		result += s
+	}
+	return result
+}
