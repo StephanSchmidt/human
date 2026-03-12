@@ -4,6 +4,15 @@
 
 Phase 1: Interact with issue trackers with product management issues and create implementation tickets with an implementation plan.
 
+# Done Done
+
+The status of 'done done' means not only things are done,
+but nothing more needs to be done, e.g. change documentation,
+website, configuration and the project is in the state for 
+a new release.
+
+Whatever you do, the new state needs to be 'done done'.
+
 # Project Structure
 
 - `main.go` — CLI entry point
@@ -34,6 +43,10 @@ When asked to commit, go through changes and create atomar commits that have one
 # Process
 
 Use todo list as much as possible.
+
+# Release
+
+By default increase versions for a release by 0.0.1
 
 # Verification
  
