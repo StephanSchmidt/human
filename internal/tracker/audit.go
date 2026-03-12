@@ -113,3 +113,31 @@ func (a *AuditProvider) AddComment(ctx context.Context, issueKey string, body st
 	a.log("AddComment", issueKey, time.Since(start), err)
 	return comment, err
 }
+
+func (a *AuditProvider) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	start := time.Now()
+	err := a.inner.TransitionIssue(ctx, key, targetStatus)
+	a.log("TransitionIssue", key, time.Since(start), err)
+	return err
+}
+
+func (a *AuditProvider) AssignIssue(ctx context.Context, key string, userID string) error {
+	start := time.Now()
+	err := a.inner.AssignIssue(ctx, key, userID)
+	a.log("AssignIssue", key, time.Since(start), err)
+	return err
+}
+
+func (a *AuditProvider) GetCurrentUser(ctx context.Context) (string, error) {
+	start := time.Now()
+	userID, err := a.inner.GetCurrentUser(ctx)
+	a.log("GetCurrentUser", "", time.Since(start), err)
+	return userID, err
+}
+
+func (a *AuditProvider) EditIssue(ctx context.Context, key string, opts EditOptions) (*Issue, error) {
+	start := time.Now()
+	issue, err := a.inner.EditIssue(ctx, key, opts)
+	a.log("EditIssue", key, time.Since(start), err)
+	return issue, err
+}

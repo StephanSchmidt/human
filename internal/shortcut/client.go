@@ -124,7 +124,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 // CreateIssue implements tracker.Creator.
 func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error) {
 	body := map[string]any{
-		"name": issue.Summary,
+		"name": issue.Title,
 	}
 	if issue.Description != "" {
 		body["description"] = issue.Description
@@ -168,10 +168,130 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	return &tracker.Issue{
 		Key:         strconv.FormatInt(story.ID, 10),
 		Project:     issue.Project,
-		Summary:     story.Name,
+		Title:       story.Name,
 		Description: story.Description,
 		Type:        story.StoryType,
 	}, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+func (c *Client) TransitionIssue(ctx context.Context, key string, _ string) error {
+	id, err := parseStoryID(key)
+	if err != nil {
+		return err
+	}
+
+	stateID, err := c.startedWorkflowStateID(ctx)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]int64{"workflow_state_id": stateID})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v3/stories/%d", id)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	id, err := parseStoryID(key)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string][]string{"owner_ids": {userID}})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v3/stories/%d", id)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v3/member-info", "", nil, "")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var info scMemberInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding member-info response")
+	}
+	return info.ID, nil
+}
+
+// startedWorkflowStateID returns the first "started" workflow state ID.
+func (c *Client) startedWorkflowStateID(ctx context.Context) (int64, error) {
+	c.statesMu.Lock()
+	defer c.statesMu.Unlock()
+
+	if c.states == nil {
+		if err := c.fetchWorkflowsLocked(ctx); err != nil {
+			return 0, err
+		}
+	}
+
+	for id, typ := range c.stateTypes {
+		if typ == "started" {
+			return id, nil
+		}
+	}
+	return 0, errors.WithDetails("no started workflow state found")
+}
+
+// EditIssue implements tracker.Editor.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	id, err := parseStoryID(key)
+	if err != nil {
+		return nil, err
+	}
+
+	fields := make(map[string]string)
+	if opts.Title != nil {
+		fields["name"] = *opts.Title
+	}
+	if opts.Description != nil {
+		fields["description"] = *opts.Description
+	}
+
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v3/stories/%d", id)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var story scStory
+	if err := json.NewDecoder(resp.Body).Decode(&story); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	}
+
+	issue, err := c.toTrackerIssue(ctx, story, "")
+	if err != nil {
+		return nil, err
+	}
+	return &issue, nil
 }
 
 // DeleteIssue implements tracker.Deleter using true deletion (DELETE /api/v3/stories/{id}).
@@ -464,7 +584,7 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 		Key:         strconv.FormatInt(story.ID, 10),
 		Project:     project,
 		Type:        story.StoryType,
-		Summary:     story.Name,
+		Title:       story.Name,
 		Status:      stateName,
 		Assignee:    assignee,
 		Reporter:    reporter,

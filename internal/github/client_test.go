@@ -97,7 +97,7 @@ func TestListIssues_happy(t *testing.T) {
 	require.Len(t, issues, 2)
 
 	assert.Equal(t, "octocat/hello-world#1", issues[0].Key)
-	assert.Equal(t, "Bug report", issues[0].Summary)
+	assert.Equal(t, "Bug report", issues[0].Title)
 	assert.Equal(t, "open", issues[0].Status)
 	assert.Equal(t, "bug", issues[0].Type)
 	assert.Equal(t, "bob", issues[0].Assignee)
@@ -197,7 +197,7 @@ func TestGetIssue_happy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "octocat/hello-world#42", issue.Key)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "open", issue.Status)
 	assert.Equal(t, "enhancement", issue.Type) // first label
 	assert.Equal(t, "", issue.Priority)        // GitHub has no priority
@@ -254,14 +254,14 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "octocat/hello-world",
-		Summary:     "New issue",
+		Title:     "New issue",
 		Description: "Some description",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "octocat/hello-world#99", issue.Key)
 	assert.Equal(t, "octocat/hello-world", issue.Project)
-	assert.Equal(t, "New issue", issue.Summary)
+	assert.Equal(t, "New issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 
 	assert.Equal(t, "New issue", gotBody.Title)
@@ -283,7 +283,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "octocat/hello-world",
-		Summary: "No desc issue",
+		Title: "No desc issue",
 	})
 
 	require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "octocat/hello-world",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -526,4 +526,114 @@ func TestListComments_empty(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, comments)
+}
+
+func TestTransitionIssue_noop(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	err := client.TransitionIssue(context.Background(), "octocat/hello-world#1", "In Progress")
+
+	require.NoError(t, err)
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	var gotBody map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/repos/octocat/hello-world/issues/1", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"number":1}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.AssignIssue(context.Background(), "octocat/hello-world#1", "octocat")
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{"assignees": {"octocat"}}, gotBody)
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.AssignIssue(context.Background(), "octocat/hello-world#1", "octocat")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/user", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `{"login":"octocat"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	login, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "octocat", login)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	title := "Updated Title"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/repos/octocat/repo/issues/1", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(body, &got))
+		assert.Equal(t, "Updated Title", got["title"])
+
+		_, _ = fmt.Fprint(w, `{"number":1,"title":"Updated Title","body":"desc","state":"open"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issue, err := client.EditIssue(context.Background(), "octocat/repo#1", tracker.EditOptions{Title: &title})
+
+	require.NoError(t, err)
+	assert.Equal(t, "octocat/repo#1", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "ghp_test")
+	_, err := client.EditIssue(context.Background(), "octocat/repo#1", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }

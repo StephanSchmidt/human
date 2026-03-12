@@ -94,7 +94,7 @@ func TestListIssues_happy(t *testing.T) {
 	require.Len(t, issues, 2)
 
 	assert.Equal(t, "mygroup/myproject#1", issues[0].Key)
-	assert.Equal(t, "Bug report", issues[0].Summary)
+	assert.Equal(t, "Bug report", issues[0].Title)
 	assert.Equal(t, "opened", issues[0].Status)
 	assert.Equal(t, "bug", issues[0].Type)
 	assert.Equal(t, "bob", issues[0].Assignee)
@@ -195,7 +195,7 @@ func TestGetIssue_happy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "mygroup/myproject#42", issue.Key)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "opened", issue.Status)
 	assert.Equal(t, "enhancement", issue.Type)
 	assert.Equal(t, "", issue.Priority)
@@ -244,14 +244,14 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "glpat-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "mygroup/myproject",
-		Summary:     "New issue",
+		Title:     "New issue",
 		Description: "Some description",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "mygroup/myproject#99", issue.Key)
 	assert.Equal(t, "mygroup/myproject", issue.Project)
-	assert.Equal(t, "New issue", issue.Summary)
+	assert.Equal(t, "New issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 
 	assert.Equal(t, "New issue", gotBody.Title)
@@ -267,7 +267,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "glpat-test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "mygroup/myproject",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -475,4 +475,121 @@ func Test_parseIssueKey(t *testing.T) {
 			assert.Equal(t, tt.wantIID, iid)
 		})
 	}
+}
+
+func TestTransitionIssue_noop(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.TransitionIssue(context.Background(), "mygroup/myproject#1", "In Progress")
+
+	require.NoError(t, err)
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	var gotBody map[string][]int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/1", r.URL.RawPath)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &gotBody))
+
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.AssignIssue(context.Background(), "mygroup/myproject#1", "42")
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]int{"assignee_ids": {42}}, gotBody)
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.AssignIssue(context.Background(), "mygroup/myproject#1", "42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_invalidUserID(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.AssignIssue(context.Background(), "mygroup/myproject#1", "abc")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid user ID")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v4/user", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `{"id":42}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	userID, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "42", userID)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	title := "Updated Title"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(body, &got))
+		assert.Equal(t, "Updated Title", got["title"])
+
+		_, _ = fmt.Fprint(w, `{"iid":42,"title":"Updated Title","description":"desc","state":"opened"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	issue, err := client.EditIssue(context.Background(), "mygroup/myproject#42", tracker.EditOptions{Title: &title})
+
+	require.NoError(t, err)
+	assert.Equal(t, "mygroup/myproject#42", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "glpat-test")
+	_, err := client.EditIssue(context.Background(), "mygroup/myproject#42", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }

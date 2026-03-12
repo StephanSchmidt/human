@@ -41,3 +41,7 @@ type ghComment struct {
 	User      *ghUser `json:"user"`
 	CreatedAt string  `json:"created_at"`
 }
+
+type ghCurrentUser struct {
+	Login string `json:"login"`
+}

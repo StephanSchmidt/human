@@ -56,3 +56,8 @@ type patchOp struct {
 	Path  string `json:"path"`
 	Value any    `json:"value"`
 }
+
+// adoConnectionData is the response from the /_apis/connectionData endpoint.
+type adoConnectionData struct {
+	AuthenticatedUser adoIdentityRef `json:"authenticatedUser"`
+}

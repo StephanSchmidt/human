@@ -149,7 +149,7 @@ func TestListIssues_happy(t *testing.T) {
 
 	assert.Equal(t, "ENG-1", issues[0].Key)
 	assert.Equal(t, "ENG", issues[0].Project)
-	assert.Equal(t, "First issue", issues[0].Summary)
+	assert.Equal(t, "First issue", issues[0].Title)
 	assert.Equal(t, "In Progress", issues[0].Status)
 	assert.Equal(t, "High", issues[0].Priority)
 	assert.Equal(t, "Alice", issues[0].Assignee)
@@ -270,7 +270,7 @@ func TestGetIssue_happy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ENG-42", issue.Key)
 	assert.Equal(t, "ENG", issue.Project)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "Done", issue.Status)
 	assert.Equal(t, "Urgent", issue.Priority)
 	assert.Equal(t, "Alice", issue.Assignee)
@@ -333,7 +333,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "ENG",
-		Summary:     "New issue",
+		Title:     "New issue",
 		Description: "Some description",
 	})
 
@@ -341,7 +341,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	assert.Equal(t, 2, callCount)
 	assert.Equal(t, "ENG-99", issue.Key)
 	assert.Equal(t, "ENG", issue.Project)
-	assert.Equal(t, "New issue", issue.Summary)
+	assert.Equal(t, "New issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 }
 
@@ -368,7 +368,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Summary: "No desc",
+		Title: "No desc",
 	})
 
 	require.NoError(t, err)
@@ -393,7 +393,7 @@ func TestCreateIssue_serverReturnsFailure(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -417,7 +417,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -438,7 +438,7 @@ func TestCreateIssue_teamNotFound(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "NOPE",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -480,7 +480,7 @@ func Test_toTrackerIssue(t *testing.T) {
 			},
 			project: "ENG",
 			want: tracker.Issue{
-				Key: "ENG-1", Project: "ENG", Summary: "Title",
+				Key: "ENG-1", Project: "ENG", Title: "Title",
 				Status: "In Progress", Priority: "High",
 				Assignee: "Alice", Reporter: "Bob", Type: "bug",
 				Description: "Desc",
@@ -495,7 +495,7 @@ func Test_toTrackerIssue(t *testing.T) {
 			},
 			project: "ENG",
 			want: tracker.Issue{
-				Key: "ENG-2", Project: "ENG", Summary: "No people",
+				Key: "ENG-2", Project: "ENG", Title: "No people",
 				Status: "Todo",
 			},
 		},
@@ -509,7 +509,7 @@ func Test_toTrackerIssue(t *testing.T) {
 			},
 			project: "ENG",
 			want: tracker.Issue{
-				Key: "ENG-3", Project: "ENG", Summary: "No labels",
+				Key: "ENG-3", Project: "ENG", Title: "No labels",
 				Status: "Done",
 			},
 		},
@@ -693,6 +693,136 @@ func TestDeleteIssue_serverReturnsFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "deletion failed")
 }
 
+func TestTransitionIssue_happy(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(id:": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG-1", vars["id"])
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"states": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG", vars["key"])
+				return `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[{"id":"state-1","name":"In Progress","type":"started"}]}}]}}}`
+			},
+			"issueUpdate(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "issue-uuid-1", vars["id"])
+				return `{"data":{"issueUpdate":{"success":true}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "In Progress")
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, callCount)
+}
+
+func TestTransitionIssue_stateNotFound(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(id:": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"states": func(_ map[string]any) string {
+				return `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[{"id":"state-1","name":"Done","type":"completed"}]}}]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "NoSuchState")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "target state not found")
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(id:": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG-1", vars["id"])
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"issueUpdate(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "issue-uuid-1", vars["id"])
+				return `{"data":{"issueUpdate":{"success":true}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.AssignIssue(context.Background(), "ENG-1", "user-uuid")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(id:": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"issueUpdate(": func(_ map[string]any) string {
+				return `{"data":{"issueUpdate":{"success":false}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.AssignIssue(context.Background(), "ENG-1", "user-uuid")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "assign failed")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"viewer": func(_ map[string]any) string {
+				return `{"data":{"viewer":{"id":"viewer-uuid"}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	userID, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "viewer-uuid", userID)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
 func TestListComments_empty(t *testing.T) {
 	srv := httptest.NewServer(&graphQLHandler{
 		t: t,
@@ -709,4 +839,54 @@ func TestListComments_empty(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, comments)
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	title := "Updated Title"
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issueUpdate": func(vars map[string]any) string {
+				callCount++
+				input := vars["input"].(map[string]any)
+				assert.Equal(t, "Updated Title", input["title"])
+				return `{"data":{"issueUpdate":{"success":true}}}`
+			},
+			"issue(": func(_ map[string]any) string {
+				callCount++
+				if callCount <= 2 {
+					// resolveIssueID call
+					return `{"data":{"issue":{"id":"uuid-1"}}}`
+				}
+				// GetIssue call after edit
+				return `{"data":{"issue":{
+					"identifier":"ENG-42","title":"Updated Title","description":"",
+					"state":{"name":"In Progress"},"priorityLabel":"High",
+					"assignee":null,"creator":null,"labels":{"nodes":[]}
+				}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	issue, err := client.EditIssue(context.Background(), "ENG-42", tracker.EditOptions{Title: &title})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ENG-42", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "lin_test")
+	_, err := client.EditIssue(context.Background(), "ENG-42", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
 }

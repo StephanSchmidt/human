@@ -62,8 +62,10 @@ func buildProviderCommands(kind string) []*cobra.Command {
 	}
 	issueCmd.AddCommand(buildIssueGetCmd(kind))
 	issueCmd.AddCommand(buildIssueCreateCmd(kind))
+	issueCmd.AddCommand(buildIssueEditCmd(kind))
 	issueCmd.AddCommand(buildIssueDeleteCmd(kind))
 	issueCmd.AddCommand(buildIssueCommentCmd(kind))
+	issueCmd.AddCommand(buildIssueStartCmd(kind))
 
 	return []*cobra.Command{issuesCmd, issueCmd}
 }
@@ -131,6 +133,40 @@ func buildIssueCreateCmd(kind string) *cobra.Command {
 	return cmd
 }
 
+func buildIssueEditCmd(kind string) *cobra.Command {
+	var title, description string
+
+	cmd := &cobra.Command{
+		Use:     "edit KEY",
+		Short:   "Edit an issue's title and/or description",
+		Example: `  human jira issue edit KAN-1 --title "New title" --description "Updated description"`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("title") && !cmd.Flags().Changed("description") {
+				return errors.WithDetails("at least one of --title or --description is required")
+			}
+			p, cleanup, err := resolveProvider(cmd, kind)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			var opts tracker.EditOptions
+			if cmd.Flags().Changed("title") {
+				opts.Title = &title
+			}
+			if cmd.Flags().Changed("description") {
+				opts.Description = &description
+			}
+
+			return runEditIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "New issue title")
+	cmd.Flags().StringVar(&description, "description", "", "New issue description (markdown)")
+	return cmd
+}
+
 func buildIssueDeleteCmd(kind string) *cobra.Command {
 	var confirm int
 
@@ -187,6 +223,22 @@ func buildIssueCommentCmd(kind string) *cobra.Command {
 
 	commentCmd.AddCommand(addCmd, listCmd)
 	return commentCmd
+}
+
+func buildIssueStartCmd(kind string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "start KEY",
+		Short: "Start working on an issue (transition to In Progress and assign to yourself)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, cleanup, err := resolveProvider(cmd, kind)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			return runStartIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0])
+		},
+	}
 }
 
 // --- Business logic functions ---
@@ -315,6 +367,48 @@ func readConfirmCode(key string) (int, error) {
 // clearConfirmCode removes the temp file after successful deletion.
 func clearConfirmCode(key string) {
 	_ = os.Remove(confirmPath(key))
+}
+
+func runEditIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, opts tracker.EditOptions) error {
+	issue, err := p.EditIssue(ctx, key, opts)
+	if err != nil {
+		return err
+	}
+	if issue == nil {
+		return errors.WithDetails("edit returned no issue", "key", key)
+	}
+	_, _ = fmt.Fprintf(out, "%s\t%s\n", issue.Key, issue.Title)
+	return nil
+}
+
+func runStartIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string) error {
+	userID, err := p.GetCurrentUser(ctx)
+	if err != nil {
+		return errors.WrapWithDetails(err, "getting current user")
+	}
+
+	transitionErr := p.TransitionIssue(ctx, key, "In Progress")
+	assignErr := p.AssignIssue(ctx, key, userID)
+
+	if transitionErr != nil && assignErr != nil {
+		return errors.WithDetails("failed to start issue",
+			"key", key,
+			"transitionError", transitionErr.Error(),
+			"assignError", assignErr.Error())
+	}
+
+	if transitionErr != nil {
+		_, _ = fmt.Fprintf(out, "Assigned %s to %s (transition failed: %v)\n", key, userID, transitionErr)
+		return nil
+	}
+
+	if assignErr != nil {
+		_, _ = fmt.Fprintf(out, "Transitioned %s to In Progress (assign failed: %v)\n", key, assignErr)
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Started %s\n", key)
+	return nil
 }
 
 func runAddComment(ctx context.Context, p tracker.Provider, out io.Writer, key, body string) error {

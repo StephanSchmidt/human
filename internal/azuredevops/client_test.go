@@ -116,7 +116,7 @@ func TestListIssues_happy(t *testing.T) {
 	require.Len(t, issues, 2)
 
 	assert.Equal(t, "Human/1", issues[0].Key)
-	assert.Equal(t, "Bug report", issues[0].Summary)
+	assert.Equal(t, "Bug report", issues[0].Title)
 	assert.Equal(t, "New", issues[0].Status)
 	assert.Equal(t, "Bug", issues[0].Type)
 	assert.Equal(t, "Alice", issues[0].Assignee)
@@ -124,7 +124,7 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "2", issues[0].Priority)
 
 	assert.Equal(t, "Human/2", issues[1].Key)
-	assert.Equal(t, "Feature request", issues[1].Summary)
+	assert.Equal(t, "Feature request", issues[1].Title)
 	assert.Equal(t, "", issues[1].Assignee)
 	assert.Equal(t, "", issues[1].Priority) // Priority 0 means not set
 }
@@ -228,7 +228,7 @@ func TestGetIssue_happy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "Human/42", issue.Key)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "Active", issue.Status)
 	assert.Equal(t, "Issue", issue.Type)
 	assert.Equal(t, "1", issue.Priority)
@@ -277,14 +277,14 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "myorg", "pat-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "Human",
-		Summary:     "New issue",
+		Title:     "New issue",
 		Description: "Some description",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "Human/99", issue.Key)
 	assert.Equal(t, "Human", issue.Project)
-	assert.Equal(t, "New issue", issue.Summary)
+	assert.Equal(t, "New issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 
 	require.Len(t, gotOps, 2)
@@ -309,7 +309,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "myorg", "pat-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "Human",
-		Summary: "No desc",
+		Title: "No desc",
 	})
 
 	require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "myorg", "pat-test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "Human",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -494,6 +494,156 @@ func TestDoRequest_authHeader(t *testing.T) {
 	})
 
 	require.NoError(t, err)
+}
+
+func TestTransitionIssue_happy(t *testing.T) {
+	var gotOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/myorg/MyProject/_apis/wit/workitems/42", r.URL.Path)
+		assert.Equal(t, "application/json-patch+json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &gotOps))
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"id":42,"rev":2,"fields":{}}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	err := client.TransitionIssue(context.Background(), "MyProject/42", "In Progress")
+
+	require.NoError(t, err)
+	require.Len(t, gotOps, 1)
+	assert.Equal(t, "add", gotOps[0].Op)
+	assert.Equal(t, "/fields/System.State", gotOps[0].Path)
+	assert.Equal(t, "In Progress", gotOps[0].Value)
+}
+
+func TestTransitionIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	err := client.TransitionIssue(context.Background(), "MyProject/42", "In Progress")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	var gotOps []patchOp
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/myorg/MyProject/_apis/wit/workitems/42", r.URL.Path)
+		assert.Equal(t, "application/json-patch+json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(body, &gotOps))
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"id":42,"rev":2,"fields":{}}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	err := client.AssignIssue(context.Background(), "MyProject/42", "user@example.com")
+
+	require.NoError(t, err)
+	require.Len(t, gotOps, 1)
+	assert.Equal(t, "add", gotOps[0].Op)
+	assert.Equal(t, "/fields/System.AssignedTo", gotOps[0].Path)
+	assert.Equal(t, "user@example.com", gotOps[0].Value)
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	err := client.AssignIssue(context.Background(), "MyProject/42", "user@example.com")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/myorg/_apis/connectionData", r.URL.Path)
+		assert.Equal(t, "7.1", r.URL.Query().Get("api-version"))
+
+		_, _ = fmt.Fprint(w, `{"authenticatedUser":{"displayName":"Alice","uniqueName":"alice@example.com"}}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	user, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "alice@example.com", user)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	title := "Updated Title"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Contains(t, r.Header.Get("Content-Type"), "application/json-patch+json")
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var ops []map[string]any
+		require.NoError(t, json.Unmarshal(body, &ops))
+		require.Len(t, ops, 1)
+		assert.Equal(t, "replace", ops[0]["op"])
+		assert.Equal(t, "/fields/System.Title", ops[0]["path"])
+		assert.Equal(t, "Updated Title", ops[0]["value"])
+
+		_, _ = fmt.Fprint(w, `{"id":42,"fields":{"System.Title":"Updated Title","System.State":"Active","System.Description":"","System.WorkItemType":"Issue"}}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	issue, err := client.EditIssue(context.Background(), "Human/42", tracker.EditOptions{Title: &title})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Human/42", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "myorg", "pat-test")
+	_, err := client.EditIssue(context.Background(), "Human/42", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func Test_parseIssueKey(t *testing.T) {

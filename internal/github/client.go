@@ -107,7 +107,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	}
 
 	payload := createRequest{
-		Title: issue.Summary,
+		Title: issue.Title,
 		Body:  issue.Description,
 	}
 
@@ -133,7 +133,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	return &tracker.Issue{
 		Key:         fmt.Sprintf("%s/%s#%d", owner, repo, result.Number),
 		Project:     issue.Project,
-		Summary:     result.Title,
+		Title:       result.Title,
 		Description: result.Body,
 	}, nil
 }
@@ -216,6 +216,84 @@ func toTrackerComment(gc ghComment) (*tracker.Comment, error) {
 		Body:    gc.Body,
 		Created: created,
 	}, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+// GitHub issues have no custom workflow states, so this is a no-op.
+func (c *Client) TransitionIssue(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	owner, repo, number, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string][]string{"assignees": {userID}})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/user", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var user ghCurrentUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding current user response")
+	}
+	return user.Login, nil
+}
+
+// EditIssue implements tracker.Editor.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	owner, repo, number, err := parseIssueKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	fields := make(map[string]string)
+	if opts.Title != nil {
+		fields["title"] = *opts.Title
+	}
+	if opts.Description != nil {
+		fields["body"] = *opts.Description
+	}
+
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var gi ghIssue
+	if err := json.NewDecoder(resp.Body).Decode(&gi); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	}
+
+	issue := toTrackerIssue(owner, repo, gi)
+	return &issue, nil
 }
 
 // DeleteIssue implements tracker.Deleter by closing the issue.
@@ -322,7 +400,7 @@ func parseIssueKey(key string) (string, string, int, error) {
 func toTrackerIssue(owner, repo string, gi ghIssue) tracker.Issue {
 	issue := tracker.Issue{
 		Key:         fmt.Sprintf("%s/%s#%d", owner, repo, gi.Number),
-		Summary:     gi.Title,
+		Title:       gi.Title,
 		Status:      gi.State,
 		Description: gi.Body,
 	}

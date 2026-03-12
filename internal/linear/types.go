@@ -107,3 +107,30 @@ type issueDeleteData struct {
 		Success bool `json:"success"`
 	} `json:"issueDelete"`
 }
+
+type teamStatesData struct {
+	Teams struct {
+		Nodes []struct {
+			ID     string `json:"id"`
+			States struct {
+				Nodes []struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+					Type string `json:"type"`
+				} `json:"nodes"`
+			} `json:"states"`
+		} `json:"nodes"`
+	} `json:"teams"`
+}
+
+type issueUpdateData struct {
+	IssueUpdate struct {
+		Success bool `json:"success"`
+	} `json:"issueUpdate"`
+}
+
+type viewerData struct {
+	Viewer struct {
+		ID string `json:"id"`
+	} `json:"viewer"`
+}

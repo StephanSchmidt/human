@@ -58,6 +58,18 @@ const addCommentMutation = `mutation($issueId: String!, $body: String!) {
 	}
 }`
 
+const getTeamStatesQuery = `query($key: String!) {
+	teams(filter: { key: { eq: $key } }) {
+		nodes { id states { nodes { id name type } } }
+	}
+}`
+
+const issueUpdateMutation = `mutation($id: String!, $input: IssueUpdateInput!) {
+	issueUpdate(id: $id, input: $input) { success }
+}`
+
+const viewerQuery = `{ viewer { id } }`
+
 const deleteIssueMutation = `mutation($id: String!) {
 	issueDelete(id: $id) { success }
 }`
@@ -144,7 +156,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 
 	vars := map[string]any{
 		"teamId": teamID,
-		"title":  issue.Summary,
+		"title":  issue.Title,
 	}
 	if issue.Description != "" {
 		vars["description"] = issue.Description
@@ -225,6 +237,136 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 		comments = append(comments, *c)
 	}
 	return comments, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	issueID, err := c.resolveIssueID(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	teamKey := projectFromIdentifier(key)
+	if teamKey == "" {
+		return errors.WithDetails("cannot determine team from issue key", "issueKey", key)
+	}
+
+	data, err := c.doGraphQL(ctx, getTeamStatesQuery, map[string]any{"key": teamKey})
+	if err != nil {
+		return err
+	}
+
+	var result teamStatesData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return errors.WrapWithDetails(err, "decoding team states response", "issueKey", key)
+	}
+
+	if len(result.Teams.Nodes) == 0 {
+		return errors.WithDetails("team not found", "teamKey", teamKey)
+	}
+
+	var stateID string
+	for _, s := range result.Teams.Nodes[0].States.Nodes {
+		if strings.EqualFold(s.Name, targetStatus) || s.Type == "started" {
+			stateID = s.ID
+			if strings.EqualFold(s.Name, targetStatus) {
+				break
+			}
+		}
+	}
+	if stateID == "" {
+		return errors.WithDetails("target state not found", "issueKey", key, "targetStatus", targetStatus)
+	}
+
+	updateData, err := c.doGraphQL(ctx, issueUpdateMutation, map[string]any{
+		"id":    issueID,
+		"input": map[string]string{"stateId": stateID},
+	})
+	if err != nil {
+		return err
+	}
+
+	var updateResult issueUpdateData
+	if err := json.Unmarshal(updateData, &updateResult); err != nil {
+		return errors.WrapWithDetails(err, "decoding issue update response", "issueKey", key)
+	}
+	if !updateResult.IssueUpdate.Success {
+		return errors.WithDetails("linear issue transition failed", "issueKey", key)
+	}
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	issueID, err := c.resolveIssueID(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	data, err := c.doGraphQL(ctx, issueUpdateMutation, map[string]any{
+		"id":    issueID,
+		"input": map[string]string{"assigneeId": userID},
+	})
+	if err != nil {
+		return err
+	}
+
+	var result issueUpdateData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return errors.WrapWithDetails(err, "decoding issue update response", "issueKey", key)
+	}
+	if !result.IssueUpdate.Success {
+		return errors.WithDetails("linear issue assign failed", "issueKey", key)
+	}
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	data, err := c.doGraphQL(ctx, viewerQuery, nil)
+	if err != nil {
+		return "", err
+	}
+
+	var result viewerData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding viewer response")
+	}
+	return result.Viewer.ID, nil
+}
+
+// EditIssue implements tracker.Editor.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	issueID, err := c.resolveIssueID(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	input := make(map[string]string)
+	if opts.Title != nil {
+		input["title"] = *opts.Title
+	}
+	if opts.Description != nil {
+		input["description"] = *opts.Description
+	}
+
+	data, err := c.doGraphQL(ctx, issueUpdateMutation, map[string]any{
+		"id":    issueID,
+		"input": input,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result issueUpdateData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding issue update response", "issueKey", key)
+	}
+	if !result.IssueUpdate.Success {
+		return nil, errors.WithDetails("linear issue edit failed", "issueKey", key)
+	}
+
+	return c.GetIssue(ctx, key)
 }
 
 // DeleteIssue implements tracker.Deleter.
@@ -387,7 +529,7 @@ func toTrackerIssue(li linearIssue, project string) tracker.Issue {
 	issue := tracker.Issue{
 		Key:         li.Identifier,
 		Project:     project,
-		Summary:     li.Title,
+		Title:       li.Title,
 		Status:      li.State.Name,
 		Priority:    li.PriorityLabel,
 		Description: li.Description,

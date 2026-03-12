@@ -133,7 +133,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	}
 
 	ops := []patchOp{
-		{Op: "add", Path: "/fields/System.Title", Value: issue.Summary},
+		{Op: "add", Path: "/fields/System.Title", Value: issue.Title},
 	}
 	if issue.Description != "" {
 		ops = append(ops, patchOp{Op: "add", Path: "/fields/System.Description", Value: issue.Description})
@@ -159,9 +159,109 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	return &tracker.Issue{
 		Key:         fmt.Sprintf("%s/%d", project, wi.ID),
 		Project:     project,
-		Summary:     wi.Fields.Title,
+		Title:       wi.Fields.Title,
 		Description: wi.Fields.Description,
 	}, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	project, id, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	ops := []patchOp{
+		{Op: "add", Path: "/fields/System.State", Value: targetStatus},
+	}
+	body, err := json.Marshal(ops)
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
+	}
+
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	project, id, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	ops := []patchOp{
+		{Op: "add", Path: "/fields/System.AssignedTo", Value: userID},
+	}
+	body, err := json.Marshal(ops)
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
+	}
+
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	path := fmt.Sprintf("/%s/_apis/connectionData", c.org)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, "api-version=7.1", nil, "")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result adoConnectionData
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding connection data response")
+	}
+	return result.AuthenticatedUser.UniqueName, nil
+}
+
+// EditIssue implements tracker.Editor using JSON Patch format.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	project, id, err := parseIssueKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	var ops []patchOp
+	if opts.Title != nil {
+		ops = append(ops, patchOp{Op: "replace", Path: "/fields/System.Title", Value: *opts.Title})
+	}
+	if opts.Description != nil {
+		ops = append(ops, patchOp{Op: "replace", Path: "/fields/System.Description", Value: *opts.Description})
+	}
+
+	body, err := json.Marshal(ops)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
+	}
+
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var wi adoWorkItem
+	if err := json.NewDecoder(resp.Body).Decode(&wi); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	}
+
+	issue := toTrackerIssue(wi, project)
+	return &issue, nil
 }
 
 // DeleteIssue implements tracker.Deleter by transitioning the work item to "Done".
@@ -335,7 +435,7 @@ func toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 		Key:         fmt.Sprintf("%s/%d", project, wi.ID),
 		Project:     project,
 		Type:        wi.Fields.WorkItemType,
-		Summary:     wi.Fields.Title,
+		Title:       wi.Fields.Title,
 		Status:      wi.Fields.State,
 		Description: wi.Fields.Description,
 	}

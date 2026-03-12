@@ -106,7 +106,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	}
 
 	payload := createRequest{
-		Title:       issue.Summary,
+		Title:       issue.Title,
 		Description: issue.Description,
 	}
 
@@ -132,7 +132,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	return &tracker.Issue{
 		Key:         fmt.Sprintf("%s#%d", issue.Project, result.IID),
 		Project:     issue.Project,
-		Summary:     result.Title,
+		Title:       result.Title,
 		Description: result.Description,
 	}, nil
 }
@@ -231,6 +231,99 @@ func toTrackerComment(gn glNote) (*tracker.Comment, error) {
 		Body:    gn.Body,
 		Created: created,
 	}, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+// GitLab issues have no custom workflow states, so this is a no-op.
+func (c *Client) TransitionIssue(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	project, iid, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	encodedProject, err := splitProject(project)
+	if err != nil {
+		return err
+	}
+
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return errors.WithDetails("invalid user ID, expected numeric", "userID", userID)
+	}
+
+	payload, err := json.Marshal(map[string][]int{"assignee_ids": {uid}})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v4/projects/%s/issues/%d", encodedProject, iid)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v4/user", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var user glCurrentUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding current user response")
+	}
+	return strconv.Itoa(user.ID), nil
+}
+
+// EditIssue implements tracker.Editor.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	project, iid, err := parseIssueKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	encodedProject, err := splitProject(project)
+	if err != nil {
+		return nil, err
+	}
+
+	fields := make(map[string]string)
+	if opts.Title != nil {
+		fields["title"] = *opts.Title
+	}
+	if opts.Description != nil {
+		fields["description"] = *opts.Description
+	}
+
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v4/projects/%s/issues/%d", encodedProject, iid)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var gi glIssue
+	if err := json.NewDecoder(resp.Body).Decode(&gi); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	}
+
+	issue := toTrackerIssue(project, gi)
+	return &issue, nil
 }
 
 // DeleteIssue implements tracker.Deleter.
@@ -339,7 +432,7 @@ func toTrackerIssue(project string, gi glIssue) tracker.Issue {
 	issue := tracker.Issue{
 		Key:         fmt.Sprintf("%s#%d", project, gi.IID),
 		Project:     project,
-		Summary:     gi.Title,
+		Title:       gi.Title,
 		Status:      gi.State,
 		Description: gi.Description,
 	}

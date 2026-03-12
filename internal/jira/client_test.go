@@ -127,7 +127,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "KAN",
 		Type:        "Task",
-		Summary:     "Test issue",
+		Title:     "Test issue",
 		Description: "Some description",
 	})
 
@@ -135,7 +135,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	assert.Equal(t, "KAN-42", issue.Key)
 	assert.Equal(t, "KAN", issue.Project)
 	assert.Equal(t, "Task", issue.Type)
-	assert.Equal(t, "Test issue", issue.Summary)
+	assert.Equal(t, "Test issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 
 	assert.Equal(t, "KAN", gotBody.Fields.Project.Key)
@@ -160,7 +160,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "KAN",
 		Type:    "Bug",
-		Summary: "No description issue",
+		Title: "No description issue",
 	})
 
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "KAN",
 		Type:    "Task",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	assert.Error(t, err)
@@ -211,11 +211,11 @@ func TestListIssues_happy(t *testing.T) {
 	require.Len(t, issues, 2)
 
 	assert.Equal(t, "KAN-1", issues[0].Key)
-	assert.Equal(t, "First issue", issues[0].Summary)
+	assert.Equal(t, "First issue", issues[0].Title)
 	assert.Equal(t, "To Do", issues[0].Status)
 
 	assert.Equal(t, "KAN-2", issues[1].Key)
-	assert.Equal(t, "Second issue", issues[1].Summary)
+	assert.Equal(t, "Second issue", issues[1].Title)
 	assert.Equal(t, "In Progress", issues[1].Status)
 }
 
@@ -301,7 +301,7 @@ func TestGetIssue_happy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "KAN-42", issue.Key)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "Done", issue.Status)
 	assert.Equal(t, "High", issue.Priority)
 	assert.Equal(t, "Alice", issue.Assignee)
@@ -464,4 +464,168 @@ func TestListComments_empty(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, comments)
+}
+
+func TestTransitionIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/rest/api/3/issue/KAN-1/transitions", r.URL.Path)
+
+		switch r.Method {
+		case http.MethodGet:
+			_, _ = fmt.Fprint(w, `{"transitions":[{"id":"21","name":"Start Progress","to":{"name":"In Progress"}}]}`)
+		case http.MethodPost:
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+
+			var got map[string]map[string]string
+			require.NoError(t, json.Unmarshal(body, &got))
+			assert.Equal(t, "21", got["transition"]["id"])
+
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.TransitionIssue(context.Background(), "KAN-1", "In Progress")
+
+	require.NoError(t, err)
+}
+
+func TestTransitionIssue_notFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"transitions":[{"id":"31","name":"Done","to":{"name":"Done"}}]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.TransitionIssue(context.Background(), "KAN-1", "In Progress")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transition not found")
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/rest/api/3/issue/KAN-1/assignee", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(body, &got))
+		assert.Equal(t, "user-123", got["accountId"])
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.AssignIssue(context.Background(), "KAN-1", "user-123")
+
+	require.NoError(t, err)
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	err := client.AssignIssue(context.Background(), "KAN-1", "user-123")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/rest/api/3/myself", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `{"accountId":"abc-123"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	accountID, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "abc-123", accountID)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	callCount := 0
+	title := "Updated Title"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/3/issue/KAN-1":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+
+			var got map[string]map[string]any
+			require.NoError(t, json.Unmarshal(body, &got))
+			assert.Equal(t, "Updated Title", got["fields"]["summary"])
+			assert.NotNil(t, got["fields"]["description"])
+
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/KAN-1":
+			_, _ = fmt.Fprint(w, `{
+				"key": "KAN-1",
+				"fields": {
+					"summary": "Updated Title",
+					"status": {"name": "Open"},
+					"description": null
+				}
+			}`)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	desc := "New desc"
+	client := New(srv.URL, "user@example.com", "token")
+	issue, err := client.EditIssue(context.Background(), "KAN-1", tracker.EditOptions{
+		Title:       &title,
+		Description: &desc,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "KAN-1", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "user@example.com", "token")
+	_, err := client.EditIssue(context.Background(), "KAN-1", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }

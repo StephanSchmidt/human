@@ -76,6 +76,8 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human <tracker> issues list")
 	assert.Contains(t, out, "human <tracker> issue  get")
 	assert.Contains(t, out, "human <tracker> issue  create")
+	assert.Contains(t, out, `human <tracker> issue  edit <KEY> --title "New" --description "Updated"`)
+	assert.Contains(t, out, "human <tracker> issue  start <KEY>                Start working on issue")
 	assert.Contains(t, out, "human <tracker> issue  delete <KEY>               Show confirmation code")
 	assert.Contains(t, out, "human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
 	assert.Contains(t, out, "human <tracker> issue  comment add")
@@ -98,10 +100,13 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human jira issue get KAN-1")
 	assert.Contains(t, out, `human jira issue create --project=KAN "Implement login page"`)
 	assert.Contains(t, out, "human github issues list --project=octocat/hello-world")
+	assert.Contains(t, out, `human jira issue edit KAN-1 --title "Updated title"`)
+	assert.Contains(t, out, "human jira issue start KAN-1")
 	assert.Contains(t, out, "human jira issue delete KAN-1")
 	assert.Contains(t, out, "human jira issue delete KAN-1 --confirm=4521")
 	assert.Contains(t, out, "human tracker list")
 	assert.Contains(t, out, "human install --agent claude")
+	assert.Contains(t, out, "human browser https://example.com")
 	assert.Contains(t, out, "human daemon start")
 	assert.Contains(t, out, "human daemon token")
 	assert.Contains(t, out, "human daemon status")
@@ -172,12 +177,16 @@ func TestPrintConnectedTrackers_error(t *testing.T) {
 // --- mock provider ---
 
 type mockProvider struct {
-	listIssuesFn   func(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error)
-	getIssueFn     func(ctx context.Context, key string) (*tracker.Issue, error)
-	createIssueFn  func(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error)
-	deleteIssueFn  func(ctx context.Context, key string) error
-	listCommentsFn func(ctx context.Context, issueKey string) ([]tracker.Comment, error)
-	addCommentFn   func(ctx context.Context, issueKey string, body string) (*tracker.Comment, error)
+	listIssuesFn      func(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error)
+	getIssueFn        func(ctx context.Context, key string) (*tracker.Issue, error)
+	createIssueFn     func(ctx context.Context, issue *tracker.Issue) (*tracker.Issue, error)
+	deleteIssueFn     func(ctx context.Context, key string) error
+	listCommentsFn    func(ctx context.Context, issueKey string) ([]tracker.Comment, error)
+	addCommentFn      func(ctx context.Context, issueKey string, body string) (*tracker.Comment, error)
+	transitionIssueFn func(ctx context.Context, key string, targetStatus string) error
+	assignIssueFn     func(ctx context.Context, key string, userID string) error
+	getCurrentUserFn  func(ctx context.Context) (string, error)
+	editIssueFn       func(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error)
 }
 
 func (m *mockProvider) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -202,6 +211,34 @@ func (m *mockProvider) ListComments(ctx context.Context, issueKey string) ([]tra
 
 func (m *mockProvider) AddComment(ctx context.Context, issueKey string, body string) (*tracker.Comment, error) {
 	return m.addCommentFn(ctx, issueKey, body)
+}
+
+func (m *mockProvider) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	if m.transitionIssueFn != nil {
+		return m.transitionIssueFn(ctx, key, targetStatus)
+	}
+	return nil
+}
+
+func (m *mockProvider) AssignIssue(ctx context.Context, key string, userID string) error {
+	if m.assignIssueFn != nil {
+		return m.assignIssueFn(ctx, key, userID)
+	}
+	return nil
+}
+
+func (m *mockProvider) GetCurrentUser(ctx context.Context) (string, error) {
+	if m.getCurrentUserFn != nil {
+		return m.getCurrentUserFn(ctx)
+	}
+	return "", nil
+}
+
+func (m *mockProvider) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	if m.editIssueFn != nil {
+		return m.editIssueFn(ctx, key, opts)
+	}
+	return nil, nil
 }
 
 // --- print function tests ---
@@ -711,6 +748,101 @@ func TestRunListComments_error(t *testing.T) {
 	assert.EqualError(t, err, "list comments failed")
 }
 
+func TestRunStartIssue(t *testing.T) {
+	p := &mockProvider{
+		getCurrentUserFn: func(_ context.Context) (string, error) {
+			return "user-123", nil
+		},
+		transitionIssueFn: func(_ context.Context, key string, targetStatus string) error {
+			assert.Equal(t, "KAN-1", key)
+			assert.Equal(t, "In Progress", targetStatus)
+			return nil
+		},
+		assignIssueFn: func(_ context.Context, key string, userID string) error {
+			assert.Equal(t, "KAN-1", key)
+			assert.Equal(t, "user-123", userID)
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Started KAN-1\n", buf.String())
+}
+
+func TestRunStartIssue_transitionFails(t *testing.T) {
+	p := &mockProvider{
+		getCurrentUserFn: func(_ context.Context) (string, error) {
+			return "user-123", nil
+		},
+		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
+			return fmt.Errorf("no transition")
+		},
+		assignIssueFn: func(_ context.Context, _ string, _ string) error {
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Assigned KAN-1 to user-123")
+	assert.Contains(t, buf.String(), "transition failed")
+}
+
+func TestRunStartIssue_assignFails(t *testing.T) {
+	p := &mockProvider{
+		getCurrentUserFn: func(_ context.Context) (string, error) {
+			return "user-123", nil
+		},
+		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
+			return nil
+		},
+		assignIssueFn: func(_ context.Context, _ string, _ string) error {
+			return fmt.Errorf("assign denied")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Transitioned KAN-1 to In Progress")
+	assert.Contains(t, buf.String(), "assign failed")
+}
+
+func TestRunStartIssue_bothFail(t *testing.T) {
+	p := &mockProvider{
+		getCurrentUserFn: func(_ context.Context) (string, error) {
+			return "user-123", nil
+		},
+		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
+			return fmt.Errorf("no transition")
+		},
+		assignIssueFn: func(_ context.Context, _ string, _ string) error {
+			return fmt.Errorf("assign denied")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to start issue")
+}
+
+func TestRunStartIssue_getCurrentUserError(t *testing.T) {
+	p := &mockProvider{
+		getCurrentUserFn: func(_ context.Context) (string, error) {
+			return "", fmt.Errorf("auth failed")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "getting current user")
+}
+
 func TestRunTrackerList_JSON(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, `jiras:
@@ -820,7 +952,7 @@ func TestRootCmd_hasProviderSubcommands(t *testing.T) {
 
 func TestRootCmd_hasStaticSubcommands(t *testing.T) {
 	cmd := newRootCmd()
-	for _, name := range []string{"tracker", "install", "daemon"} {
+	for _, name := range []string{"tracker", "install", "daemon", "browser URL"} {
 		found := false
 		for _, sub := range cmd.Commands() {
 			if sub.Use == name {
@@ -923,6 +1055,56 @@ func TestIsDaemonSubcommand(t *testing.T) {
 		got := isDaemonSubcommand(tt.args)
 		assert.Equal(t, tt.want, got, "isDaemonSubcommand(%v)", tt.args)
 	}
+}
+
+func TestRunEditIssue(t *testing.T) {
+	title := "Updated"
+	p := &mockProvider{
+		editIssueFn: func(_ context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+			assert.Equal(t, "KAN-1", key)
+			assert.Equal(t, &title, opts.Title)
+			assert.Nil(t, opts.Description)
+			return &tracker.Issue{Key: "KAN-1", Title: "Updated"}, nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "KAN-1")
+	assert.Contains(t, buf.String(), "Updated")
+}
+
+func TestRunEditIssue_error(t *testing.T) {
+	title := "X"
+	p := &mockProvider{
+		editIssueFn: func(_ context.Context, _ string, _ tracker.EditOptions) (*tracker.Issue, error) {
+			return nil, fmt.Errorf("edit failed")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
+	assert.EqualError(t, err, "edit failed")
+}
+
+func TestRunEditIssue_bothFields(t *testing.T) {
+	title := "New Title"
+	desc := "New Desc"
+	p := &mockProvider{
+		editIssueFn: func(_ context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+			assert.Equal(t, "KAN-1", key)
+			assert.Equal(t, &title, opts.Title)
+			assert.Equal(t, &desc, opts.Description)
+			return &tracker.Issue{Key: "KAN-1", Title: "New Title"}, nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title, Description: &desc})
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "KAN-1")
+	assert.Contains(t, buf.String(), "New Title")
 }
 
 func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {

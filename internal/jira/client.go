@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/stephanschmidt/human/errors"
@@ -64,7 +65,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	for i, iss := range result.Issues {
 		issues[i] = tracker.Issue{
 			Key:     iss.Key,
-			Summary: iss.Fields.Summary,
+			Title:   iss.Fields.Summary,
 			Status:  iss.Fields.Status.Name,
 		}
 	}
@@ -103,7 +104,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 
 	return &tracker.Issue{
 		Key:         detail.Key,
-		Summary:     f.Summary,
+		Title:       f.Summary,
 		Status:      f.Status.Name,
 		Priority:    nameOrEmpty(f.Priority),
 		Assignee:    nameOrEmpty(f.Assignee),
@@ -117,7 +118,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	payload := createRequest{
 		Fields: createFields{
 			Project:     keyField{Key: issue.Project},
-			Summary:     issue.Summary,
+			Summary:     issue.Title,
 			IssueType:   nameOnly{Name: issue.Type},
 			Description: adf.FromMarkdown(issue.Description),
 		},
@@ -145,7 +146,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Key:         result.Key,
 		Project:     issue.Project,
 		Type:        issue.Type,
-		Summary:     issue.Summary,
+		Title:       issue.Title,
 		Description: issue.Description,
 	}, nil
 }
@@ -225,6 +226,100 @@ func toTrackerComment(jc jiraComment) (*tracker.Comment, error) {
 		Body:    body,
 		Created: created,
 	}, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	path := fmt.Sprintf("/rest/api/3/issue/%s/transitions", url.PathEscape(key))
+	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result transitionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return errors.WrapWithDetails(err, "decoding transitions response", "issueKey", key)
+	}
+
+	var transitionID string
+	for _, t := range result.Transitions {
+		if strings.EqualFold(t.To.Name, targetStatus) {
+			transitionID = t.ID
+			break
+		}
+	}
+	if transitionID == "" {
+		return errors.WithDetails("transition not found", "issueKey", key, "targetStatus", targetStatus)
+	}
+
+	payload, err := json.Marshal(map[string]any{"transition": map[string]string{"id": transitionID}})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling transition request", "issueKey", key)
+	}
+
+	resp2, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp2.Body.Close()
+	return nil
+}
+
+// AssignIssue implements tracker.Assigner.
+func (c *Client) AssignIssue(ctx context.Context, key string, userID string) error {
+	path := fmt.Sprintf("/rest/api/3/issue/%s/assignee", url.PathEscape(key))
+	payload, err := json.Marshal(map[string]string{"accountId": userID})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling assign request", "issueKey", key)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// GetCurrentUser implements tracker.CurrentUserGetter.
+func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/rest/api/3/myself", "", nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result myselfResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding myself response")
+	}
+	return result.AccountID, nil
+}
+
+// EditIssue implements tracker.Editor.
+func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
+	fields := make(map[string]any)
+	if opts.Title != nil {
+		fields["summary"] = *opts.Title
+	}
+	if opts.Description != nil {
+		fields["description"] = adf.FromMarkdown(*opts.Description)
+	}
+
+	payload, err := json.Marshal(map[string]any{"fields": fields})
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling edit request", "issueKey", key)
+	}
+
+	path := fmt.Sprintf("/rest/api/3/issue/%s", url.PathEscape(key))
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	_ = resp.Body.Close()
+
+	return c.GetIssue(ctx, key)
 }
 
 // DeleteIssue implements tracker.Deleter.

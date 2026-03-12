@@ -41,3 +41,7 @@ type createResponse struct {
 type noteRequest struct {
 	Body string `json:"body"`
 }
+
+type glCurrentUser struct {
+	ID int `json:"id"`
+}

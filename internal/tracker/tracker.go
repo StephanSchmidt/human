@@ -189,7 +189,7 @@ type Issue struct {
 	Key         string `json:"key"`
 	Project     string `json:"project"` // project key, e.g. "KAN"
 	Type        string `json:"type"`    // issue type, e.g. "Task", "Bug"
-	Summary     string `json:"summary"`
+	Title       string `json:"title"`
 	Status      string `json:"status"`
 	Priority    string `json:"priority"`
 	Assignee    string `json:"assignee"`
@@ -231,6 +231,10 @@ type Provider interface {
 	Creator
 	Commenter
 	Deleter
+	Transitioner
+	Assigner
+	CurrentUserGetter
+	Editor
 }
 
 // Instance represents a configured tracker backend ready for use.
@@ -264,6 +268,28 @@ type Deleter interface {
 // Transitioner moves an issue to a new status.
 type Transitioner interface {
 	TransitionIssue(ctx context.Context, key string, targetStatus string) error
+}
+
+// Assigner assigns an issue to a user.
+type Assigner interface {
+	AssignIssue(ctx context.Context, key string, userID string) error
+}
+
+// CurrentUserGetter retrieves the authenticated user's identifier.
+type CurrentUserGetter interface {
+	GetCurrentUser(ctx context.Context) (string, error)
+}
+
+// EditOptions specifies which fields to update on an issue.
+// Nil pointer fields are left unchanged; non-nil fields are set (even if empty).
+type EditOptions struct {
+	Title       *string
+	Description *string
+}
+
+// Editor updates an existing issue's title and/or description.
+type Editor interface {
+	EditIssue(ctx context.Context, key string, opts EditOptions) (*Issue, error)
 }
 
 // Resolve determines which tracker instance to use.

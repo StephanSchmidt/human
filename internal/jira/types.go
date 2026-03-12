@@ -77,3 +77,17 @@ type jiraComment struct {
 type commentsResponse struct {
 	Comments []jiraComment `json:"comments"`
 }
+
+type transitionsResponse struct {
+	Transitions []jiraTransition `json:"transitions"`
+}
+
+type jiraTransition struct {
+	ID   string      `json:"id"`
+	Name string      `json:"name"`
+	To   statusField `json:"to"`
+}
+
+type myselfResponse struct {
+	AccountID string `json:"accountId"`
+}

@@ -49,11 +49,26 @@ amplitudes:
 Select a specific instance with `--tracker`:
 
 ```bash
-human --tracker=personal issues list --project=KAN
-human --tracker=work issues list --project=octocat/hello-world
+human --tracker=personal list --project=KAN
+human --tracker=work list --project=octocat/hello-world
 ```
 
-When only one tracker type is configured, it is auto-detected. When multiple tracker types are configured, specify which one with `--tracker=<name>`.
+Quick commands auto-detect the tracker from key format and configuration:
+
+```bash
+human get KAN-1                  # auto-detects tracker from key format
+human list --project=KAN         # auto-detects when one tracker type is configured
+```
+
+When only one tracker type is configured, it is auto-detected. When multiple tracker types are configured, specify which one with `--tracker=<name>`. Provider-specific commands (`human jira issues list ...`) also continue to work.
+
+Edit an existing issue's title and/or description (both flags are optional, but at least one is required):
+
+```bash
+human jira issue edit KAN-1 --title "New title"
+human jira issue edit KAN-1 --description "Updated description"
+human github issue edit octocat/repo#42 --title "New title" --description "Updated desc"
+```
 
 List all configured trackers (JSON output, also the default when run without arguments):
 
@@ -136,6 +151,8 @@ A 32-byte random hex token is generated on first run of `human daemon start` and
 
 3. Inside the container, all commands work transparently:
    ```bash
+   human get KAN-1
+   human list --project=KAN
    human jira issues list --project=KAN
    human notion search "quarterly report"
    human figma file get ABC123

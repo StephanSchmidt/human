@@ -54,3 +54,8 @@ type scGroup struct {
 	ID   string `json:"id"` // UUID
 	Name string `json:"name"`
 }
+
+// scMemberInfo is the response from /api/v3/member-info.
+type scMemberInfo struct {
+	ID string `json:"id"` // UUID
+}

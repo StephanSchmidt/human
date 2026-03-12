@@ -180,8 +180,10 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human <tracker> issues list --project=<PROJECT>   List issues (JSON)")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  get <KEY>                  Get issue (markdown)")
 	_, _ = fmt.Fprintln(w, `  human <tracker> issue  create --project=<P> "Title" --description "Details"`)
+	_, _ = fmt.Fprintln(w, `  human <tracker> issue  edit <KEY> --title "New" --description "Updated"`)
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Show confirmation code")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  start <KEY>                Start working on issue")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment add <KEY> <BODY>   Add comment")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment list <KEY>         List comments")
 	_, _ = fmt.Fprintln(w)
@@ -199,6 +201,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, `  human jira issue create --project=KAN "Implement login page" --description "Add OAuth2 login flow with Google provider"`)
 	_, _ = fmt.Fprintln(w, "  human github issues list --project=octocat/hello-world")
 	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
+	_, _ = fmt.Fprintln(w, `  human jira issue edit KAN-1 --title "Updated title"`)
+	_, _ = fmt.Fprintln(w, "  human jira issue start KAN-1")
 	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1                    # shows confirmation code")
 	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1 --confirm=4521     # deletes")
 	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
@@ -210,6 +214,7 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human amplitude cohorts list")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
+	_, _ = fmt.Fprintln(w, "  human browser https://example.com")
 	_, _ = fmt.Fprintln(w, "  human daemon start")
 	_, _ = fmt.Fprintln(w, "  human daemon token")
 	_, _ = fmt.Fprintln(w, "  human daemon status")
@@ -384,6 +389,8 @@ All trackers share the same command structure:
   human <tracker> issues list   — JSON array of issues
   human <tracker> issue  get    — single issue as markdown
   human <tracker> issue  create — create and return key
+  human <tracker> issue  edit   — update title and/or description
+  human <tracker> issue  start  — transition + assign to yourself
   human <tracker> issue  delete — delete or close
   human <tracker> issue  comment add/list — manage comments
 
@@ -507,6 +514,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	daemonCmd := buildDaemonCmd()
 	daemonCmd.GroupID = "utility"
 	rootCmd.AddCommand(daemonCmd)
+
+	browserCmd := buildBrowserCmd()
+	browserCmd.GroupID = "utility"
+	rootCmd.AddCommand(browserCmd)
 
 	return rootCmd
 }

@@ -107,14 +107,14 @@ func TestListIssues_happy(t *testing.T) {
 	require.Len(t, issues, 2)
 
 	assert.Equal(t, "1", issues[0].Key)
-	assert.Equal(t, "Bug report", issues[0].Summary)
+	assert.Equal(t, "Bug report", issues[0].Title)
 	assert.Equal(t, "To Do", issues[0].Status)
 	assert.Equal(t, "bug", issues[0].Type)
 	assert.Equal(t, "Alice", issues[0].Assignee)
 	assert.Equal(t, "Bob", issues[0].Reporter)
 
 	assert.Equal(t, "2", issues[1].Key)
-	assert.Equal(t, "Feature request", issues[1].Summary)
+	assert.Equal(t, "Feature request", issues[1].Title)
 	assert.Equal(t, "In Progress", issues[1].Status)
 	assert.Equal(t, "", issues[1].Assignee)
 	assert.Equal(t, "", issues[1].Reporter)
@@ -164,7 +164,7 @@ func TestListIssues_all(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, filtered, 1)
-	assert.Equal(t, "Active item", filtered[0].Summary)
+	assert.Equal(t, "Active item", filtered[0].Title)
 }
 
 func TestListIssues_empty(t *testing.T) {
@@ -277,7 +277,7 @@ func TestGetIssue_happy(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "42", issue.Key)
-	assert.Equal(t, "The answer", issue.Summary)
+	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "In Progress", issue.Status)
 	assert.Equal(t, "feature", issue.Type)
 	assert.Equal(t, "Alice", issue.Assignee)
@@ -340,14 +340,14 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "tok-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "Human",
-		Summary:     "New story",
+		Title:     "New story",
 		Description: "Some description",
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "99", issue.Key)
 	assert.Equal(t, "Human", issue.Project)
-	assert.Equal(t, "New story", issue.Summary)
+	assert.Equal(t, "New story", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
 
 	assert.Equal(t, "New story", gotBody["name"])
@@ -385,7 +385,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "tok-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "Human",
-		Summary: "No desc",
+		Title: "No desc",
 	})
 
 	require.NoError(t, err)
@@ -414,7 +414,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "tok-test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "Human",
-		Summary: "Will fail",
+		Title: "Will fail",
 	})
 
 	require.Error(t, err)
@@ -715,6 +715,193 @@ func TestResolveMemberName_caching(t *testing.T) {
 	name3, err := client.resolveMemberName(context.Background(), "")
 	require.NoError(t, err)
 	assert.Equal(t, "", name3)
+}
+
+func TestTransitionIssue_happy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+
+		case "/api/v3/stories/1":
+			assert.Equal(t, http.MethodPut, r.Method)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+
+			_, _ = fmt.Fprint(w, `{"id":1,"name":"Bug"}`)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.TransitionIssue(context.Background(), "1", "In Progress")
+
+	require.NoError(t, err)
+	assert.Equal(t, float64(501), gotBody["workflow_state_id"])
+}
+
+func TestTransitionIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+
+		case "/api/v3/stories/1":
+			w.WriteHeader(http.StatusBadRequest)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.TransitionIssue(context.Background(), "1", "In Progress")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_happy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/stories/1":
+			assert.Equal(t, http.MethodPut, r.Method)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(body, &gotBody))
+
+			_, _ = fmt.Fprint(w, `{"id":1,"name":"Bug"}`)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.AssignIssue(context.Background(), "1", "uuid-alice")
+
+	require.NoError(t, err)
+	ownerIDs, ok := gotBody["owner_ids"].([]any)
+	require.True(t, ok)
+	require.Len(t, ownerIDs, 1)
+	assert.Equal(t, "uuid-alice", ownerIDs[0])
+}
+
+func TestAssignIssue_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	err := client.AssignIssue(context.Background(), "1", "uuid-alice")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetCurrentUser_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/member-info":
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "tok-test", r.Header.Get("Shortcut-Token"))
+
+			_, _ = fmt.Fprint(w, `{"id":"uuid-me"}`)
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	userID, err := client.GetCurrentUser(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-me", userID)
+}
+
+func TestGetCurrentUser_error(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_happy(t *testing.T) {
+	title := "Updated Title"
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v3/stories/123":
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+
+			var got map[string]string
+			require.NoError(t, json.Unmarshal(body, &got))
+			assert.Equal(t, "Updated Title", got["name"])
+
+			_, _ = fmt.Fprint(w, `{"id":123,"name":"Updated Title","description":"desc","story_type":"feature","workflow_state_id":500,"owner_ids":[],"requested_by_id":""}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[{"id":500,"name":"Unstarted","type":"unstarted"}]}]`)
+		default:
+			t.Fatalf("unexpected request: %s %s (call %d)", r.Method, r.URL.Path, callCount)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issue, err := client.EditIssue(context.Background(), "123", tracker.EditOptions{Title: &title})
+
+	require.NoError(t, err)
+	assert.Equal(t, "123", issue.Key)
+	assert.Equal(t, "Updated Title", issue.Title)
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	title := "X"
+	client := New(srv.URL, "tok-test")
+	_, err := client.EditIssue(context.Background(), "123", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
 }
 
 func TestResolveMemberName_fallbackToName(t *testing.T) {
