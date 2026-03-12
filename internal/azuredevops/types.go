@@ -61,3 +61,14 @@ type patchOp struct {
 type adoConnectionData struct {
 	AuthenticatedUser adoIdentityRef `json:"authenticatedUser"`
 }
+
+// adoWorkItemTypeStatesResponse is the response from the work item type states endpoint.
+type adoWorkItemTypeStatesResponse struct {
+	Value []adoWorkItemTypeState `json:"value"`
+}
+
+// adoWorkItemTypeState represents a single state for a work item type.
+type adoWorkItemTypeState struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+}

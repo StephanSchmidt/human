@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -174,14 +175,70 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	}, nil
 }
 
+// ListStatuses implements tracker.StatusLister.
+func (c *Client) ListStatuses(ctx context.Context, _ string) ([]tracker.Status, error) {
+	c.statesMu.Lock()
+	defer c.statesMu.Unlock()
+
+	if c.states == nil {
+		if err := c.fetchWorkflowsLocked(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	statuses := make([]tracker.Status, 0, len(c.states))
+	for id, name := range c.states {
+		statuses = append(statuses, tracker.Status{
+			Name: name,
+			Type: c.stateTypes[id],
+		})
+	}
+	return statuses, nil
+}
+
+// resolveStateByName matches a target status name against cached workflow states.
+// Returns the state ID or an error listing available state names.
+func (c *Client) resolveStateByName(ctx context.Context, targetStatus string) (int64, error) {
+	c.statesMu.Lock()
+	defer c.statesMu.Unlock()
+
+	if c.states == nil {
+		if err := c.fetchWorkflowsLocked(ctx); err != nil {
+			return 0, err
+		}
+	}
+
+	// Try exact name match (case-insensitive).
+	for id, name := range c.states {
+		if strings.EqualFold(name, targetStatus) {
+			return id, nil
+		}
+	}
+
+	// Fall back to type-based match for backward compat with "issue start".
+	targetLower := strings.ToLower(targetStatus)
+	for id, typ := range c.stateTypes {
+		if typ == targetLower {
+			return id, nil
+		}
+	}
+
+	names := make([]string, 0, len(c.states))
+	for _, name := range c.states {
+		names = append(names, name)
+	}
+	return 0, errors.WithDetails("workflow state not found",
+		"targetStatus", targetStatus, "available", strings.Join(names, ", "))
+}
+
 // TransitionIssue implements tracker.Transitioner.
-func (c *Client) TransitionIssue(ctx context.Context, key string, _ string) error {
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
 	id, err := parseStoryID(key)
 	if err != nil {
 		return err
 	}
 
-	stateID, err := c.startedWorkflowStateID(ctx)
+	stateID, err := c.resolveStateByName(ctx, targetStatus)
 	if err != nil {
 		return err
 	}
@@ -236,24 +293,7 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	return info.ID, nil
 }
 
-// startedWorkflowStateID returns the first "started" workflow state ID.
-func (c *Client) startedWorkflowStateID(ctx context.Context) (int64, error) {
-	c.statesMu.Lock()
-	defer c.statesMu.Unlock()
 
-	if c.states == nil {
-		if err := c.fetchWorkflowsLocked(ctx); err != nil {
-			return 0, err
-		}
-	}
-
-	for id, typ := range c.stateTypes {
-		if typ == "started" {
-			return id, nil
-		}
-	}
-	return 0, errors.WithDetails("no started workflow state found")
-}
 
 // EditIssue implements tracker.Editor.
 func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {

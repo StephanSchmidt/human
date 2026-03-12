@@ -239,6 +239,60 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	return comments, nil
 }
 
+// fetchTeamStates returns the workflow states for the team derived from the issue key.
+func (c *Client) fetchTeamStates(ctx context.Context, key string) ([]linearState, error) {
+	teamKey := projectFromIdentifier(key)
+	if teamKey == "" {
+		return nil, errors.WithDetails("cannot determine team from issue key", "issueKey", key)
+	}
+
+	data, err := c.doGraphQL(ctx, getTeamStatesQuery, map[string]any{"key": teamKey})
+	if err != nil {
+		return nil, err
+	}
+
+	var result teamStatesData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding team states response", "issueKey", key)
+	}
+
+	if len(result.Teams.Nodes) == 0 {
+		return nil, errors.WithDetails("team not found", "teamKey", teamKey)
+	}
+
+	return result.Teams.Nodes[0].States.Nodes, nil
+}
+
+// linearStateType maps Linear's internal state types to normalized status types.
+func linearStateType(t string) string {
+	switch t {
+	case "unstarted", "backlog", "triage":
+		return "unstarted"
+	case "started":
+		return "started"
+	case "completed":
+		return "done"
+	case "canceled":
+		return "closed"
+	default:
+		return ""
+	}
+}
+
+// ListStatuses implements tracker.StatusLister.
+func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
+	states, err := c.fetchTeamStates(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]tracker.Status, len(states))
+	for i, s := range states {
+		statuses[i] = tracker.Status{Name: s.Name, Type: linearStateType(s.Type)}
+	}
+	return statuses, nil
+}
+
 // TransitionIssue implements tracker.Transitioner.
 func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
 	issueID, err := c.resolveIssueID(ctx, key)
@@ -246,36 +300,23 @@ func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus s
 		return err
 	}
 
-	teamKey := projectFromIdentifier(key)
-	if teamKey == "" {
-		return errors.WithDetails("cannot determine team from issue key", "issueKey", key)
-	}
-
-	data, err := c.doGraphQL(ctx, getTeamStatesQuery, map[string]any{"key": teamKey})
+	states, err := c.fetchTeamStates(ctx, key)
 	if err != nil {
 		return err
 	}
 
-	var result teamStatesData
-	if err := json.Unmarshal(data, &result); err != nil {
-		return errors.WrapWithDetails(err, "decoding team states response", "issueKey", key)
-	}
-
-	if len(result.Teams.Nodes) == 0 {
-		return errors.WithDetails("team not found", "teamKey", teamKey)
-	}
-
 	var stateID string
-	for _, s := range result.Teams.Nodes[0].States.Nodes {
-		if strings.EqualFold(s.Name, targetStatus) || s.Type == "started" {
+	var names []string
+	for _, s := range states {
+		names = append(names, s.Name)
+		if strings.EqualFold(s.Name, targetStatus) {
 			stateID = s.ID
-			if strings.EqualFold(s.Name, targetStatus) {
-				break
-			}
+			break
 		}
 	}
 	if stateID == "" {
-		return errors.WithDetails("target state not found", "issueKey", key, "targetStatus", targetStatus)
+		return errors.WithDetails("target state not found",
+			"issueKey", key, "targetStatus", targetStatus, "available", strings.Join(names, ", "))
 	}
 
 	updateData, err := c.doGraphQL(ctx, issueUpdateMutation, map[string]any{

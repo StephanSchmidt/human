@@ -164,6 +164,71 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	}, nil
 }
 
+// adoCategoryToType maps Azure DevOps state category to normalized status type.
+func adoCategoryToType(category string) string {
+	switch category {
+	case "Proposed":
+		return "unstarted"
+	case "InProgress":
+		return "started"
+	case "Resolved", "Completed":
+		return "done"
+	case "Removed":
+		return "closed"
+	default:
+		return ""
+	}
+}
+
+// ListStatuses implements tracker.StatusLister.
+func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
+	project, id, err := parseIssueKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch the work item to determine its type.
+	wiPath := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	wiResp, err := c.doRequest(ctx, http.MethodGet, wiPath, "api-version=7.1", nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = wiResp.Body.Close() }()
+
+	var wi adoWorkItem
+	if err := json.NewDecoder(wiResp.Body).Decode(&wi); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding work item for type lookup", "key", key)
+	}
+
+	wiType := wi.Fields.WorkItemType
+	if wiType == "" {
+		return nil, errors.WithDetails("work item has no type", "key", key)
+	}
+
+	// Fetch states for that work item type.
+	statesPath := fmt.Sprintf("/%s/%s/_apis/wit/workitemtypes/%s/states",
+		c.org, project, url.PathEscape(wiType))
+	statesResp, err := c.doRequest(ctx, http.MethodGet, statesPath, "api-version=7.1", nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = statesResp.Body.Close() }()
+
+	var statesResult adoWorkItemTypeStatesResponse
+	if err := json.NewDecoder(statesResp.Body).Decode(&statesResult); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding work item type states", "key", key, "type", wiType)
+	}
+
+	statuses := make([]tracker.Status, len(statesResult.Value))
+	for i, s := range statesResult.Value {
+		statuses[i] = tracker.Status{
+			Name: s.Name,
+			Type: adoCategoryToType(s.Category),
+		}
+	}
+	return statuses, nil
+}
+
 // TransitionIssue implements tracker.Transitioner.
 func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
 	project, id, err := parseIssueKey(key)

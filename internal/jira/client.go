@@ -228,31 +228,61 @@ func toTrackerComment(jc jiraComment) (*tracker.Comment, error) {
 	}, nil
 }
 
-// TransitionIssue implements tracker.Transitioner.
-func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+// fetchTransitions fetches available transitions for an issue.
+func (c *Client) fetchTransitions(ctx context.Context, key string) ([]jiraTransition, error) {
 	path := fmt.Sprintf("/rest/api/3/issue/%s/transitions", url.PathEscape(key))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	var result transitionsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return errors.WrapWithDetails(err, "decoding transitions response", "issueKey", key)
+		return nil, errors.WrapWithDetails(err, "decoding transitions response", "issueKey", key)
+	}
+	return result.Transitions, nil
+}
+
+// ListStatuses implements tracker.StatusLister.
+// Returns the available transitions from the issue's current state.
+func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
+	transitions, err := c.fetchTransitions(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+
+	statuses := make([]tracker.Status, len(transitions))
+	for i, t := range transitions {
+		statuses[i] = tracker.Status{Name: t.To.Name}
+	}
+	return statuses, nil
+}
+
+// TransitionIssue implements tracker.Transitioner.
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	transitions, err := c.fetchTransitions(ctx, key)
+	if err != nil {
+		return err
 	}
 
 	var transitionID string
-	for _, t := range result.Transitions {
+	for _, t := range transitions {
 		if strings.EqualFold(t.To.Name, targetStatus) {
 			transitionID = t.ID
 			break
 		}
 	}
 	if transitionID == "" {
-		return errors.WithDetails("transition not found", "issueKey", key, "targetStatus", targetStatus)
+		names := make([]string, len(transitions))
+		for i, t := range transitions {
+			names[i] = t.To.Name
+		}
+		return errors.WithDetails("transition not found",
+			"issueKey", key, "targetStatus", targetStatus, "available", strings.Join(names, ", "))
 	}
 
+	path := fmt.Sprintf("/rest/api/3/issue/%s/transitions", url.PathEscape(key))
 	payload, err := json.Marshal(map[string]any{"transition": map[string]string{"id": transitionID}})
 	if err != nil {
 		return errors.WrapWithDetails(err, "marshalling transition request", "issueKey", key)

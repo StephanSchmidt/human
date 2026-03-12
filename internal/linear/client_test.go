@@ -890,3 +890,65 @@ func TestEditIssue_httpError(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+func TestListStatuses_happy(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"states": func(vars map[string]any) string {
+				assert.Equal(t, "ENG", vars["key"])
+				return `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[
+					{"id":"s1","name":"Backlog","type":"backlog"},
+					{"id":"s2","name":"In Progress","type":"started"},
+					{"id":"s3","name":"Done","type":"completed"},
+					{"id":"s4","name":"Cancelled","type":"canceled"}
+				]}}]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	statuses, err := client.ListStatuses(context.Background(), "ENG-1")
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 4)
+
+	assert.Equal(t, "Backlog", statuses[0].Name)
+	assert.Equal(t, "unstarted", statuses[0].Type)
+
+	assert.Equal(t, "In Progress", statuses[1].Name)
+	assert.Equal(t, "started", statuses[1].Type)
+
+	assert.Equal(t, "Done", statuses[2].Name)
+	assert.Equal(t, "done", statuses[2].Type)
+
+	assert.Equal(t, "Cancelled", statuses[3].Name)
+	assert.Equal(t, "closed", statuses[3].Type)
+}
+
+func TestListStatuses_emptyStates(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"states": func(_ map[string]any) string {
+				return `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[]}}]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	statuses, err := client.ListStatuses(context.Background(), "ENG-1")
+
+	require.NoError(t, err)
+	assert.Empty(t, statuses)
+}
+
+func TestListStatuses_invalidIssueKey(t *testing.T) {
+	client := New("http://localhost", "lin_test")
+	_, err := client.ListStatuses(context.Background(), "nohyphen")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot determine team from issue key")
+}

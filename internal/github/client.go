@@ -218,9 +218,39 @@ func toTrackerComment(gc ghComment) (*tracker.Comment, error) {
 	}, nil
 }
 
+// ListStatuses implements tracker.StatusLister.
+// GitHub issues have fixed states: open and closed.
+func (c *Client) ListStatuses(_ context.Context, _ string) ([]tracker.Status, error) {
+	return []tracker.Status{
+		{Name: "open", Type: "started"},
+		{Name: "closed", Type: "closed"},
+	}, nil
+}
+
 // TransitionIssue implements tracker.Transitioner.
-// GitHub issues have no custom workflow states, so this is a no-op.
-func (c *Client) TransitionIssue(_ context.Context, _ string, _ string) error {
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	lower := strings.ToLower(targetStatus)
+	if lower != "open" && lower != "closed" {
+		return errors.WithDetails("GitHub only supports 'open' and 'closed' states",
+			"key", key, "targetStatus", targetStatus)
+	}
+
+	owner, repo, number, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]string{"state": lower})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
+	}
+
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
 	return nil
 }
 

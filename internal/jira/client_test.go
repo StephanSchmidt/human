@@ -629,3 +629,53 @@ func TestEditIssue_httpError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned")
 }
+
+func TestListStatuses_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/rest/api/3/issue/KAN-42/transitions", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `{"transitions":[
+			{"id":"21","name":"Start Progress","to":{"name":"In Progress"}},
+			{"id":"22","name":"Done","to":{"name":"Done"}},
+			{"id":"23","name":"Backlog","to":{"name":"To Do"}}
+		]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	statuses, err := client.ListStatuses(context.Background(), "KAN-42")
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 3)
+
+	assert.Equal(t, "In Progress", statuses[0].Name)
+	assert.Equal(t, "Done", statuses[1].Name)
+	assert.Equal(t, "To Do", statuses[2].Name)
+}
+
+func TestListStatuses_empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"transitions":[]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	statuses, err := client.ListStatuses(context.Background(), "KAN-42")
+
+	require.NoError(t, err)
+	assert.Empty(t, statuses)
+}
+
+func TestListStatuses_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "user@example.com", "token")
+	_, err := client.ListStatuses(context.Background(), "KAN-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}

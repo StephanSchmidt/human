@@ -108,16 +108,19 @@ type issueDeleteData struct {
 	} `json:"issueDelete"`
 }
 
+// linearState represents a workflow state in Linear.
+type linearState struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 type teamStatesData struct {
 	Teams struct {
 		Nodes []struct {
 			ID     string `json:"id"`
 			States struct {
-				Nodes []struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-					Type string `json:"type"`
-				} `json:"nodes"`
+				Nodes []linearState `json:"nodes"`
 			} `json:"states"`
 		} `json:"nodes"`
 	} `json:"teams"`

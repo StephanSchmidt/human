@@ -477,11 +477,41 @@ func Test_parseIssueKey(t *testing.T) {
 	}
 }
 
-func TestTransitionIssue_noop(t *testing.T) {
+func TestTransitionIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "/api/v4/projects/mygroup%2Fmyproject/issues/1", r.URL.RawPath)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "close", payload["state_event"])
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.TransitionIssue(context.Background(), "mygroup/myproject#1", "closed")
+	require.NoError(t, err)
+}
+
+func TestTransitionIssue_invalidState(t *testing.T) {
 	client := New("http://localhost", "glpat-test")
 	err := client.TransitionIssue(context.Background(), "mygroup/myproject#1", "In Progress")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GitLab only supports")
+}
 
+func TestListStatuses_gitlab(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	statuses, err := client.ListStatuses(context.Background(), "mygroup/myproject#1")
 	require.NoError(t, err)
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "opened", statuses[0].Name)
+	assert.Equal(t, "closed", statuses[1].Name)
 }
 
 func TestAssignIssue_happy(t *testing.T) {

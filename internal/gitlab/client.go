@@ -233,9 +233,51 @@ func toTrackerComment(gn glNote) (*tracker.Comment, error) {
 	}, nil
 }
 
+// ListStatuses implements tracker.StatusLister.
+// GitLab issues have fixed states: opened and closed.
+func (c *Client) ListStatuses(_ context.Context, _ string) ([]tracker.Status, error) {
+	return []tracker.Status{
+		{Name: "opened", Type: "started"},
+		{Name: "closed", Type: "closed"},
+	}, nil
+}
+
 // TransitionIssue implements tracker.Transitioner.
-// GitLab issues have no custom workflow states, so this is a no-op.
-func (c *Client) TransitionIssue(_ context.Context, _ string, _ string) error {
+func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
+	lower := strings.ToLower(targetStatus)
+
+	var event string
+	switch lower {
+	case "opened", "open", "reopen", "reopened":
+		event = "reopen"
+	case "closed", "close":
+		event = "close"
+	default:
+		return errors.WithDetails("GitLab only supports 'opened' and 'closed' states",
+			"key", key, "targetStatus", targetStatus)
+	}
+
+	project, iid, err := parseIssueKey(key)
+	if err != nil {
+		return err
+	}
+
+	encodedProject, err := splitProject(project)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]string{"state_event": event})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
+	}
+
+	path := fmt.Sprintf("/api/v4/projects/%s/issues/%d", encodedProject, iid)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, "", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
 	return nil
 }
 

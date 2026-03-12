@@ -915,3 +915,81 @@ func TestResolveMemberName_fallbackToName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Full Name", name)
 }
+
+func TestListStatuses_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"},
+				{"id":503,"name":"Blocked","type":"unstarted"}
+			]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	statuses, err := client.ListStatuses(context.Background(), "42")
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 4)
+
+	assert.Equal(t, "To Do", statuses[0].Name)
+	assert.Equal(t, "unstarted", statuses[0].Type)
+
+	assert.Equal(t, "In Progress", statuses[1].Name)
+	assert.Equal(t, "started", statuses[1].Type)
+
+	assert.Equal(t, "Done", statuses[2].Name)
+	assert.Equal(t, "done", statuses[2].Type)
+
+	assert.Equal(t, "Blocked", statuses[3].Name)
+	assert.Equal(t, "unstarted", statuses[3].Type)
+}
+
+func TestListStatuses_emptyStates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	statuses, err := client.ListStatuses(context.Background(), "1")
+
+	require.NoError(t, err)
+	assert.Empty(t, statuses)
+}
+
+func TestListStatuses_caching(t *testing.T) {
+	fetchCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			fetchCount++
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"}
+			]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	statuses1, err := client.ListStatuses(context.Background(), "1")
+	require.NoError(t, err)
+	require.Len(t, statuses1, 1)
+
+	statuses2, err := client.ListStatuses(context.Background(), "2")
+	require.NoError(t, err)
+	require.Len(t, statuses2, 1)
+
+	assert.Equal(t, 1, fetchCount)
+}

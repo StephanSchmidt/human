@@ -528,11 +528,41 @@ func TestListComments_empty(t *testing.T) {
 	assert.Empty(t, comments)
 }
 
-func TestTransitionIssue_noop(t *testing.T) {
+func TestTransitionIssue_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/repos/octocat/hello-world/issues/1", r.URL.Path)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "closed", payload["state"])
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.TransitionIssue(context.Background(), "octocat/hello-world#1", "closed")
+	require.NoError(t, err)
+}
+
+func TestTransitionIssue_invalidState(t *testing.T) {
 	client := New("http://localhost", "ghp_test")
 	err := client.TransitionIssue(context.Background(), "octocat/hello-world#1", "In Progress")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "GitHub only supports")
+}
 
+func TestListStatuses_github(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	statuses, err := client.ListStatuses(context.Background(), "octocat/hello-world#1")
 	require.NoError(t, err)
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "open", statuses[0].Name)
+	assert.Equal(t, "closed", statuses[1].Name)
 }
 
 func TestAssignIssue_happy(t *testing.T) {

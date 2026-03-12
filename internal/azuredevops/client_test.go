@@ -677,3 +677,152 @@ func Test_parseIssueKey(t *testing.T) {
 		})
 	}
 }
+
+func TestListStatuses_happy(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/myorg/Human/_apis/wit/workitems/42", r.URL.Path)
+
+			_, _ = fmt.Fprint(w, `{
+				"id": 42,
+				"fields": {
+					"System.Title": "Test issue",
+					"System.State": "New",
+					"System.WorkItemType": "Bug",
+					"System.TeamProject": "Human"
+				}
+			}`)
+			return
+		}
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/myorg/Human/_apis/wit/workitemtypes/Bug/states", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `{"value":[
+			{"name":"New","category":"Proposed"},
+			{"name":"Active","category":"InProgress"},
+			{"name":"Resolved","category":"Resolved"},
+			{"name":"Closed","category":"Completed"},
+			{"name":"Removed","category":"Removed"}
+		]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	statuses, err := client.ListStatuses(context.Background(), "Human/42")
+
+	require.NoError(t, err)
+	require.Len(t, statuses, 5)
+	assert.Equal(t, 2, callCount)
+
+	assert.Equal(t, "New", statuses[0].Name)
+	assert.Equal(t, "unstarted", statuses[0].Type)
+
+	assert.Equal(t, "Active", statuses[1].Name)
+	assert.Equal(t, "started", statuses[1].Type)
+
+	assert.Equal(t, "Resolved", statuses[2].Name)
+	assert.Equal(t, "done", statuses[2].Type)
+
+	assert.Equal(t, "Closed", statuses[3].Name)
+	assert.Equal(t, "done", statuses[3].Type)
+
+	assert.Equal(t, "Removed", statuses[4].Name)
+	assert.Equal(t, "closed", statuses[4].Type)
+}
+
+func TestListStatuses_invalidKey(t *testing.T) {
+	client := New("http://localhost", "myorg", "pat-test")
+	_, err := client.ListStatuses(context.Background(), "invalid")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestListStatuses_workItemFetchError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	_, err := client.ListStatuses(context.Background(), "Human/42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListStatuses_statesFetchError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			_, _ = fmt.Fprint(w, `{
+				"id": 42,
+				"fields": {
+					"System.Title": "Test",
+					"System.State": "New",
+					"System.WorkItemType": "Issue",
+					"System.TeamProject": "Human"
+				}
+			}`)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	_, err := client.ListStatuses(context.Background(), "Human/42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListStatuses_emptyStates(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			_, _ = fmt.Fprint(w, `{
+				"id": 42,
+				"fields": {
+					"System.Title": "Test",
+					"System.State": "New",
+					"System.WorkItemType": "Task",
+					"System.TeamProject": "Human"
+				}
+			}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"value":[]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "myorg", "pat-test")
+	statuses, err := client.ListStatuses(context.Background(), "Human/42")
+
+	require.NoError(t, err)
+	assert.Empty(t, statuses)
+}
+
+func TestAdoCategoryToType(t *testing.T) {
+	tests := []struct {
+		category string
+		want     string
+	}{
+		{"Proposed", "unstarted"},
+		{"InProgress", "started"},
+		{"Resolved", "done"},
+		{"Completed", "done"},
+		{"Removed", "closed"},
+		{"Unknown", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.category, func(t *testing.T) {
+			assert.Equal(t, tt.want, adoCategoryToType(tt.category))
+		})
+	}
+}
