@@ -175,6 +175,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human get KAN-1")
 	_, _ = fmt.Fprintln(w, "  human list --project=KAN")
 	_, _ = fmt.Fprintln(w, "  human list --project=KAN --tracker=work")
+	_, _ = fmt.Fprintln(w, "  human statuses KAN-1")
+	_, _ = fmt.Fprintln(w, `  human status KAN-1 "Done"`)
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Command pattern:")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issues list --project=<PROJECT>   List issues (JSON)")
@@ -184,6 +186,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Show confirmation code")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  start <KEY>                Start working on issue")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  statuses <KEY>             List available statuses")
+	_, _ = fmt.Fprintln(w, `  human <tracker> issue  status <KEY> "<STATUS>"    Set issue status`)
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment add <KEY> <BODY>   Add comment")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment list <KEY>         List comments")
 	_, _ = fmt.Fprintln(w)
@@ -203,6 +207,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
 	_, _ = fmt.Fprintln(w, `  human jira issue edit KAN-1 --title "Updated title"`)
 	_, _ = fmt.Fprintln(w, "  human jira issue start KAN-1")
+	_, _ = fmt.Fprintln(w, "  human jira issue statuses KAN-1")
+	_, _ = fmt.Fprintln(w, `  human jira issue status KAN-1 "Done"`)
 	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1                    # shows confirmation code")
 	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1 --confirm=4521     # deletes")
 	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
@@ -392,6 +398,8 @@ All trackers share the same command structure:
   human <tracker> issue  edit   — update title and/or description
   human <tracker> issue  start  — transition + assign to yourself
   human <tracker> issue  delete — delete or close
+  human <tracker> issue  statuses — list available statuses
+  human <tracker> issue  status   — set issue status
   human <tracker> issue  comment add/list — manage comments
 
 Tools:
@@ -472,6 +480,14 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	autoListCmd := buildAutoListCmd()
 	autoListCmd.GroupID = "shortcuts"
 	rootCmd.AddCommand(autoListCmd)
+
+	autoStatusesCmd := buildAutoStatusesCmd()
+	autoStatusesCmd.GroupID = "shortcuts"
+	rootCmd.AddCommand(autoStatusesCmd)
+
+	autoStatusCmd := buildAutoStatusCmd()
+	autoStatusCmd.GroupID = "shortcuts"
+	rootCmd.AddCommand(autoStatusCmd)
 
 	// --- Provider commands (dynamic registration) ---
 	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}

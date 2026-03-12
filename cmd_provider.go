@@ -66,6 +66,8 @@ func buildProviderCommands(kind string) []*cobra.Command {
 	issueCmd.AddCommand(buildIssueDeleteCmd(kind))
 	issueCmd.AddCommand(buildIssueCommentCmd(kind))
 	issueCmd.AddCommand(buildIssueStartCmd(kind))
+	issueCmd.AddCommand(buildIssueStatusesCmd(kind))
+	issueCmd.AddCommand(buildIssueStatusSetCmd(kind))
 
 	return []*cobra.Command{issuesCmd, issueCmd}
 }
@@ -443,6 +445,79 @@ func printIssuesTable(out io.Writer, issues []tracker.Issue) error {
 	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tTITLE")
 	for _, issue := range issues {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", issue.Key, issue.Status, issue.Title)
+	}
+	return w.Flush()
+}
+
+func buildIssueStatusesCmd(kind string) *cobra.Command {
+	var table bool
+
+	cmd := &cobra.Command{
+		Use:     "statuses KEY",
+		Short:   "List available statuses for an issue",
+		Example: `  human jira issue statuses KAN-1`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, cleanup, err := resolveProvider(cmd, kind)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			return runListStatuses(cmd.Context(), p, cmd.OutOrStdout(), args[0], table)
+		},
+	}
+	cmd.Flags().BoolVar(&table, "table", false, "Output as human-readable table instead of JSON")
+	return cmd
+}
+
+func buildIssueStatusSetCmd(kind string) *cobra.Command {
+	return &cobra.Command{
+		Use:     "status KEY STATUS",
+		Short:   "Set the status of an issue",
+		Example: `  human jira issue status KAN-1 "In Progress"`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, cleanup, err := resolveProvider(cmd, kind)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+			return runSetStatus(cmd.Context(), p, cmd.OutOrStdout(), args[0], args[1])
+		},
+	}
+}
+
+func runListStatuses(ctx context.Context, p tracker.Provider, out io.Writer, key string, table bool) error {
+	statuses, err := p.ListStatuses(ctx, key)
+	if err != nil {
+		return err
+	}
+	if table {
+		return printStatusesTable(out, statuses)
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(statuses)
+}
+
+func runSetStatus(ctx context.Context, p tracker.Provider, out io.Writer, key, status string) error {
+	if err := p.TransitionIssue(ctx, key, status); err != nil {
+		_, _ = fmt.Fprintf(out, "Hint: run 'human <tracker> issue statuses %s' to see available statuses\n", key)
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "Transitioned %s to %s\n", key, status)
+	return nil
+}
+
+func printStatusesTable(out io.Writer, statuses []tracker.Status) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "NAME\tTYPE")
+	for _, s := range statuses {
+		typ := s.Type
+		if typ == "" {
+			typ = "-"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", s.Name, typ)
 	}
 	return w.Flush()
 }

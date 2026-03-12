@@ -78,6 +78,8 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human <tracker> issue  create")
 	assert.Contains(t, out, `human <tracker> issue  edit <KEY> --title "New" --description "Updated"`)
 	assert.Contains(t, out, "human <tracker> issue  start <KEY>                Start working on issue")
+	assert.Contains(t, out, "human <tracker> issue  statuses <KEY>             List available statuses")
+	assert.Contains(t, out, `human <tracker> issue  status <KEY> "<STATUS>"    Set issue status`)
 	assert.Contains(t, out, "human <tracker> issue  delete <KEY>               Show confirmation code")
 	assert.Contains(t, out, "human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
 	assert.Contains(t, out, "human <tracker> issue  comment add")
@@ -102,6 +104,8 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human github issues list --project=octocat/hello-world")
 	assert.Contains(t, out, `human jira issue edit KAN-1 --title "Updated title"`)
 	assert.Contains(t, out, "human jira issue start KAN-1")
+	assert.Contains(t, out, "human jira issue statuses KAN-1")
+	assert.Contains(t, out, `human jira issue status KAN-1 "Done"`)
 	assert.Contains(t, out, "human jira issue delete KAN-1")
 	assert.Contains(t, out, "human jira issue delete KAN-1 --confirm=4521")
 	assert.Contains(t, out, "human tracker list")
@@ -187,6 +191,7 @@ type mockProvider struct {
 	assignIssueFn     func(ctx context.Context, key string, userID string) error
 	getCurrentUserFn  func(ctx context.Context) (string, error)
 	editIssueFn       func(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error)
+	listStatusesFn    func(ctx context.Context, key string) ([]tracker.Status, error)
 }
 
 func (m *mockProvider) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -237,6 +242,13 @@ func (m *mockProvider) GetCurrentUser(ctx context.Context) (string, error) {
 func (m *mockProvider) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
 	if m.editIssueFn != nil {
 		return m.editIssueFn(ctx, key, opts)
+	}
+	return nil, nil
+}
+
+func (m *mockProvider) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
+	if m.listStatusesFn != nil {
+		return m.listStatusesFn(ctx, key)
 	}
 	return nil, nil
 }
@@ -1105,6 +1117,107 @@ func TestRunEditIssue_bothFields(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-1")
 	assert.Contains(t, buf.String(), "New Title")
+}
+
+func TestRunListStatuses_JSON(t *testing.T) {
+	statuses := []tracker.Status{
+		{Name: "To Do", Type: "unstarted"},
+		{Name: "In Progress", Type: "started"},
+		{Name: "Done", Type: "done"},
+	}
+	p := &mockProvider{
+		listStatusesFn: func(_ context.Context, key string) ([]tracker.Status, error) {
+			assert.Equal(t, "KAN-1", key)
+			return statuses, nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runListStatuses(context.Background(), p, &buf, "KAN-1", false)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `"name": "To Do"`)
+	assert.Contains(t, buf.String(), `"type": "unstarted"`)
+	assert.Contains(t, buf.String(), `"name": "Done"`)
+}
+
+func TestRunListStatuses_Table(t *testing.T) {
+	statuses := []tracker.Status{
+		{Name: "To Do", Type: "unstarted"},
+		{Name: "Done", Type: "done"},
+	}
+	p := &mockProvider{
+		listStatusesFn: func(_ context.Context, _ string) ([]tracker.Status, error) {
+			return statuses, nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runListStatuses(context.Background(), p, &buf, "KAN-1", true)
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "TYPE")
+	assert.Contains(t, out, "To Do")
+	assert.Contains(t, out, "Done")
+}
+
+func TestRunListStatuses_error(t *testing.T) {
+	p := &mockProvider{
+		listStatusesFn: func(_ context.Context, _ string) ([]tracker.Status, error) {
+			return nil, fmt.Errorf("statuses failed")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runListStatuses(context.Background(), p, &buf, "KAN-1", false)
+	assert.EqualError(t, err, "statuses failed")
+}
+
+func TestRunSetStatus_success(t *testing.T) {
+	p := &mockProvider{
+		transitionIssueFn: func(_ context.Context, key string, targetStatus string) error {
+			assert.Equal(t, "KAN-1", key)
+			assert.Equal(t, "Done", targetStatus)
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runSetStatus(context.Background(), p, &buf, "KAN-1", "Done")
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Transitioned KAN-1 to Done")
+}
+
+func TestRunSetStatus_error(t *testing.T) {
+	p := &mockProvider{
+		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
+			return fmt.Errorf("invalid status")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runSetStatus(context.Background(), p, &buf, "KAN-1", "Bogus")
+	assert.EqualError(t, err, "invalid status")
+	assert.Contains(t, buf.String(), "Hint: run 'human <tracker> issue statuses KAN-1'")
+}
+
+func TestPrintStatusesTable(t *testing.T) {
+	statuses := []tracker.Status{
+		{Name: "Open", Type: "unstarted"},
+		{Name: "In Progress", Type: "started"},
+		{Name: "Custom"},
+	}
+
+	var buf bytes.Buffer
+	err := printStatusesTable(&buf, statuses)
+	require.NoError(t, err)
+	out := buf.String()
+	assert.Contains(t, out, "NAME")
+	assert.Contains(t, out, "TYPE")
+	assert.Contains(t, out, "Open")
+	assert.Contains(t, out, "unstarted")
+	assert.Contains(t, out, "Custom")
+	assert.Contains(t, out, "-") // empty type shows as "-"
 }
 
 func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {

@@ -62,6 +62,21 @@ human list --project=KAN         # auto-detects when one tracker type is configu
 
 When only one tracker type is configured, it is auto-detected. When multiple tracker types are configured, specify which one with `--tracker=<name>`. Provider-specific commands (`human jira issues list ...`) also continue to work.
 
+List available statuses for an issue and set the status:
+
+```bash
+human jira issue statuses KAN-1              # JSON output
+human jira issue statuses KAN-1 --table      # human-readable table
+human jira issue status KAN-1 "Done"         # set issue status
+```
+
+Quick commands auto-detect the tracker:
+
+```bash
+human statuses KAN-1
+human status KAN-1 "Done"
+```
+
 Edit an existing issue's title and/or description (both flags are optional, but at least one is required):
 
 ```bash

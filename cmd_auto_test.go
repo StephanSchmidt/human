@@ -46,6 +46,10 @@ func newMockInstances(kinds ...string) []tracker.Instance {
 				addCommentFn: func(_ context.Context, _ string, _ string) (*tracker.Comment, error) {
 					return &tracker.Comment{ID: "c1", Body: "ok"}, nil
 				},
+				listStatusesFn: func(_ context.Context, _ string) ([]tracker.Status, error) {
+					return []tracker.Status{{Name: "Open", Type: "started"}, {Name: "Closed", Type: "closed"}}, nil
+				},
+				transitionIssueFn: func(_ context.Context, _ string, _ string) error { return nil },
 			},
 		})
 	}
@@ -251,6 +255,32 @@ func TestPrintAutoHints_afterList(t *testing.T) {
 	assert.Contains(t, out, `human linear issue  create --project=HUM "Title"`)
 }
 
+func TestPrintAutoHints_afterGet_includesStatuses(t *testing.T) {
+	var buf bytes.Buffer
+	printAutoHints(&buf, "jira", "KAN-1", "KAN", "get")
+
+	out := buf.String()
+	assert.Contains(t, out, "human jira issue  statuses KAN-1")
+}
+
+func TestPrintAutoHints_afterStatuses(t *testing.T) {
+	var buf bytes.Buffer
+	printAutoHints(&buf, "jira", "KAN-1", "KAN", "statuses")
+
+	out := buf.String()
+	assert.Contains(t, out, "Detected tracker: jira")
+	assert.Contains(t, out, `human jira issue  status KAN-1 "<STATUS>"`)
+}
+
+func TestPrintAutoHints_afterStatus(t *testing.T) {
+	var buf bytes.Buffer
+	printAutoHints(&buf, "linear", "ENG-1", "ENG", "status")
+
+	out := buf.String()
+	assert.Contains(t, out, "Detected tracker: linear")
+	assert.Contains(t, out, "human linear issue  statuses ENG-1")
+}
+
 func TestPrintAutoHints_afterGet_noProject(t *testing.T) {
 	var buf bytes.Buffer
 	printAutoHints(&buf, "shortcut", "123", "", "get")
@@ -288,11 +318,82 @@ func TestPrintAutoHints_listShowsBothHints(t *testing.T) {
 	assert.Contains(t, out, `human jira issue  create --project=KAN "Title"`)
 }
 
+// --- buildAutoStatusesCmd tests ---
+
+func TestAutoStatuses_singleKind(t *testing.T) {
+	setAutoLoader(t, newMockInstances("jira"))
+
+	cmd := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"statuses", "KAN-1"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "Open")
+	assert.Contains(t, stderr.String(), "Detected tracker: jira")
+}
+
+func TestAutoStatuses_tableFlag(t *testing.T) {
+	setAutoLoader(t, newMockInstances("jira"))
+
+	cmd := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"statuses", "KAN-1", "--table"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "NAME")
+	assert.Contains(t, stdout.String(), "TYPE")
+}
+
+func TestAutoStatuses_requiresKeyArg(t *testing.T) {
+	cmd := newRootCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"statuses"})
+
+	err := cmd.Execute()
+	assert.Error(t, err)
+}
+
+// --- buildAutoStatusCmd tests ---
+
+func TestAutoStatus_singleKind(t *testing.T) {
+	setAutoLoader(t, newMockInstances("jira"))
+
+	cmd := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"status", "KAN-1", "Done"})
+
+	err := cmd.Execute()
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "Transitioned KAN-1 to Done")
+	assert.Contains(t, stderr.String(), "Detected tracker: jira")
+}
+
+func TestAutoStatus_requiresArgs(t *testing.T) {
+	cmd := newRootCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"status", "KAN-1"})
+
+	err := cmd.Execute()
+	assert.Error(t, err)
+}
+
 // --- registration tests ---
 
 func TestRootCmd_hasAutoCommands(t *testing.T) {
 	cmd := newRootCmd()
-	var foundGet, foundList bool
+	var foundGet, foundList, foundStatuses, foundStatus bool
 	for _, sub := range cmd.Commands() {
 		switch {
 		case strings.HasPrefix(sub.Use, "get "):
@@ -301,10 +402,18 @@ func TestRootCmd_hasAutoCommands(t *testing.T) {
 		case sub.Use == "list":
 			foundList = true
 			assert.Equal(t, "shortcuts", sub.GroupID)
+		case strings.HasPrefix(sub.Use, "statuses "):
+			foundStatuses = true
+			assert.Equal(t, "shortcuts", sub.GroupID)
+		case strings.HasPrefix(sub.Use, "status "):
+			foundStatus = true
+			assert.Equal(t, "shortcuts", sub.GroupID)
 		}
 	}
 	assert.True(t, foundGet, "expected top-level 'get' command")
 	assert.True(t, foundList, "expected top-level 'list' command")
+	assert.True(t, foundStatuses, "expected top-level 'statuses' command")
+	assert.True(t, foundStatus, "expected top-level 'status' command")
 }
 
 func TestPrintExamples_includesQuickCommands(t *testing.T) {
@@ -316,6 +425,8 @@ func TestPrintExamples_includesQuickCommands(t *testing.T) {
 	assert.Contains(t, out, "human get KAN-1")
 	assert.Contains(t, out, "human list --project=KAN")
 	assert.Contains(t, out, "human list --project=KAN --tracker=work")
+	assert.Contains(t, out, "human statuses KAN-1")
+	assert.Contains(t, out, `human status KAN-1 "Done"`)
 }
 
 func TestRootHelp_includesQuickCommandsGroup(t *testing.T) {
