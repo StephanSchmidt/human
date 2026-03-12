@@ -52,6 +52,12 @@ Or with Go:
 go install github.com/stephanschmidt/human@latest
 ```
 
+Or add as a [devcontainer Feature](https://github.com/StephanSchmidt/treehouse):
+
+```json
+{ "features": { "ghcr.io/stephanschmidt/treehouse/human:1": {} } }
+```
+
 ## CLI usage
 
 Use `--table` for human-readable output. Quick commands auto-detect the tracker from key format and configuration:
