@@ -12,21 +12,45 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-**Human in the loop —** Issue tracker and tools CLI for AIs. Reads and manages issues across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut. Searches and reads content from Notion. Browses Figma designs. Queries Amplitude product analytics. Output as JSON and markdown.
+**Human in the loop —** Swiss army knive for AI agentic coding with batteries included. Give your AI agent access to issue trackers, design files, and analytics. One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude. Output as JSON and markdown.
 
-- **One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude** — no tool-switching for the AI
-- **JSON and markdown output** — pipe directly into LLMs - LLMs can work with it
-- **Claude Code skills** turn PM tickets into implementation plans and bug analyses
-- **Definition of Ready checks** AI catches incomplete tickets before coding starts
-- **Notion integration** search workspace, read pages, query databases for context
-- **Figma integration** browse files, inspect components, read design comments, export images
-- **Amplitude integration** query event analytics, funnels, retention, cohorts
+- **One unified interface** — Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude through a single CLI
+- **JSON and markdown output** — pipe directly into LLMs
+- **Claude Code skills** — turn PM tickets into implementation plans and bug analyses
+- **Definition of Ready checks** — catch incomplete tickets before coding starts
+- **Notion integration** — search workspace, read pages, query databases for context
+- **Figma integration** — browse files, inspect components, read design comments, export images
+- **Amplitude integration** — query event analytics, funnels, retention, cohorts
 
 ### Why
 
-As AI agents write more code autonomously, the question becomes: who decides *what* gets built? With `human`, an AI reads a product ticket from the issue tracker, creates an implementation ticket with a plan, and a human reviews it before coding starts. That's the human in the loop — and that's the pun.
+As AI agents write more code autonomously, the question becomes: who decides *what* gets built? With `human`, an AI reads a product ticket from the issue tracker, creates an implementation ticket with a plan, and a human reviews it before coding starts.
 
 <img src="human-loop.svg" width="960" alt="human loop: PM Ticket → AI → Dev Ticket">
+
+## Install
+
+```bash
+curl -sSfL gethuman.sh/install.sh | bash
+```
+
+Or with Homebrew:
+
+```bash
+brew install stephanschmidt/tap/human
+```
+
+Or with [mise](https://mise.jdx.dev):
+
+```bash
+mise use -g github:StephanSchmidt/human
+```
+
+Or with Go:
+
+```bash
+go install github.com/stephanschmidt/human@latest
+```
 
 ## Claude Code usage
 
@@ -70,33 +94,58 @@ The `/human-bug-plan` skill fetches a bug ticket (including comments for stack t
 
 The analysis is written to `.human/bugs/kan-1.md`.
 
-## Install
+## Setup
 
 ```bash
-curl -sSfL gethuman.sh/install.sh | bash
+cp .humanconfig.example .humanconfig.yaml
+# edit .humanconfig.yaml with your tracker instances
 ```
 
-Or with Homebrew:
+## Configuration
 
-```bash
-brew install stephanschmidt/tap/human
+Add trackers and tools to `.humanconfig.yaml`:
+
+```yaml
+# Issue trackers
+jiras:
+  - name: work
+    url: https://work.atlassian.net
+    user: me@work.com
+    key: your-api-token
+
+githubs:
+  - name: oss
+    token: ghp_abc123
+
+# Tools
+notions:
+  - name: work
+    token: ntn_abc123
+    description: Company workspace
+
+figmas:
+  - name: design
+    token: figd_abc123
+    description: Product design team
+
+amplitudes:
+  - name: product
+    url: https://analytics.eu.amplitude.com  # EU; US default: https://amplitude.com
+    description: Product analytics
+    # key + secret from env
 ```
 
-Or with [mise](https://mise.jdx.dev):
+Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
 
-```bash
-mise use -g github:StephanSchmidt/human
-```
+Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) or `FIGMA_<NAME>_TOKEN` (per-instance).
 
-Or with Go:
+Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
 
-```bash
-go install github.com/stephanschmidt/human@latest
-```
+See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
 
 ## CLI usage
 
-Commands output JSON by default for easy piping to scripts and LLMs. Use `--table` for human-readable output. The same commands work across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut — only the project identifier changes.
+Use `--table` for human-readable output. The same commands work across all providers — only the project identifier changes.
 
 ```bash
 # List issues (JSON by default)
@@ -196,59 +245,10 @@ human figma file get ABC123                # forwarded to host daemon
 human notion search "quarterly report"     # forwarded to host daemon
 ```
 
-When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode (the default, no change from previous behavior).
-
-## Setup
-
-```bash
-cp .humanconfig.example .humanconfig.yaml
-# edit .humanconfig.yaml with your tracker instances
-```
+When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
 
 ## Build
 
 ```bash
 make build
 ```
-
-## Configuration
-
-Add trackers and tools to `.humanconfig.yaml`:
-
-```yaml
-# Issue trackers
-jiras:
-  - name: work
-    url: https://work.atlassian.net
-    user: me@work.com
-    key: your-api-token
-
-githubs:
-  - name: oss
-    token: ghp_abc123
-
-# Tools
-notions:
-  - name: work
-    token: ntn_abc123
-    description: Company workspace
-
-figmas:
-  - name: design
-    token: figd_abc123
-    description: Product design team
-
-amplitudes:
-  - name: product
-    url: https://analytics.eu.amplitude.com  # EU; US default: https://amplitude.com
-    description: Product analytics
-    # key + secret from env
-```
-
-Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
-
-Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) or `FIGMA_<NAME>_TOKEN` (per-instance).
-
-Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
-
-See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
