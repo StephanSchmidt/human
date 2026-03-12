@@ -1,6 +1,6 @@
 module github.com/stephanschmidt/human
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/rs/zerolog v1.34.0
