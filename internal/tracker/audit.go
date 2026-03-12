@@ -141,3 +141,10 @@ func (a *AuditProvider) EditIssue(ctx context.Context, key string, opts EditOpti
 	a.log("EditIssue", key, time.Since(start), err)
 	return issue, err
 }
+
+func (a *AuditProvider) ListStatuses(ctx context.Context, key string) ([]Status, error) {
+	start := time.Now()
+	statuses, err := a.inner.ListStatuses(ctx, key)
+	a.log("ListStatuses", key, time.Since(start), err)
+	return statuses, err
+}

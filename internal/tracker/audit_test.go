@@ -27,6 +27,7 @@ type mockProvider struct {
 	assignIssueFn     func(ctx context.Context, key string, userID string) error
 	getCurrentUserFn  func(ctx context.Context) (string, error)
 	editIssueFn       func(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error)
+	listStatusesFn    func(ctx context.Context, key string) ([]tracker.Status, error)
 }
 
 func (m *mockProvider) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -77,6 +78,13 @@ func (m *mockProvider) GetCurrentUser(ctx context.Context) (string, error) {
 func (m *mockProvider) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
 	if m.editIssueFn != nil {
 		return m.editIssueFn(ctx, key, opts)
+	}
+	return nil, nil
+}
+
+func (m *mockProvider) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
+	if m.listStatusesFn != nil {
+		return m.listStatusesFn(ctx, key)
 	}
 	return nil, nil
 }
@@ -362,6 +370,30 @@ func TestAuditProvider_EditIssue(t *testing.T) {
 	entries := readEntries(t, logPath)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "EditIssue", entries[0].Operation)
+	assert.Equal(t, "KAN-1", entries[0].Key)
+}
+
+func TestAuditProvider_ListStatuses(t *testing.T) {
+	inner := &mockProvider{
+		listStatusesFn: func(_ context.Context, key string) ([]tracker.Status, error) {
+			assert.Equal(t, "KAN-1", key)
+			return []tracker.Status{
+				{Name: "To Do", Type: "unstarted"},
+				{Name: "Done", Type: "done"},
+			}, nil
+		},
+	}
+	ap, logPath := newAudit(t, inner)
+
+	statuses, err := ap.ListStatuses(context.Background(), "KAN-1")
+	require.NoError(t, err)
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "To Do", statuses[0].Name)
+	assert.Equal(t, "Done", statuses[1].Name)
+
+	entries := readEntries(t, logPath)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "ListStatuses", entries[0].Operation)
 	assert.Equal(t, "KAN-1", entries[0].Key)
 }
 

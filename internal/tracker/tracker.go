@@ -235,6 +235,7 @@ type Provider interface {
 	Assigner
 	CurrentUserGetter
 	Editor
+	StatusLister
 }
 
 // Instance represents a configured tracker backend ready for use.
@@ -290,6 +291,19 @@ type EditOptions struct {
 // Editor updates an existing issue's title and/or description.
 type Editor interface {
 	EditIssue(ctx context.Context, key string, opts EditOptions) (*Issue, error)
+}
+
+// Status represents a workflow state that an issue can be in.
+type Status struct {
+	Name string `json:"name"`
+	Type string `json:"type,omitempty"` // "unstarted", "started", "done", "closed", or ""
+}
+
+// StatusLister lists available statuses for an issue.
+// For Jira, only valid transitions from the current state are returned.
+// For other trackers, all statuses for the project/workflow are returned.
+type StatusLister interface {
+	ListStatuses(ctx context.Context, key string) ([]Status, error)
 }
 
 // Resolve determines which tracker instance to use.

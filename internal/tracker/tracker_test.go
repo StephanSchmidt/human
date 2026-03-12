@@ -35,6 +35,7 @@ func (stubProvider) TransitionIssue(context.Context, string, string) error      
 func (stubProvider) AssignIssue(context.Context, string, string) error            { return nil }
 func (stubProvider) GetCurrentUser(context.Context) (string, error)               { return "", nil }
 func (stubProvider) EditIssue(context.Context, string, EditOptions) (*Issue, error) { return nil, nil }
+func (stubProvider) ListStatuses(context.Context, string) ([]Status, error)       { return nil, nil }
 
 func TestResolveByKind_found(t *testing.T) {
 	instances := []Instance{
