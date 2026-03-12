@@ -1,4 +1,4 @@
-module github.com/stephanschmidt/human
+module github.com/StephanSchmidt/human
 
 go 1.26.1
 

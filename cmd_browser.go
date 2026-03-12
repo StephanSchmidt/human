@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/internal/browser"
+	"github.com/StephanSchmidt/human/internal/browser"
 )
 
 func buildBrowserCmd() *cobra.Command {

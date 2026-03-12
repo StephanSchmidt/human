@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/errors"
-	"github.com/stephanschmidt/human/internal/amplitude"
+	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/amplitude"
 )
 
 // --- Interfaces ---

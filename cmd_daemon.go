@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
 func buildDaemonCmd() *cobra.Command {

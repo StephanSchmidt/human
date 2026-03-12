@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // autoInstanceLoader loads tracker instances for auto-detect commands.

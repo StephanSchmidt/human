@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stephanschmidt/human/internal/notion"
+	"github.com/StephanSchmidt/human/internal/notion"
 )
 
 // --- mock notion client ---

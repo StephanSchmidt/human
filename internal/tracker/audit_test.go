@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // --- mock provider for audit tests ---

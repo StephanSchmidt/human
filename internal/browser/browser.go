@@ -7,7 +7,7 @@ import (
 
 	"github.com/pkg/browser"
 
-	"github.com/stephanschmidt/human/errors"
+	"github.com/StephanSchmidt/human/errors"
 )
 
 // Opener opens a URL in the default browser.

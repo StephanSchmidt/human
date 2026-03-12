@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stephanschmidt/human/errors"
+	"github.com/StephanSchmidt/human/errors"
 )
 
 // githubIssueRe matches GitHub issue keys like "owner/repo#123".

@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/stephanschmidt/human/errors"
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 const notionVersion = "2022-06-28"

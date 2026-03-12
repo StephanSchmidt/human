@@ -15,8 +15,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/errors"
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // resolveProvider loads instances, applies CLI flag overrides, and resolves

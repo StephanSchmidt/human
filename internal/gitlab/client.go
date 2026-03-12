@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stephanschmidt/human/errors"
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 var _ tracker.Provider = (*Client)(nil)

@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/stephanschmidt/human/internal/config"
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/config"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // Config holds the configuration for a single GitLab instance.

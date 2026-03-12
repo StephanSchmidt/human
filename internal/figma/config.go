@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/stephanschmidt/human/internal/config"
+	"github.com/StephanSchmidt/human/internal/config"
 )
 
 // Config holds the configuration for a single Figma instance.

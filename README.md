@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml/badge.svg)](https://github.com/StephanSchmidt/human/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/StephanSchmidt/human/branch/main/graph/badge.svg)](https://codecov.io/gh/StephanSchmidt/human)
-[![Go Report Card](https://goreportcard.com/badge/github.com/stephanschmidt/human)](https://goreportcard.com/report/github.com/stephanschmidt/human)
-[![Go Reference](https://pkg.go.dev/badge/github.com/stephanschmidt/human.svg)](https://pkg.go.dev/github.com/stephanschmidt/human)
+[![Go Report Card](https://goreportcard.com/badge/github.com/StephanSchmidt/human)](https://goreportcard.com/report/github.com/StephanSchmidt/human)
+[![Go Reference](https://pkg.go.dev/badge/github.com/StephanSchmidt/human.svg)](https://pkg.go.dev/github.com/StephanSchmidt/human)
 [![Latest Release](https://img.shields.io/github/v/release/StephanSchmidt/human)](https://github.com/StephanSchmidt/human/releases/latest)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue?logo=dependabot)](https://github.com/StephanSchmidt/human/network/updates)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StephanSchmidt/human/blob/main/LICENSE)
@@ -49,7 +49,7 @@ mise use -g github:StephanSchmidt/human
 Or with Go:
 
 ```bash
-go install github.com/stephanschmidt/human@latest
+go install github.com/StephanSchmidt/human@latest
 ```
 
 Or add as a [devcontainer Feature](https://github.com/StephanSchmidt/treehouse):

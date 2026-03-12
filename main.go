@@ -13,16 +13,16 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/stephanschmidt/human/errors"
-	"github.com/stephanschmidt/human/internal/azuredevops"
-	"github.com/stephanschmidt/human/internal/claude"
-	"github.com/stephanschmidt/human/internal/daemon"
-	"github.com/stephanschmidt/human/internal/github"
-	"github.com/stephanschmidt/human/internal/gitlab"
-	"github.com/stephanschmidt/human/internal/jira"
-	"github.com/stephanschmidt/human/internal/linear"
-	"github.com/stephanschmidt/human/internal/shortcut"
-	"github.com/stephanschmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/azuredevops"
+	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/github"
+	"github.com/StephanSchmidt/human/internal/gitlab"
+	"github.com/StephanSchmidt/human/internal/jira"
+	"github.com/StephanSchmidt/human/internal/linear"
+	"github.com/StephanSchmidt/human/internal/shortcut"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 var (
