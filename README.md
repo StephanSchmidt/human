@@ -139,7 +139,7 @@ human amplitude --amplitude=product events list
 
 ## Devcontainer / Remote mode
 
-AI agents running inside devcontainers need access to issue trackers, Notion, Figma, and Amplitude, but credentials should stay on the host. The daemon mode splits `human` into two roles: a **daemon** on the host (holds credentials, executes commands) and a **client** inside the container (forwards CLI args, prints results).
+AI agents running inside devcontainers need access to issue trackers, Notion, Figma, and Amplitude, but credentials should stay on the host. The daemon mode splits `human` into two roles: a **daemon** on the host (holds credentials, executes commands) and a **client** inside the container (forwards CLI args, prints results). You need `human` installed on both sides: on the host (via Homebrew, curl, etc.) to run the daemon, and inside the container (via the devcontainer Feature) as the client. It's the same binary — the mode is determined by the `HUMAN_DAEMON_ADDR` environment variable.
 
 On the host:
 
@@ -149,10 +149,13 @@ human daemon token          # print token for copy/paste
 human daemon status         # check if daemon is reachable
 ```
 
-In `devcontainer.json`:
+In `devcontainer.json`, add the [devcontainer Feature](https://github.com/StephanSchmidt/treehouse) to install `human` and configure the daemon connection:
 
 ```json
 {
+  "features": {
+    "ghcr.io/stephanschmidt/treehouse/human:1": {}
+  },
   "forwardPorts": [19285],
   "remoteEnv": {
     "HUMAN_DAEMON_ADDR": "localhost:19285",
