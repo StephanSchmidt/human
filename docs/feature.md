@@ -19,10 +19,12 @@
   - `<tracker> issue create <title> --description <description>` — create a new issue (requires `--project`)
   - `<tracker> issue comment add <key> <body>` — add a comment to an issue
   - `<tracker> issue comment list <key>` — list comments on an issue
+  - `<tracker> issue start <key>` — start working on an issue (transition to In Progress and assign to yourself)
   - `<tracker> issue delete <key>` — delete (or close) an issue by key (requires `--confirm`)
 - **Utility commands**
   - `tracker list` — list configured tracker instances
   - `install --agent claude` — install Claude Code skills and agents
+  - `browser <url>` — open a URL in the default browser (works in devcontainer via daemon)
 -
 ## Skills / Agents
 

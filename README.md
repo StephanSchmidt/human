@@ -54,7 +54,16 @@ go install github.com/stephanschmidt/human@latest
 
 ## CLI usage
 
-Use `--table` for human-readable output. The same commands work across all providers — only the project identifier changes.
+Use `--table` for human-readable output. Quick commands auto-detect the tracker from key format and configuration:
+
+```bash
+# Quick commands (auto-detect tracker)
+human get KAN-1                                          # get a single issue
+human list --project=KAN                                 # list issues in a project
+human list --project=KAN --tracker=work                  # disambiguate with --tracker
+```
+
+The same commands also work in provider-specific form — only the project identifier changes:
 
 ```bash
 # List issues (JSON by default)
@@ -77,7 +86,7 @@ human azuredevops issue get Human/42                    # Azure DevOps
 human shortcut issue get 123                            # Shortcut
 
 # Create an issue
-human linear issue create --project=ENG "Implement feature"
+human linear issue create --project=ENG "Implement feature" --description "Feature details in markdown"
 
 # Add a comment to an issue
 human jira issue comment add KAN-1 "This is done"

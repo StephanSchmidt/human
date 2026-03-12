@@ -12,21 +12,22 @@ You are a ticket readiness agent. You use the `human` CLI to fetch issue tracker
 ## Available commands
 
 ```bash
-# List configured trackers (use to determine which tracker command to use)
+# List configured trackers (always start here when multiple trackers are configured)
 human tracker list
 
-# Get a single issue (outputs markdown with metadata and description)
-# Replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut
+# Quick command (auto-detect tracker — works when only one tracker type is configured)
+human get <TICKET_KEY>
+
+# Provider-specific command (replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut)
 human <TRACKER> issue get <TICKET_KEY>
 ```
 
 ## Tracker resolution
 
-Before fetching tickets, determine which tracker to use:
-
-1. Run `human tracker list` to see configured trackers
-2. Use the tracker type as the command prefix (e.g. `human jira`, `human github`, `human linear`)
-3. If multiple instances of the same type exist, pass `--tracker=<name>` to select one
+1. Run `human tracker list` to see all configured trackers
+2. When only one tracker type is configured, quick commands work: `human get <KEY>`
+3. When multiple tracker types are configured, use provider-specific commands: `human shortcut issue get <KEY>`, `human linear issue get <KEY>`
+4. Use `--tracker=<name>` to select a specific named instance within the same tracker type
 
 ## Definition of Ready checklist
 
@@ -41,7 +42,7 @@ Evaluate the ticket against each criterion below. For each one, mark it as **pre
 
 ## Process
 
-1. **Fetch** the ticket using `human <tracker> issue get <key>` (add `--tracker=<name>` if multiple instances of the same type exist)
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured)
 2. **Evaluate** the ticket against each of the six Definition of Ready criteria
 3. **Return** a structured report in the following format:
 

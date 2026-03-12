@@ -5,3 +5,4 @@ local/
 coverage.out
 logo/
 .claude/
+.humanconfig

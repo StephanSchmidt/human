@@ -12,27 +12,29 @@ You are an implementation planning agent. You use the `human` CLI to fetch issue
 ## Available commands
 
 ```bash
-# List configured trackers (use to determine which tracker command to use)
+# List configured trackers (always start here when multiple trackers are configured)
 human tracker list
 
-# List issues in a project (replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut)
-human <TRACKER> issues list --project <PROJECT_KEY>
+# Quick commands (auto-detect tracker — works when only one tracker type is configured)
+human get <TICKET_KEY>
+human list --project=<PROJECT_KEY>
 
-# Get a single issue (outputs markdown with metadata and description)
+# Provider-specific commands (replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut)
 human <TRACKER> issue get <TICKET_KEY>
+human <TRACKER> issues list --project=<PROJECT_KEY>
+human <TRACKER> issue create --project=<PROJECT_KEY> "Short title" --description "Detailed description in markdown"
 ```
 
 ## Tracker resolution
 
-Before fetching tickets, determine which tracker to use:
-
-1. Run `human tracker list` to see configured trackers
-2. Use the tracker type as the command prefix (e.g. `human jira`, `human github`, `human linear`)
-3. If multiple instances of the same type exist, pass `--tracker=<name>` to select one
+1. Run `human tracker list` to see all configured trackers
+2. When only one tracker type is configured, quick commands work: `human get <KEY>`, `human list --project=<P>`
+3. When multiple tracker types are configured (e.g. read PM tickets from Shortcut, write dev tickets to Linear), use provider-specific commands for each tracker: `human shortcut issue get <KEY>`, `human linear issue create ...`
+4. Use `--tracker=<name>` to select a specific named instance within the same tracker type
 
 ## Planning process
 
-1. **Fetch** the ticket using `human <tracker> issue get <key>` (add `--tracker=<name>` if multiple instances of the same type exist)
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured)
 2. **Explore** the codebase with Glob, Grep, and Read to understand affected areas
 3. **Identify** existing patterns, conventions, and related code
 4. **Produce** a structured plan with:
@@ -40,3 +42,4 @@ Before fetching tickets, determine which tracker to use:
    - **Changes**: ordered list of files to create/modify with rationale
    - **Verification**: test commands, manual checks, edge cases
 5. **Write** the plan to `.human/plans/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the `.human/plans/` directory first with `mkdir -p .human/plans`.
+6. **Create** a Linear implementation ticket using `human <tracker> issue create --project=<PROJECT> "Short title" --description "$(cat .human/plans/<key>.md)"` — title must be a short one-line summary, all detail goes in `--description`

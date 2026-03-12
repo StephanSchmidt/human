@@ -13,6 +13,13 @@ a new release.
 
 Whatever you do, the new state needs to be 'done done'.
 
+# Tickets
+
+Use Human on Shortcut to read PM tickets on what to do.
+Use HUM on Linear to create implementation plan tickets.
+
+Use 'human' to read and write tickets.
+
 # Project Structure
 
 - `main.go` — CLI entry point
@@ -46,7 +53,7 @@ Use todo list as much as possible.
 
 # Release
 
-By default increase versions for a release by 0.0.1
+By default increase versions for a release by 0.1.0
 
 # Verification
  
