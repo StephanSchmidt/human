@@ -245,7 +245,7 @@ Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) o
 
 Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
 
-See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
+See [documentation.md](docs/documentation.md) for full configuration details including environment variables and settings resolution.
 
 ## Build
 
