@@ -10,13 +10,17 @@
   - Azure DevOps — issue keys `<Project>/<ID>` (e.g. `Human/42`), project keys are project names
   - Shortcut — issue keys are numeric story IDs (e.g. `123`), project keys are project names
 - **Auto-detection** — tracker type is inferred from issue key format when possible (GitHub keys containing `/` and `#` are globally unique; other trackers require `--tracker` when multiple types are configured)
-- **Commands**
-  - `issues list` — list issues for a project (requires `--project`)
-  - `issue get <key>` — fetch a single issue with metadata and description
-  - `issue create <summary>` — create a new issue (requires `--project`)
-  - `issue comment add <key> <body>` — add a comment to an issue
-  - `issue comment list <key>` — list comments on an issue
-  - `issue delete <key>` — delete (or close) an issue by key
+- **Quick commands** (auto-detect tracker from key format and configuration)
+  - `get <key>` — fetch a single issue (auto-detects tracker)
+  - `list --project=<project>` — list issues (auto-detects tracker)
+- **Provider-specific commands**
+  - `<tracker> issues list` — list issues for a project (requires `--project`)
+  - `<tracker> issue get <key>` — fetch a single issue with metadata and description
+  - `<tracker> issue create <title> --description <description>` — create a new issue (requires `--project`)
+  - `<tracker> issue comment add <key> <body>` — add a comment to an issue
+  - `<tracker> issue comment list <key>` — list comments on an issue
+  - `<tracker> issue delete <key>` — delete (or close) an issue by key (requires `--confirm`)
+- **Utility commands**
   - `tracker list` — list configured tracker instances
   - `install --agent claude` — install Claude Code skills and agents
 -
@@ -37,7 +41,7 @@
   - Writes the analysis to `.human/bugs/<key>.md` (lowercased key)
 - **`human-ready` agent** (`.claude/agents/human-ready.md`)
   - Tools: Bash, Read
-  - Runs `human tracker list` to discover configured trackers, then `human issue get <key>` to fetch the ticket
+  - Runs `human tracker list` to discover configured trackers, then fetches the ticket (`human get <key>` for single-tracker setups, or `human <tracker> issue get <key>` for multi-tracker setups)
   - Evaluates against the Definition of Ready checklist (6 criteria):
     1. Clear description — is the problem or feature clearly stated?
     2. Acceptance criteria — are there concrete, testable conditions for "done"?
@@ -49,7 +53,7 @@
 - **`human-planner` agent** (`.claude/agents/human-planner.md`)
   - Tools: Bash, Read, Grep, Glob, Write
   - Planning process:
-    1. Fetch the ticket via `human issue get <key>`
+    1. Fetch the ticket via `human <tracker> issue get <key>` (or `human get <key>` for single-tracker setups)
     2. Explore the codebase with Glob, Grep, and Read to understand affected areas
     3. Identify existing patterns, conventions, and related code
     4. Produce a structured plan (context, ordered changes with rationale, verification steps)
@@ -57,7 +61,7 @@
 - **`human-bug-analyzer` agent** (`.claude/agents/human-bug-analyzer.md`)
   - Tools: Bash, Read, Grep, Glob, Write
   - Analysis process:
-    1. Fetch the ticket via `human issue get <key>` and comments via `human issue comment list <key>`
+    1. Fetch the ticket via `human <tracker> issue get <key>` (or `human get <key>` for single-tracker setups) and comments via `human <tracker> issue comment list <key>`
     2. Identify symptoms — error messages, stack traces, failing inputs, reproduction steps
     3. Locate code — use Grep and Glob to find functions in stack traces, error messages, related code paths, tests, and log statements
     4. Read and trace the code flow to identify root cause

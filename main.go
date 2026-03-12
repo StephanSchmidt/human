@@ -171,11 +171,17 @@ func printConnectedTrackers(w io.Writer) {
 
 func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Quick commands (auto-detect tracker):")
+	_, _ = fmt.Fprintln(w, "  human get KAN-1")
+	_, _ = fmt.Fprintln(w, "  human list --project=KAN")
+	_, _ = fmt.Fprintln(w, "  human list --project=KAN --tracker=work")
+	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Command pattern:")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issues list --project=<PROJECT>   List issues (JSON)")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  get <KEY>                  Get issue (markdown)")
-	_, _ = fmt.Fprintln(w, `  human <tracker> issue  create --project=<P> "S"   Create issue`)
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Delete/close issue")
+	_, _ = fmt.Fprintln(w, `  human <tracker> issue  create --project=<P> "Title" --description "Details"`)
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Show confirmation code")
+	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment add <KEY> <BODY>   Add comment")
 	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment list <KEY>         List comments")
 	_, _ = fmt.Fprintln(w)
@@ -190,10 +196,11 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "Examples:")
 	_, _ = fmt.Fprintln(w, "  human jira issues list --project=KAN")
 	_, _ = fmt.Fprintln(w, "  human jira issue get KAN-1")
-	_, _ = fmt.Fprintln(w, `  human jira issue create --project=KAN "Implement login page"`)
+	_, _ = fmt.Fprintln(w, `  human jira issue create --project=KAN "Implement login page" --description "Add OAuth2 login flow with Google provider"`)
 	_, _ = fmt.Fprintln(w, "  human github issues list --project=octocat/hello-world")
 	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
-	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1")
+	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1                    # shows confirmation code")
+	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1 --confirm=4521     # deletes")
 	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
 	_, _ = fmt.Fprintln(w, "  human notion search \"quarterly report\"")
 	_, _ = fmt.Fprintln(w, "  human notion page get <page-id>")
@@ -441,6 +448,7 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 
 	// --- Command groups ---
 	rootCmd.AddGroup(
+		&cobra.Group{ID: "shortcuts", Title: "Quick Commands:"},
 		&cobra.Group{ID: "trackers", Title: "Issue Trackers:"},
 		&cobra.Group{ID: "tools", Title: "Tools:"},
 		&cobra.Group{ID: "utility", Title: "Utility:"},
@@ -448,6 +456,15 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 
 	// Hide the auto-generated completion command.
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
+
+	// --- Quick commands (auto-detect tracker) ---
+	autoGetCmd := buildAutoGetCmd()
+	autoGetCmd.GroupID = "shortcuts"
+	rootCmd.AddCommand(autoGetCmd)
+
+	autoListCmd := buildAutoListCmd()
+	autoListCmd.GroupID = "shortcuts"
+	rootCmd.AddCommand(autoListCmd)
 
 	// --- Provider commands (dynamic registration) ---
 	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}

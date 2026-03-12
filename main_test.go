@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,7 +76,8 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, "human <tracker> issues list")
 	assert.Contains(t, out, "human <tracker> issue  get")
 	assert.Contains(t, out, "human <tracker> issue  create")
-	assert.Contains(t, out, "human <tracker> issue  delete")
+	assert.Contains(t, out, "human <tracker> issue  delete <KEY>               Show confirmation code")
+	assert.Contains(t, out, "human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
 	assert.Contains(t, out, "human <tracker> issue  comment add")
 	assert.Contains(t, out, "human <tracker> issue  comment list")
 
@@ -97,6 +99,7 @@ func TestPrintExamples(t *testing.T) {
 	assert.Contains(t, out, `human jira issue create --project=KAN "Implement login page"`)
 	assert.Contains(t, out, "human github issues list --project=octocat/hello-world")
 	assert.Contains(t, out, "human jira issue delete KAN-1")
+	assert.Contains(t, out, "human jira issue delete KAN-1 --confirm=4521")
 	assert.Contains(t, out, "human tracker list")
 	assert.Contains(t, out, "human install --agent claude")
 	assert.Contains(t, out, "human daemon start")
@@ -246,7 +249,7 @@ func TestPrintTrackerTable_withEntries(t *testing.T) {
 
 func TestPrintIssuesJSON(t *testing.T) {
 	issues := []tracker.Issue{
-		{Key: "KAN-1", Summary: "First issue", Status: "Open"},
+		{Key: "KAN-1", Title: "First issue", Status: "Open"},
 	}
 
 	var buf bytes.Buffer
@@ -255,13 +258,13 @@ func TestPrintIssuesJSON(t *testing.T) {
 
 	out := buf.String()
 	assert.Contains(t, out, `"key": "KAN-1"`)
-	assert.Contains(t, out, `"summary": "First issue"`)
+	assert.Contains(t, out, `"title": "First issue"`)
 }
 
 func TestPrintIssuesTable(t *testing.T) {
 	issues := []tracker.Issue{
-		{Key: "KAN-1", Status: "Open", Summary: "First issue"},
-		{Key: "KAN-2", Status: "Done", Summary: "Second issue"},
+		{Key: "KAN-1", Status: "Open", Title: "First issue"},
+		{Key: "KAN-2", Status: "Done", Title: "Second issue"},
 	}
 
 	var buf bytes.Buffer
@@ -271,7 +274,7 @@ func TestPrintIssuesTable(t *testing.T) {
 	out := buf.String()
 	assert.Contains(t, out, "KEY")
 	assert.Contains(t, out, "STATUS")
-	assert.Contains(t, out, "SUMMARY")
+	assert.Contains(t, out, "TITLE")
 	assert.Contains(t, out, "KAN-1")
 	assert.Contains(t, out, "KAN-2")
 }
@@ -359,7 +362,7 @@ func unsetAzureEnvs(t *testing.T) {
 
 func TestRunListIssues_JSON(t *testing.T) {
 	issues := []tracker.Issue{
-		{Key: "KAN-1", Summary: "First", Status: "Open"},
+		{Key: "KAN-1", Title: "First", Status: "Open"},
 	}
 	p := &mockProvider{
 		listIssuesFn: func(_ context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -378,8 +381,8 @@ func TestRunListIssues_JSON(t *testing.T) {
 
 func TestRunListIssues_All(t *testing.T) {
 	issues := []tracker.Issue{
-		{Key: "KAN-1", Summary: "Open", Status: "Open"},
-		{Key: "KAN-2", Summary: "Done", Status: "Done"},
+		{Key: "KAN-1", Title: "Open", Status: "Open"},
+		{Key: "KAN-2", Title: "Done", Status: "Done"},
 	}
 	p := &mockProvider{
 		listIssuesFn: func(_ context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
@@ -397,7 +400,7 @@ func TestRunListIssues_All(t *testing.T) {
 
 func TestRunListIssues_Table(t *testing.T) {
 	issues := []tracker.Issue{
-		{Key: "KAN-1", Summary: "First", Status: "Open"},
+		{Key: "KAN-1", Title: "First", Status: "Open"},
 	}
 	p := &mockProvider{
 		listIssuesFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
@@ -427,7 +430,7 @@ func TestRunListIssues_error(t *testing.T) {
 func TestRunGetIssue(t *testing.T) {
 	issue := &tracker.Issue{
 		Key:         "KAN-1",
-		Summary:     "Test issue",
+		Title:     "Test issue",
 		Status:      "In Progress",
 		Priority:    "High",
 		Assignee:    "alice",
@@ -458,7 +461,7 @@ func TestRunGetIssue(t *testing.T) {
 func TestRunGetIssue_emptyFields(t *testing.T) {
 	issue := &tracker.Issue{
 		Key:     "KAN-2",
-		Summary: "Minimal",
+		Title: "Minimal",
 		Status:  "Open",
 	}
 	p := &mockProvider{
@@ -495,8 +498,8 @@ func TestRunCreateIssue(t *testing.T) {
 		createIssueFn: func(_ context.Context, issue *tracker.Issue) (*tracker.Issue, error) {
 			assert.Equal(t, "KAN", issue.Project)
 			assert.Equal(t, "Task", issue.Type)
-			assert.Equal(t, "New issue", issue.Summary)
-			return &tracker.Issue{Key: "KAN-42", Summary: "New issue"}, nil
+			assert.Equal(t, "New issue", issue.Title)
+			return &tracker.Issue{Key: "KAN-42", Title: "New issue"}, nil
 		},
 	}
 
@@ -520,20 +523,31 @@ func TestRunCreateIssue_error(t *testing.T) {
 }
 
 func TestRunDeleteIssue(t *testing.T) {
+	key := "KAN-1"
+	// Write a known confirmation code to the temp file.
+	code := 4521
+	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+	t.Cleanup(func() { clearConfirmCode(key) })
+
 	p := &mockProvider{
-		deleteIssueFn: func(_ context.Context, key string) error {
-			assert.Equal(t, "KAN-1", key)
+		deleteIssueFn: func(_ context.Context, k string) error {
+			assert.Equal(t, key, k)
 			return nil
 		},
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, "KAN-1")
+	err := runDeleteIssue(context.Background(), p, &buf, key, code)
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted KAN-1\n", buf.String())
 }
 
 func TestRunDeleteIssue_error(t *testing.T) {
+	key := "KAN-ERR"
+	code := 1234
+	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+	t.Cleanup(func() { clearConfirmCode(key) })
+
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error {
 			return fmt.Errorf("delete failed")
@@ -541,8 +555,97 @@ func TestRunDeleteIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, "KAN-1")
+	err := runDeleteIssue(context.Background(), p, &buf, key, code)
 	assert.EqualError(t, err, "delete failed")
+}
+
+func TestRunDeleteIssue_noConfirm(t *testing.T) {
+	key := "KAN-NC"
+	t.Cleanup(func() { clearConfirmCode(key) })
+
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runDeleteIssue(context.Background(), p, &buf, key, 0)
+	require.NoError(t, err)
+	assert.False(t, deleted, "issue should not be deleted without confirmation")
+
+	out := buf.String()
+	assert.Contains(t, out, "Warning: This is a destructive operation.")
+	assert.Contains(t, out, "Sure? From a user perspective, is this the right thing?")
+	assert.Contains(t, out, "--confirm=")
+	assert.Contains(t, out, key)
+
+	// Temp file should have been created.
+	_, err = os.Stat(confirmPath(key))
+	assert.NoError(t, err, "confirmation temp file should exist")
+}
+
+func TestRunDeleteIssue_wrongConfirm(t *testing.T) {
+	key := "KAN-WC"
+	require.NoError(t, os.WriteFile(confirmPath(key), []byte("5555"), 0o600))
+	t.Cleanup(func() { clearConfirmCode(key) })
+
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runDeleteIssue(context.Background(), p, &buf, key, 9999)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "confirmation code does not match")
+	assert.False(t, deleted, "issue should not be deleted with wrong code")
+}
+
+func TestRunDeleteIssue_confirmCleansUp(t *testing.T) {
+	key := "KAN-CU"
+	code := 7777
+	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error { return nil },
+	}
+
+	var buf bytes.Buffer
+	err := runDeleteIssue(context.Background(), p, &buf, key, code)
+	require.NoError(t, err)
+
+	_, err = os.Stat(confirmPath(key))
+	assert.True(t, os.IsNotExist(err), "temp file should be removed after successful delete")
+}
+
+func TestGenerateConfirmCode_range(t *testing.T) {
+	key := "KAN-RNG"
+	t.Cleanup(func() { clearConfirmCode(key) })
+
+	for range 20 {
+		code, err := generateConfirmCode(key)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, code, 1000)
+		assert.LessOrEqual(t, code, 9999)
+	}
+}
+
+func TestGenerateConfirmCode_writesFile(t *testing.T) {
+	key := "KAN-WF"
+	t.Cleanup(func() { clearConfirmCode(key) })
+
+	code, err := generateConfirmCode(key)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(confirmPath(key))
+	require.NoError(t, err)
+	assert.Equal(t, strconv.Itoa(code), string(data))
 }
 
 func TestRunAddComment(t *testing.T) {

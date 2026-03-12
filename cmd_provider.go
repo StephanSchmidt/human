@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"crypto/rand"
+	"math/big"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/stephanschmidt/human/errors"
 	"github.com/stephanschmidt/human/internal/tracker"
 )
 
@@ -105,9 +111,10 @@ func buildIssueCreateCmd(kind string) *cobra.Command {
 	var project, typ, description string
 
 	cmd := &cobra.Command{
-		Use:   "create SUMMARY",
-		Short: "Create a new issue in a project",
-		Args:  cobra.ExactArgs(1),
+		Use:     "create TITLE",
+		Short:   "Create a new issue in a project",
+		Example: `  human jira issue create --project=KAN "Implement login page" --description "Add OAuth2 login flow with Google provider"`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, cleanup, err := resolveProvider(cmd, kind)
 			if err != nil {
@@ -120,14 +127,16 @@ func buildIssueCreateCmd(kind string) *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", "", "Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)")
 	_ = cmd.MarkFlagRequired("project")
 	cmd.Flags().StringVar(&typ, "type", "Task", "Issue type (Jira only, e.g. Task, Bug, Story)")
-	cmd.Flags().StringVar(&description, "description", "", "Issue description (markdown)")
+	cmd.Flags().StringVar(&description, "description", "", "Issue description in markdown (separate from title)")
 	return cmd
 }
 
 func buildIssueDeleteCmd(kind string) *cobra.Command {
-	return &cobra.Command{
+	var confirm int
+
+	cmd := &cobra.Command{
 		Use:   "delete KEY",
-		Short: "Delete (or close) an issue by key",
+		Short: "Delete (or close) an issue by key (requires --confirm)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, cleanup, err := resolveProvider(cmd, kind)
@@ -135,9 +144,11 @@ func buildIssueDeleteCmd(kind string) *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return runDeleteIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0])
+			return runDeleteIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], confirm)
 		},
 	}
+	cmd.Flags().IntVar(&confirm, "confirm", 0, "Confirmation code from the first invocation")
+	return cmd
 }
 
 func buildIssueCommentCmd(kind string) *cobra.Command {
@@ -208,7 +219,7 @@ func runGetIssue(ctx context.Context, p tracker.Provider, out io.Writer, key str
 		return s
 	}
 
-	_, _ = fmt.Fprintf(out, "# %s: %s\n\n", issue.Key, issue.Summary)
+	_, _ = fmt.Fprintf(out, "# %s: %s\n\n", issue.Key, issue.Title)
 	_, _ = fmt.Fprintln(out, "| Field    | Value       |")
 	_, _ = fmt.Fprintln(out, "|----------|-------------|")
 	_, _ = fmt.Fprintf(out, "| Status   | %s |\n", issue.Status)
@@ -223,26 +234,87 @@ func runGetIssue(ctx context.Context, p tracker.Provider, out io.Writer, key str
 	return nil
 }
 
-func runCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, project, typ, summary, description string) error {
+func runCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, project, typ, title, description string) error {
 	issue, err := p.CreateIssue(ctx, &tracker.Issue{
 		Project:     project,
 		Type:        typ,
-		Summary:     summary,
+		Title:       title,
 		Description: description,
 	})
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "%s\t%s\n", issue.Key, issue.Summary)
+	_, _ = fmt.Fprintf(out, "%s\t%s\n", issue.Key, issue.Title)
 	return nil
 }
 
-func runDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string) error {
+func runDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, confirm int) error {
+	if confirm == 0 {
+		code, err := generateConfirmCode(key)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "Warning: This is a destructive operation. You are about to delete %s.\n", key)
+		_, _ = fmt.Fprintln(out, "Sure? From a user perspective, is this the right thing?")
+		_, _ = fmt.Fprintf(out, "Use --confirm=%d to confirm deletion of %s\n", code, key)
+		return nil
+	}
+
+	stored, err := readConfirmCode(key)
+	if err != nil {
+		return err
+	}
+	if confirm != stored {
+		return errors.WithDetails("confirmation code does not match", "key", key)
+	}
+
 	if err := p.DeleteIssue(ctx, key); err != nil {
 		return err
 	}
+	clearConfirmCode(key)
 	_, _ = fmt.Fprintf(out, "Deleted %s\n", key)
 	return nil
+}
+
+// confirmPath returns the temp file path for a confirmation code.
+func confirmPath(key string) string {
+	return filepath.Join(os.TempDir(), "human-confirm-"+key)
+}
+
+// generateConfirmCode creates a random 4-digit code, writes it to a temp file, returns it.
+func generateConfirmCode(key string) (int, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(9000))
+	if err != nil {
+		return 0, errors.WithDetails("generating random confirmation code", "key", key)
+	}
+	code := int(n.Int64()) + 1000 // 1000–9999
+	path := confirmPath(key)
+	if err := os.WriteFile(path, []byte(strconv.Itoa(code)), 0o600); err != nil {
+		return 0, errors.WithDetails("writing confirmation file", "path", path)
+	}
+	return code, nil
+}
+
+// readConfirmCode reads the stored confirmation code from the temp file.
+func readConfirmCode(key string) (int, error) {
+	root, err := os.OpenRoot(os.TempDir())
+	if err != nil {
+		return 0, errors.WithDetails("opening temp directory", "key", key)
+	}
+	defer func() { _ = root.Close() }()
+	f, err := root.Open("human-confirm-" + key)
+	if err != nil {
+		return 0, errors.WithDetails("no pending confirmation", "key", key)
+	}
+	defer func() { _ = f.Close() }()
+	data := make([]byte, 16)
+	n, _ := f.Read(data)
+	return strconv.Atoi(strings.TrimSpace(string(data[:n])))
+}
+
+// clearConfirmCode removes the temp file after successful deletion.
+func clearConfirmCode(key string) {
+	_ = os.Remove(confirmPath(key))
 }
 
 func runAddComment(ctx context.Context, p tracker.Provider, out io.Writer, key, body string) error {
@@ -274,9 +346,9 @@ func printIssuesJSON(w io.Writer, issues []tracker.Issue) error {
 
 func printIssuesTable(out io.Writer, issues []tracker.Issue) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tSUMMARY")
+	_, _ = fmt.Fprintln(w, "KEY\tSTATUS\tTITLE")
 	for _, issue := range issues {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", issue.Key, issue.Status, issue.Summary)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", issue.Key, issue.Status, issue.Title)
 	}
 	return w.Flush()
 }
