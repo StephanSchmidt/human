@@ -52,97 +52,6 @@ Or with Go:
 go install github.com/stephanschmidt/human@latest
 ```
 
-## Claude Code usage
-
-Install the Claude Code skills and agents into your project:
-
-```bash
-human install --agent claude
-```
-
-This writes skill and agent files to `.claude/` in the current directory. Re-run after upgrading `human` to pick up changes.
-
-### Check ticket readiness
-
-The `/human-ready` skill fetches a ticket, evaluates it against a Definition of Ready checklist, and asks you to fill in any gaps. The result is saved for reference.
-
-In Claude Code:
-
-```
-/human-ready KAN-1
-```
-
-The skill checks six criteria: clear description, acceptance criteria, scope, dependencies, context, and edge cases. For anything missing or incomplete, it asks you to provide the information. The completed assessment is written to `.human/ready/kan-1.md`.
-
-### Create an implementation plan
-
-The `/human-plan` skill fetches a ticket, explores the codebase, and produces a structured implementation plan.
-
-```
-/human-plan KAN-1
-```
-
-The plan is written to `.human/plans/kan-1.md`.
-
-### Analyze a bug
-
-The `/human-bug-plan` skill fetches a bug ticket (including comments for stack traces and logs), explores the codebase for root cause, and writes a structured bug analysis with a fix plan.
-
-```
-/human-bug-plan KAN-1
-```
-
-The analysis is written to `.human/bugs/kan-1.md`.
-
-## Setup
-
-```bash
-cp .humanconfig.example .humanconfig.yaml
-# edit .humanconfig.yaml with your tracker instances
-```
-
-## Configuration
-
-Add trackers and tools to `.humanconfig.yaml`:
-
-```yaml
-# Issue trackers
-jiras:
-  - name: work
-    url: https://work.atlassian.net
-    user: me@work.com
-    key: your-api-token
-
-githubs:
-  - name: oss
-    token: ghp_abc123
-
-# Tools
-notions:
-  - name: work
-    token: ntn_abc123
-    description: Company workspace
-
-figmas:
-  - name: design
-    token: figd_abc123
-    description: Product design team
-
-amplitudes:
-  - name: product
-    url: https://analytics.eu.amplitude.com  # EU; US default: https://amplitude.com
-    description: Product analytics
-    # key + secret from env
-```
-
-Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
-
-Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) or `FIGMA_<NAME>_TOKEN` (per-instance).
-
-Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
-
-See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
-
 ## CLI usage
 
 Use `--table` for human-readable output. The same commands work across all providers — only the project identifier changes.
@@ -246,6 +155,97 @@ human notion search "quarterly report"     # forwarded to host daemon
 ```
 
 When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
+
+## Claude Code usage
+
+Install the Claude Code skills and agents into your project:
+
+```bash
+human install --agent claude
+```
+
+This writes skill and agent files to `.claude/` in the current directory. Re-run after upgrading `human` to pick up changes.
+
+### Check ticket readiness
+
+The `/human-ready` skill fetches a ticket, evaluates it against a Definition of Ready checklist, and asks you to fill in any gaps. The result is saved for reference.
+
+In Claude Code:
+
+```
+/human-ready KAN-1
+```
+
+The skill checks six criteria: clear description, acceptance criteria, scope, dependencies, context, and edge cases. For anything missing or incomplete, it asks you to provide the information. The completed assessment is written to `.human/ready/kan-1.md`.
+
+### Create an implementation plan
+
+The `/human-plan` skill fetches a ticket, explores the codebase, and produces a structured implementation plan.
+
+```
+/human-plan KAN-1
+```
+
+The plan is written to `.human/plans/kan-1.md`.
+
+### Analyze a bug
+
+The `/human-bug-plan` skill fetches a bug ticket (including comments for stack traces and logs), explores the codebase for root cause, and writes a structured bug analysis with a fix plan.
+
+```
+/human-bug-plan KAN-1
+```
+
+The analysis is written to `.human/bugs/kan-1.md`.
+
+## Setup
+
+```bash
+cp .humanconfig.example .humanconfig.yaml
+# edit .humanconfig.yaml with your tracker instances
+```
+
+## Configuration
+
+Add trackers and tools to `.humanconfig.yaml`:
+
+```yaml
+# Issue trackers
+jiras:
+  - name: work
+    url: https://work.atlassian.net
+    user: me@work.com
+    key: your-api-token
+
+githubs:
+  - name: oss
+    token: ghp_abc123
+
+# Tools
+notions:
+  - name: work
+    token: ntn_abc123
+    description: Company workspace
+
+figmas:
+  - name: design
+    token: figd_abc123
+    description: Product design team
+
+amplitudes:
+  - name: product
+    url: https://analytics.eu.amplitude.com  # EU; US default: https://amplitude.com
+    description: Product analytics
+    # key + secret from env
+```
+
+Notion tokens can also be set via environment variables: `NOTION_TOKEN` (global) or `NOTION_<NAME>_TOKEN` (per-instance).
+
+Figma tokens can also be set via environment variables: `FIGMA_TOKEN` (global) or `FIGMA_<NAME>_TOKEN` (per-instance).
+
+Amplitude credentials can also be set via environment variables: `AMPLITUDE_KEY` + `AMPLITUDE_SECRET` (global) or `AMPLITUDE_<NAME>_KEY` + `AMPLITUDE_<NAME>_SECRET` (per-instance).
+
+See [documentation.md](documentation.md) for full configuration details including environment variables and settings resolution.
 
 ## Build
 
