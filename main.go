@@ -219,6 +219,7 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human amplitude events list")
 	_, _ = fmt.Fprintln(w, "  human amplitude cohorts list")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
+	_, _ = fmt.Fprintln(w, "  human init")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 	_, _ = fmt.Fprintln(w, "  human browser https://example.com")
 	_, _ = fmt.Fprintln(w, "  human daemon start")
@@ -534,6 +535,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	browserCmd := buildBrowserCmd()
 	browserCmd.GroupID = "utility"
 	rootCmd.AddCommand(browserCmd)
+
+	initCmd := buildInitCmd()
+	initCmd.GroupID = "utility"
+	rootCmd.AddCommand(initCmd)
 
 	return rootCmd
 }
