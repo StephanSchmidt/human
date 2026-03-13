@@ -218,6 +218,16 @@ The analysis is written to `.human/bugs/kan-1.md`.
 
 ## Setup
 
+The fastest way to get started:
+
+```bash
+human init
+```
+
+The interactive wizard lets you pick trackers and tools, then writes `.humanconfig.yaml` and prints the environment variables to set. It can also install the Claude Code integration.
+
+Alternatively, configure manually:
+
 ```bash
 cp .humanconfig.example .humanconfig.yaml
 # edit .humanconfig.yaml with your tracker instances
