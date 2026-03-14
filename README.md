@@ -156,10 +156,11 @@ In `devcontainer.json`, add the [devcontainer Feature](https://github.com/Stepha
   "features": {
     "ghcr.io/stephanschmidt/treehouse/human:1": {}
   },
-  "forwardPorts": [19285],
+  "forwardPorts": [19285, 19286],
   "remoteEnv": {
     "HUMAN_DAEMON_ADDR": "localhost:19285",
-    "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>"
+    "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
+    "HUMAN_CHROME_ADDR": "localhost:19286"
   }
 }
 ```
@@ -171,6 +172,31 @@ human jira issues list --project=KAN       # forwarded to host daemon
 human figma file get ABC123                # forwarded to host daemon
 human notion search "quarterly report"     # forwarded to host daemon
 ```
+
+### Chrome bridge
+
+When using Claude Code inside a devcontainer, the Chrome MCP bridge needs a Unix socket that Claude can discover. The `chrome-bridge` command creates this socket and tunnels traffic to the daemon on the host.
+
+```bash
+human chrome-bridge                        # daemonizes, prints PID and socket path
+```
+
+The command starts in the background by default — it prints the PID, socket path, and log location, then returns control to the terminal so you can run `claude` in the same shell:
+
+```bash
+human chrome-bridge
+claude                                     # runs immediately after
+```
+
+The bridge requires `HUMAN_CHROME_ADDR` and `HUMAN_DAEMON_TOKEN` environment variables (included in the `devcontainer.json` example above).
+
+Use `--foreground` to run the bridge in blocking mode (useful for debugging):
+
+```bash
+human chrome-bridge --foreground           # blocks, logs to stderr
+```
+
+Logs are written to `~/.human/chrome-bridge.log`.
 
 When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
 
