@@ -12,15 +12,14 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-**Human in the loop —** Swiss army knive for AI agentic coding with batteries included. Give your AI agent access to issue trackers, design files, and analytics. One CLI for Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude. Output as JSON and markdown.
+**The everything framework for AI development.** Claude is the engine. human is everything else. One tool. One install. Everything works.
 
-- **One unified interface** — Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude through a single CLI
-- **JSON and markdown output** — pipe directly into LLMs
-- **Claude Code skills** — full ticket lifecycle: readiness, planning, execution, review, and done verification
-- **Definition of Ready checks** — catch incomplete tickets before coding starts
-- **Notion integration** — search workspace, read pages, query databases for context
-- **Figma integration** — browse files, inspect components, read design comments, export images
-- **Amplitude integration** — query event analytics, funnels, retention, cohorts
+- **All connectors included** — Jira, Notion, Figma, Amplitude, GitHub, GitLab, Linear, Azure DevOps, Shortcut — every integration ships with human
+- **One-command setup** — `human init` configures every connector, every project, every developer
+- **Secure by default** — one credential system for all services, secrets never touch the AI
+- **Token efficient** — 95% fewer tokens vs raw APIs, to not run into daily token limits
+- **Always current** — we track API changes so you don't; update human, and every connector updates with it
+- **Built-in workflows** — `/human-ready`, `/human-plan`, `/human-execute`, `/human-review`, `/human-done`, `/human-bug-plan` — real workflows, not glue code
 
 ### Why
 
