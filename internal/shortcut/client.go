@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -193,6 +194,9 @@ func (c *Client) ListStatuses(ctx context.Context, _ string) ([]tracker.Status, 
 			Type: c.stateTypes[id],
 		})
 	}
+	slices.SortFunc(statuses, func(a, b tracker.Status) int {
+		return strings.Compare(a.Name, b.Name)
+	})
 	return statuses, nil
 }
 

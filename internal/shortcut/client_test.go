@@ -937,16 +937,17 @@ func TestListStatuses_happy(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, statuses, 4)
 
-	assert.Equal(t, "To Do", statuses[0].Name)
+	// Statuses are sorted alphabetically by name.
+	assert.Equal(t, "Blocked", statuses[0].Name)
 	assert.Equal(t, "unstarted", statuses[0].Type)
 
-	assert.Equal(t, "In Progress", statuses[1].Name)
-	assert.Equal(t, "started", statuses[1].Type)
+	assert.Equal(t, "Done", statuses[1].Name)
+	assert.Equal(t, "done", statuses[1].Type)
 
-	assert.Equal(t, "Done", statuses[2].Name)
-	assert.Equal(t, "done", statuses[2].Type)
+	assert.Equal(t, "In Progress", statuses[2].Name)
+	assert.Equal(t, "started", statuses[2].Type)
 
-	assert.Equal(t, "Blocked", statuses[3].Name)
+	assert.Equal(t, "To Do", statuses[3].Name)
 	assert.Equal(t, "unstarted", statuses[3].Type)
 }
 
