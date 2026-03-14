@@ -479,7 +479,7 @@ func TestRunListIssues_error(t *testing.T) {
 func TestRunGetIssue(t *testing.T) {
 	issue := &tracker.Issue{
 		Key:         "KAN-1",
-		Title:     "Test issue",
+		Title:       "Test issue",
 		Status:      "In Progress",
 		Priority:    "High",
 		Assignee:    "alice",
@@ -509,9 +509,9 @@ func TestRunGetIssue(t *testing.T) {
 
 func TestRunGetIssue_emptyFields(t *testing.T) {
 	issue := &tracker.Issue{
-		Key:     "KAN-2",
-		Title: "Minimal",
-		Status:  "Open",
+		Key:    "KAN-2",
+		Title:  "Minimal",
+		Status: "Open",
 	}
 	p := &mockProvider{
 		getIssueFn: func(_ context.Context, _ string) (*tracker.Issue, error) {
@@ -928,23 +928,18 @@ func TestRunTrackerList_defaultDir(t *testing.T) {
 
 // --- newRootCmd tests ---
 
-func TestRootCmd_defaultRunsTrackerList(t *testing.T) {
-	// When invoked without args, root command runs "tracker list"
-	dir := t.TempDir()
-	origDir, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(dir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
-
+func TestRootCmd_defaultShowsHelp(t *testing.T) {
+	// When invoked without args, root command shows help
 	cmd := newRootCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{})
 
-	err = cmd.Execute()
+	err := cmd.Execute()
 	require.NoError(t, err)
-	// Should produce tracker list output (empty list)
-	assert.Contains(t, buf.String(), "[]")
+	// Should produce help output with usage info
+	assert.Contains(t, buf.String(), "Usage:")
+	assert.Contains(t, buf.String(), "human")
 }
 
 func TestRootCmd_hasProviderSubcommands(t *testing.T) {
@@ -1049,7 +1044,7 @@ func TestRunTrackerFindWithInstances_Table(t *testing.T) {
 	assert.Contains(t, out, "KAN-42")
 }
 
-func TestIsDaemonSubcommand(t *testing.T) {
+func TestIsLocalSubcommand(t *testing.T) {
 	tests := []struct {
 		args []string
 		want bool
@@ -1062,10 +1057,12 @@ func TestIsDaemonSubcommand(t *testing.T) {
 		{[]string{"jira", "issues", "list"}, false},
 		{[]string{"--help"}, false},
 		{[]string{"--", "daemon"}, false},
+		{[]string{"chrome-bridge"}, true},
+		{[]string{"--verbose", "chrome-bridge"}, true},
 	}
 	for _, tt := range tests {
-		got := isDaemonSubcommand(tt.args)
-		assert.Equal(t, tt.want, got, "isDaemonSubcommand(%v)", tt.args)
+		got := isLocalSubcommand(tt.args)
+		assert.Equal(t, tt.want, got, "isLocalSubcommand(%v)", tt.args)
 	}
 }
 

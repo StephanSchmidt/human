@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"crypto/rand"
 	"math/big"
 	"os"
 	"path/filepath"

@@ -416,9 +416,9 @@ Tools:
 
 Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/env vars.`,
 		Version: version + " (" + commit + ") " + date,
-		// When no subcommand is given, run "tracker list".
+		// When no subcommand is given, show help.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrackerList(cmd.OutOrStdout(), ".", false)
+			return cmd.Help()
 		},
 		SilenceUsage: true,
 	}
@@ -540,6 +540,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	initCmd.GroupID = "utility"
 	rootCmd.AddCommand(initCmd)
 
+	chromeBridgeCmd := buildChromeBridgeCmd()
+	chromeBridgeCmd.GroupID = "utility"
+	rootCmd.AddCommand(chromeBridgeCmd)
+
 	return rootCmd
 }
 
@@ -601,9 +605,10 @@ func buildInstallCmd() *cobra.Command {
 	return cmd
 }
 
-// isDaemonSubcommand returns true if args start with "daemon", so that daemon
-// management commands (token, start, status) always execute locally.
-func isDaemonSubcommand(args []string) bool {
+// isLocalSubcommand returns true if args start with "daemon", "chrome-host",
+// or "chrome-bridge", so that these commands always execute locally rather
+// than being forwarded.
+func isLocalSubcommand(args []string) bool {
 	for _, a := range args {
 		if a == "--" {
 			return false
@@ -611,7 +616,7 @@ func isDaemonSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip flags
 		}
-		return a == "daemon"
+		return a == "daemon" || a == "chrome-bridge"
 	}
 	return false
 }
@@ -624,7 +629,7 @@ func main() {
 	// Client mode: forward to daemon if configured.
 	// Skip forwarding for "daemon" subcommands — they must run locally.
 	args := os.Args[1:] //nolint:nilaway // os.Args is always set in main
-	if addr := os.Getenv("HUMAN_DAEMON_ADDR"); addr != "" && !isDaemonSubcommand(args) {
+	if addr := os.Getenv("HUMAN_DAEMON_ADDR"); addr != "" && !isLocalSubcommand(args) {
 		token := os.Getenv("HUMAN_DAEMON_TOKEN")
 		exitCode, err := daemon.RunRemote(addr, token, args, version)
 		if err != nil {
