@@ -5,4 +5,5 @@ local/
 coverage.out
 logo/
 .claude/
+.devcontainer/
 .humanconfig
