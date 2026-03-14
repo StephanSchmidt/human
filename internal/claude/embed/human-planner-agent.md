@@ -41,5 +41,13 @@ human <TRACKER> issue create --project=<PROJECT_KEY> "Short title" --description
    - **Context**: ticket summary, acceptance criteria
    - **Changes**: ordered list of files to create/modify with rationale
    - **Verification**: test commands, manual checks, edge cases
-5. **Write** the plan to `.human/plans/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the `.human/plans/` directory first with `mkdir -p .human/plans`.
-6. **Create** a Linear implementation ticket using `human <tracker> issue create --project=<PROJECT> "Short title" --description "$(cat .human/plans/<key>.md)"` — title must be a short one-line summary, all detail goes in `--description`
+5. **Verify** that every file, function, and type referenced in the plan actually exists. Use Grep/Glob to confirm.
+6. **Write** the plan to `.human/plans/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the `.human/plans/` directory first with `mkdir -p .human/plans`.
+7. **Create** a Linear implementation ticket using `human <tracker> issue create --project=<PROJECT> "Short title" --description "$(cat .human/plans/<key>.md)"` — title must be a short one-line summary, all detail goes in `--description`
+
+## Principles
+
+- Verify that every file, function, and type you reference in the plan actually exists in the codebase. Use Grep/Glob to confirm.
+- Do not plan changes to code you haven't read.
+- Plans must be concrete enough that an agent can execute them without ambiguity.
+- Always include the original ticket key in the plan. Git commit messages should reference it (e.g. `KAN-1: Add validation`).

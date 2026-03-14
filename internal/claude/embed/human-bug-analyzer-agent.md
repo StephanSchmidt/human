@@ -44,6 +44,13 @@ human <TRACKER> issue comment list <TICKET_KEY>
 5. **Read and trace** — use Read to understand the code flow, identify the root cause, and note any related issues
 6. **Write** the analysis to `.human/bugs/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the directory first with `mkdir -p .human/bugs`.
 
+## Principles
+
+- Do not claim root cause without evidence. Show specific file and line references.
+- Investigate before proposing fixes — read the code, don't guess.
+- If you cannot reproduce or confirm the root cause, say so explicitly.
+- Always preserve the original ticket key. Include it in any proposed commit messages.
+
 ## Output format
 
 Write the analysis in this structure:

@@ -28,6 +28,24 @@ var bugPlanSkillContent []byte
 //go:embed embed/human-bug-analyzer-agent.md
 var bugAnalyzerAgentContent []byte
 
+//go:embed embed/human-review-skill.md
+var reviewSkillContent []byte
+
+//go:embed embed/human-reviewer-agent.md
+var reviewerAgentContent []byte
+
+//go:embed embed/human-done-skill.md
+var doneSkillContent []byte
+
+//go:embed embed/human-done-agent.md
+var doneAgentContent []byte
+
+//go:embed embed/human-execute-skill.md
+var executeSkillContent []byte
+
+//go:embed embed/human-executor-agent.md
+var executorAgentContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -76,6 +94,12 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: readyAgentContent, relPath: filepath.Join("agents", "human-ready.md")},
 		{content: bugPlanSkillContent, relPath: filepath.Join("skills", "human-bug-plan", "SKILL.md")},
 		{content: bugAnalyzerAgentContent, relPath: filepath.Join("agents", "human-bug-analyzer.md")},
+		{content: reviewSkillContent, relPath: filepath.Join("skills", "human-review", "SKILL.md")},
+		{content: reviewerAgentContent, relPath: filepath.Join("agents", "human-reviewer.md")},
+		{content: doneSkillContent, relPath: filepath.Join("skills", "human-done", "SKILL.md")},
+		{content: doneAgentContent, relPath: filepath.Join("agents", "human-done.md")},
+		{content: executeSkillContent, relPath: filepath.Join("skills", "human-execute", "SKILL.md")},
+		{content: executorAgentContent, relPath: filepath.Join("agents", "human-executor.md")},
 	}
 
 	for _, f := range files {

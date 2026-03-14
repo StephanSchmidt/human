@@ -16,7 +16,7 @@
 
 - **One unified interface** — Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, Notion, Figma, and Amplitude through a single CLI
 - **JSON and markdown output** — pipe directly into LLMs
-- **Claude Code skills** — turn PM tickets into implementation plans and bug analyses
+- **Claude Code skills** — full ticket lifecycle: readiness, planning, execution, review, and done verification
 - **Definition of Ready checks** — catch incomplete tickets before coding starts
 - **Notion integration** — search workspace, read pages, query databases for context
 - **Figma integration** — browse files, inspect components, read design comments, export images
@@ -215,6 +215,36 @@ The `/human-bug-plan` skill fetches a bug ticket (including comments for stack t
 ```
 
 The analysis is written to `.human/bugs/kan-1.md`.
+
+### Execute a plan
+
+The `/human-execute` skill loads an existing plan, executes it step by step, and runs a review checkpoint to verify the result.
+
+```
+/human-execute KAN-1
+```
+
+Requires a plan at `.human/plans/kan-1.md` (create one first with `/human-plan`).
+
+### Review changes against a ticket
+
+The `/human-review` skill diffs the current branch against the default branch and evaluates every change against the ticket's acceptance criteria. It flags missing criteria, scope creep, and unhandled edge cases.
+
+```
+/human-review KAN-1
+```
+
+The review is written to `.human/reviews/kan-1.md`.
+
+### Check if a ticket is done
+
+The `/human-done` skill runs tests, checks each acceptance criterion against the implementation, and produces a structured pass/fail Definition of Done report.
+
+```
+/human-done KAN-1
+```
+
+The report is written to `.human/done/kan-1.md`.
 
 ## Setup
 
