@@ -64,9 +64,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	issues := make([]tracker.Issue, len(result.Issues))
 	for i, iss := range result.Issues {
 		issues[i] = tracker.Issue{
-			Key:     iss.Key,
-			Title:   iss.Fields.Summary,
-			Status:  iss.Fields.Status.Name,
+			Key:    iss.Key,
+			Title:  iss.Fields.Summary,
+			Status: iss.Fields.Status.Name,
 		}
 	}
 	return issues, nil

@@ -16,13 +16,13 @@ import (
 // --- mock figma client ---
 
 type mockFigmaClient struct {
-	getFileFn          func(ctx context.Context, fileKey string) (*figma.FileSummary, error)
-	getNodesFn         func(ctx context.Context, fileKey string, nodeIDs []string) ([]figma.NodeSummary, error)
+	getFileFn           func(ctx context.Context, fileKey string) (*figma.FileSummary, error)
+	getNodesFn          func(ctx context.Context, fileKey string, nodeIDs []string) ([]figma.NodeSummary, error)
 	getFileComponentsFn func(ctx context.Context, fileKey string) ([]figma.Component, error)
-	getFileCommentsFn  func(ctx context.Context, fileKey string) ([]figma.FileComment, error)
-	exportImagesFn     func(ctx context.Context, fileKey string, nodeIDs []string, format string) ([]figma.ImageExport, error)
-	listProjectsFn     func(ctx context.Context, teamID string) ([]figma.Project, error)
-	listProjectFilesFn func(ctx context.Context, projectID string) ([]figma.ProjectFile, error)
+	getFileCommentsFn   func(ctx context.Context, fileKey string) ([]figma.FileComment, error)
+	exportImagesFn      func(ctx context.Context, fileKey string, nodeIDs []string, format string) ([]figma.ImageExport, error)
+	listProjectsFn      func(ctx context.Context, teamID string) ([]figma.Project, error)
+	listProjectFilesFn  func(ctx context.Context, projectID string) ([]figma.ProjectFile, error)
 }
 
 func (m *mockFigmaClient) GetFile(ctx context.Context, fileKey string) (*figma.FileSummary, error) {

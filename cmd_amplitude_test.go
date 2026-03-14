@@ -16,15 +16,15 @@ import (
 // --- mock amplitude client ---
 
 type mockAmplitudeClient struct {
-	listEventsFn                func(ctx context.Context) ([]amplitude.EventType, error)
-	querySegmentationFn         func(ctx context.Context, eventType, start, end, metric, interval string) (*amplitude.SegmentationResult, error)
-	listTaxonomyEventsFn        func(ctx context.Context) ([]amplitude.TaxonomyEvent, error)
-	listTaxonomyUserPropsFn     func(ctx context.Context) ([]amplitude.TaxonomyUserProperty, error)
-	queryFunnelFn               func(ctx context.Context, events []string, start, end string) (*amplitude.FunnelResult, error)
-	queryRetentionFn            func(ctx context.Context, startEvent, returnEvent, start, end string) (*amplitude.RetentionResult, error)
-	searchUsersFn               func(ctx context.Context, query string) ([]amplitude.UserMatch, error)
-	getUserActivityFn           func(ctx context.Context, amplitudeID string) (*amplitude.UserActivity, error)
-	listCohortsFn               func(ctx context.Context) ([]amplitude.Cohort, error)
+	listEventsFn            func(ctx context.Context) ([]amplitude.EventType, error)
+	querySegmentationFn     func(ctx context.Context, eventType, start, end, metric, interval string) (*amplitude.SegmentationResult, error)
+	listTaxonomyEventsFn    func(ctx context.Context) ([]amplitude.TaxonomyEvent, error)
+	listTaxonomyUserPropsFn func(ctx context.Context) ([]amplitude.TaxonomyUserProperty, error)
+	queryFunnelFn           func(ctx context.Context, events []string, start, end string) (*amplitude.FunnelResult, error)
+	queryRetentionFn        func(ctx context.Context, startEvent, returnEvent, start, end string) (*amplitude.RetentionResult, error)
+	searchUsersFn           func(ctx context.Context, query string) ([]amplitude.UserMatch, error)
+	getUserActivityFn       func(ctx context.Context, amplitudeID string) (*amplitude.UserActivity, error)
+	listCohortsFn           func(ctx context.Context) ([]amplitude.Cohort, error)
 }
 
 func (m *mockAmplitudeClient) ListEvents(ctx context.Context) ([]amplitude.EventType, error) {

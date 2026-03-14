@@ -14,13 +14,13 @@ import (
 
 // ServiceType describes a configurable service with its YAML key, defaults, and env var pattern.
 type ServiceType struct {
-	Label      string   // display name, e.g. "Jira"
-	ConfigKey  string   // YAML top-level key, e.g. "jiras"
-	DefaultURL string   // empty means user must provide it
-	URLRequired bool    // if true and DefaultURL is empty, prompt for URL
+	Label       string   // display name, e.g. "Jira"
+	ConfigKey   string   // YAML top-level key, e.g. "jiras"
+	DefaultURL  string   // empty means user must provide it
+	URLRequired bool     // if true and DefaultURL is empty, prompt for URL
 	ExtraFields []string // additional fields beyond name+description, e.g. "user", "org"
-	EnvVars    []string // env var suffixes, e.g. ["KEY"] → JIRA_{NAME}_KEY
-	EnvPrefix  string   // e.g. "JIRA"
+	EnvVars     []string // env var suffixes, e.g. ["KEY"] → JIRA_{NAME}_KEY
+	EnvPrefix   string   // e.g. "JIRA"
 }
 
 // ServiceRegistry returns all available services.
@@ -34,44 +34,44 @@ func ServiceRegistry() []ServiceType {
 		{
 			Label: "GitHub", ConfigKey: "githubs",
 			DefaultURL: "https://api.github.com",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "GITHUB",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "GITHUB",
 		},
 		{
 			Label: "GitLab", ConfigKey: "gitlabs",
 			DefaultURL: "https://gitlab.com",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "GITLAB",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "GITLAB",
 		},
 		{
 			Label: "Linear", ConfigKey: "linears",
 			DefaultURL: "https://api.linear.app",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "LINEAR",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "LINEAR",
 		},
 		{
 			Label: "Azure DevOps", ConfigKey: "azuredevops",
-			DefaultURL: "https://dev.azure.com",
+			DefaultURL:  "https://dev.azure.com",
 			ExtraFields: []string{"org"},
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "AZURE",
+			EnvVars:     []string{"TOKEN"}, EnvPrefix: "AZURE",
 		},
 		{
 			Label: "Shortcut", ConfigKey: "shortcuts",
 			DefaultURL: "https://api.app.shortcut.com",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "SHORTCUT",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "SHORTCUT",
 		},
 		{
 			Label: "Notion", ConfigKey: "notions",
 			DefaultURL: "https://api.notion.com",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "NOTION",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "NOTION",
 		},
 		{
 			Label: "Figma", ConfigKey: "figmas",
 			DefaultURL: "https://api.figma.com",
-			EnvVars: []string{"TOKEN"}, EnvPrefix: "FIGMA",
+			EnvVars:    []string{"TOKEN"}, EnvPrefix: "FIGMA",
 		},
 		{
 			Label: "Amplitude", ConfigKey: "amplitudes",
-			DefaultURL: "https://amplitude.com",
+			DefaultURL:  "https://amplitude.com",
 			URLRequired: true,
-			EnvVars: []string{"KEY", "SECRET"}, EnvPrefix: "AMPLITUDE",
+			EnvVars:     []string{"KEY", "SECRET"}, EnvPrefix: "AMPLITUDE",
 		},
 	}
 }

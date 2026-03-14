@@ -2,11 +2,11 @@ package notion
 
 // notionPage represents a Notion page from the API.
 type notionPage struct {
-	Object     string                     `json:"object"`
-	ID         string                     `json:"id"`
-	URL        string                     `json:"url"`
-	Parent     notionParent               `json:"parent"`
-	Properties map[string]notionProperty  `json:"properties"`
+	Object     string                    `json:"object"`
+	ID         string                    `json:"id"`
+	URL        string                    `json:"url"`
+	Parent     notionParent              `json:"parent"`
+	Properties map[string]notionProperty `json:"properties"`
 }
 
 // notionParent represents the parent of a Notion object.
@@ -71,29 +71,29 @@ type notionAnnotations struct {
 
 // notionBlock represents a Notion block.
 type notionBlock struct {
-	Object          string `json:"object"`
-	ID              string `json:"id"`
-	Type            string `json:"type"`
-	HasChildren     bool   `json:"has_children"`
+	Object      string `json:"object"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	HasChildren bool   `json:"has_children"`
 
-	Paragraph       *textBlock  `json:"paragraph,omitempty"`
-	Heading1        *textBlock  `json:"heading_1,omitempty"`
-	Heading2        *textBlock  `json:"heading_2,omitempty"`
-	Heading3        *textBlock  `json:"heading_3,omitempty"`
-	BulletedListItem *textBlock `json:"bulleted_list_item,omitempty"`
-	NumberedListItem *textBlock `json:"numbered_list_item,omitempty"`
-	ToDo            *toDoBlock  `json:"to_do,omitempty"`
-	Code            *codeBlock  `json:"code,omitempty"`
-	Quote           *textBlock  `json:"quote,omitempty"`
-	Divider         *struct{}   `json:"divider,omitempty"`
-	Callout         *calloutBlock `json:"callout,omitempty"`
-	Image           *fileBlock  `json:"image,omitempty"`
-	Bookmark        *bookmarkBlock `json:"bookmark,omitempty"`
-	ChildPage       *childPageBlock `json:"child_page,omitempty"`
-	Table           *tableBlock `json:"table,omitempty"`
-	TableRow        *tableRowBlock `json:"table_row,omitempty"`
+	Paragraph        *textBlock      `json:"paragraph,omitempty"`
+	Heading1         *textBlock      `json:"heading_1,omitempty"`
+	Heading2         *textBlock      `json:"heading_2,omitempty"`
+	Heading3         *textBlock      `json:"heading_3,omitempty"`
+	BulletedListItem *textBlock      `json:"bulleted_list_item,omitempty"`
+	NumberedListItem *textBlock      `json:"numbered_list_item,omitempty"`
+	ToDo             *toDoBlock      `json:"to_do,omitempty"`
+	Code             *codeBlock      `json:"code,omitempty"`
+	Quote            *textBlock      `json:"quote,omitempty"`
+	Divider          *struct{}       `json:"divider,omitempty"`
+	Callout          *calloutBlock   `json:"callout,omitempty"`
+	Image            *fileBlock      `json:"image,omitempty"`
+	Bookmark         *bookmarkBlock  `json:"bookmark,omitempty"`
+	ChildPage        *childPageBlock `json:"child_page,omitempty"`
+	Table            *tableBlock     `json:"table,omitempty"`
+	TableRow         *tableRowBlock  `json:"table_row,omitempty"`
 
-	Children        []notionBlock `json:"-"` // populated by recursive fetch
+	Children []notionBlock `json:"-"` // populated by recursive fetch
 }
 
 // headingBlock returns the textBlock for whichever heading type is set.
@@ -132,9 +132,9 @@ type notionIcon struct {
 }
 
 type fileBlock struct {
-	Type     string     `json:"type"`
-	File     *fileURL   `json:"file,omitempty"`
-	External *fileURL   `json:"external,omitempty"`
+	Type     string           `json:"type"`
+	File     *fileURL         `json:"file,omitempty"`
+	External *fileURL         `json:"external,omitempty"`
 	Caption  []notionRichText `json:"caption,omitempty"`
 }
 
@@ -163,11 +163,11 @@ type tableRowBlock struct {
 
 // notionDatabase represents a Notion database from the API.
 type notionDatabase struct {
-	Object     string                    `json:"object"`
-	ID         string                    `json:"id"`
-	URL        string                    `json:"url"`
-	Title      []notionRichText          `json:"title"`
-	Properties map[string]notionDBProp   `json:"properties"`
+	Object     string                  `json:"object"`
+	ID         string                  `json:"id"`
+	URL        string                  `json:"url"`
+	Title      []notionRichText        `json:"title"`
+	Properties map[string]notionDBProp `json:"properties"`
 }
 
 // notionDBProp describes a database property schema.

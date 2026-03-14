@@ -20,9 +20,9 @@ type segmentationResponse struct {
 
 // segmentationData holds segmentation series data.
 type segmentationData struct {
-	Series       [][]float64  `json:"series"`
-	SeriesLabels [][]string   `json:"seriesLabels"`
-	XValues      []string     `json:"xValues"`
+	Series       [][]float64 `json:"series"`
+	SeriesLabels [][]string  `json:"seriesLabels"`
+	XValues      []string    `json:"xValues"`
 }
 
 // taxonomyResponse is the response from GET /api/2/taxonomy/event.
@@ -40,7 +40,7 @@ type taxonomyEvent struct {
 
 // taxonomyUserPropResponse is the response from GET /api/2/taxonomy/user-property.
 type taxonomyUserPropResponse struct {
-	Success bool                `json:"success"`
+	Success bool               `json:"success"`
 	Data    []taxonomyUserProp `json:"data"`
 }
 

@@ -385,6 +385,6 @@ type failingFileWriter struct {
 	err error
 }
 
-func (f *failingFileWriter) MkdirAll(_ string, _ os.FileMode) error             { return nil }
-func (f *failingFileWriter) WriteFile(_ string, _ []byte, _ os.FileMode) error   { return f.err }
-func (f *failingFileWriter) ReadFile(_ string) ([]byte, error)                   { return nil, os.ErrNotExist }
+func (f *failingFileWriter) MkdirAll(_ string, _ os.FileMode) error            { return nil }
+func (f *failingFileWriter) WriteFile(_ string, _ []byte, _ os.FileMode) error { return f.err }
+func (f *failingFileWriter) ReadFile(_ string) ([]byte, error)                 { return nil, os.ErrNotExist }

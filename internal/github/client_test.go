@@ -254,7 +254,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "octocat/hello-world",
-		Title:     "New issue",
+		Title:       "New issue",
 		Description: "Some description",
 	})
 
@@ -283,7 +283,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "octocat/hello-world",
-		Title: "No desc issue",
+		Title:   "No desc issue",
 	})
 
 	require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "ghp_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "octocat/hello-world",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	require.Error(t, err)

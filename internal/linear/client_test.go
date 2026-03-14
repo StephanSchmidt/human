@@ -333,7 +333,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "ENG",
-		Title:     "New issue",
+		Title:       "New issue",
 		Description: "Some description",
 	})
 
@@ -368,7 +368,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Title: "No desc",
+		Title:   "No desc",
 	})
 
 	require.NoError(t, err)
@@ -393,7 +393,7 @@ func TestCreateIssue_serverReturnsFailure(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	require.Error(t, err)
@@ -417,7 +417,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "ENG",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	require.Error(t, err)
@@ -438,7 +438,7 @@ func TestCreateIssue_teamNotFound(t *testing.T) {
 	client := New(srv.URL, "lin_test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "NOPE",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	require.Error(t, err)

@@ -127,7 +127,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "KAN",
 		Type:        "Task",
-		Title:     "Test issue",
+		Title:       "Test issue",
 		Description: "Some description",
 	})
 
@@ -160,7 +160,7 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "KAN",
 		Type:    "Bug",
-		Title: "No description issue",
+		Title:   "No description issue",
 	})
 
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "KAN",
 		Type:    "Task",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	assert.Error(t, err)

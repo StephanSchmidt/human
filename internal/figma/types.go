@@ -4,26 +4,26 @@ package figma
 
 // figmaFile is the response from GET /v1/files/:key.
 type figmaFile struct {
-	Name         string                       `json:"name"`
-	LastModified string                       `json:"lastModified"`
-	ThumbnailURL string                       `json:"thumbnailUrl"`
-	Version      string                       `json:"version"`
-	Document     figmaNode                    `json:"document"`
+	Name         string                        `json:"name"`
+	LastModified string                        `json:"lastModified"`
+	ThumbnailURL string                        `json:"thumbnailUrl"`
+	Version      string                        `json:"version"`
+	Document     figmaNode                     `json:"document"`
 	Components   map[string]figmaComponentMeta `json:"components"`
 }
 
 // figmaNode represents a node in the Figma document tree.
 type figmaNode struct {
-	ID                  string           `json:"id"`
-	Name                string           `json:"name"`
-	Type                string           `json:"type"`
-	Children            []figmaNode      `json:"children,omitempty"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Type                string            `json:"type"`
+	Children            []figmaNode       `json:"children,omitempty"`
 	AbsoluteBoundingBox *figmaBoundingBox `json:"absoluteBoundingBox,omitempty"`
-	Fills               []figmaPaint     `json:"fills,omitempty"`
-	Strokes             []figmaPaint     `json:"strokes,omitempty"`
-	Characters          string           `json:"characters,omitempty"`
-	Style               *figmaTextStyle  `json:"style,omitempty"`
-	ComponentID         string           `json:"componentId,omitempty"`
+	Fills               []figmaPaint      `json:"fills,omitempty"`
+	Strokes             []figmaPaint      `json:"strokes,omitempty"`
+	Characters          string            `json:"characters,omitempty"`
+	Style               *figmaTextStyle   `json:"style,omitempty"`
+	ComponentID         string            `json:"componentId,omitempty"`
 }
 
 // figmaBoundingBox represents node dimensions.
@@ -93,7 +93,7 @@ type figmaUser struct {
 
 // figmaClientMeta holds position metadata for a comment.
 type figmaClientMeta struct {
-	NodeID string    `json:"node_id,omitempty"`
+	NodeID     string `json:"node_id,omitempty"`
 	NodeOffset *struct {
 		X float64 `json:"x"`
 		Y float64 `json:"y"`
@@ -142,23 +142,23 @@ type figmaFileComponentsResponse struct {
 // figmaComponentsMeta holds the components array and cursor.
 type figmaComponentsMeta struct {
 	Components []figmaComponentDetail `json:"components"`
-	Cursor     *string               `json:"cursor,omitempty"`
+	Cursor     *string                `json:"cursor,omitempty"`
 }
 
 // figmaComponentDetail represents a published component.
 type figmaComponentDetail struct {
-	Key             string              `json:"key"`
-	NodeID          string              `json:"node_id"`
-	Name            string              `json:"name"`
-	Description     string              `json:"description"`
+	Key             string               `json:"key"`
+	NodeID          string               `json:"node_id"`
+	Name            string               `json:"name"`
+	Description     string               `json:"description"`
 	ContainingFrame figmaContainingFrame `json:"containing_frame"`
 }
 
 // figmaContainingFrame describes the frame that contains a component.
 type figmaContainingFrame struct {
-	Name   string `json:"name"`
-	NodeID string `json:"nodeId"`
-	PageID string `json:"pageId"`
+	Name     string `json:"name"`
+	NodeID   string `json:"nodeId"`
+	PageID   string `json:"pageId"`
 	PageName string `json:"pageName"`
 }
 

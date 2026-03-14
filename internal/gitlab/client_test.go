@@ -244,7 +244,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	client := New(srv.URL, "glpat-test")
 	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project:     "mygroup/myproject",
-		Title:     "New issue",
+		Title:       "New issue",
 		Description: "Some description",
 	})
 
@@ -267,7 +267,7 @@ func TestCreateIssue_httpError(t *testing.T) {
 	client := New(srv.URL, "glpat-test")
 	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
 		Project: "mygroup/myproject",
-		Title: "Will fail",
+		Title:   "Will fail",
 	})
 
 	require.Error(t, err)

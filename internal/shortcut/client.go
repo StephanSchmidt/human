@@ -293,8 +293,6 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	return info.ID, nil
 }
 
-
-
 // EditIssue implements tracker.Editor.
 func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOptions) (*tracker.Issue, error) {
 	id, err := parseStoryID(key)
