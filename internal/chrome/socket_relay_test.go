@@ -188,8 +188,10 @@ func TestSocketRelay_SpawnContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	done := make(chan struct{})
 	go func() {
 		_ = relay.ListenAndServe(ctx)
+		close(done)
 	}()
 
 	// Cancel before any Chrome connection.
@@ -200,6 +202,7 @@ func TestSocketRelay_SpawnContextCancellation(t *testing.T) {
 	require.Error(t, err)
 
 	cancel()
+	<-done // wait for ListenAndServe cleanup before TempDir removal
 }
 
 func TestSocketRelay_CleanShutdown(t *testing.T) {
