@@ -14,6 +14,20 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 )
 
+// Dialer abstracts TCP connection creation for testability.
+type Dialer interface {
+	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// DefaultDialer uses the standard net.Dialer.
+type DefaultDialer struct{}
+
+// DialContext dials using the standard library.
+func (DefaultDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, network, addr)
+}
+
 // SocketDir returns the directory where Chrome MCP bridge sockets are created.
 // It follows the same convention as the Claude MCP browser bridge:
 // /tmp/claude-mcp-browser-bridge-<username>/
