@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -56,8 +55,8 @@ Requires HUMAN_CHROME_ADDR and HUMAN_DAEMON_TOKEN environment variables.`,
 }
 
 // runChromeBridgeForeground runs the bridge in the current process (blocking).
-func runChromeBridgeForeground(addr, token string, out io.Writer) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+func runChromeBridgeForeground(addr, token string, _ io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
@@ -92,7 +91,7 @@ func runChromeBridgeBackground(addr, token string, out io.Writer) error {
 	child.Env = append(os.Environ(), chromeBridgeChildEnv+"=1")
 	child.Stderr = logFile
 	child.Stdout = logFile
-	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	child.SysProcAttr = detachSysProcAttr()
 
 	if err := child.Start(); err != nil {
 		_ = logFile.Close()
