@@ -2,62 +2,150 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/chrome"
 )
 
+const chromeBridgeChildEnv = "_HUMAN_CHROME_BRIDGE_CHILD"
+
 func buildChromeBridgeCmd() *cobra.Command {
-	return &cobra.Command{
+	var foreground bool
+
+	cmd := &cobra.Command{
 		Use:   "chrome-bridge",
 		Short: "Bridge Chrome MCP socket to daemon (for devcontainer use)",
 		Long: `Creates a fake Unix socket that Claude's MCP server can discover,
 and tunnels traffic over TCP to the daemon running on the host.
 
 Requires HUMAN_CHROME_ADDR and HUMAN_DAEMON_TOKEN environment variables.`,
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			addr := os.Getenv("HUMAN_CHROME_ADDR")
 			if addr == "" {
-				return chromeBridgeError("HUMAN_CHROME_ADDR environment variable is required")
+				return errors.WithDetails("HUMAN_CHROME_ADDR environment variable is required")
 			}
 
 			token := os.Getenv("HUMAN_DAEMON_TOKEN")
 			if token == "" {
-				return chromeBridgeError("HUMAN_DAEMON_TOKEN environment variable is required")
+				return errors.WithDetails("HUMAN_DAEMON_TOKEN environment variable is required")
 			}
 
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
+			out := cmd.OutOrStdout()
 
-			logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
-
-			bridge := &chrome.Bridge{
-				Dialer:  chrome.DefaultDialer{},
-				Addr:    addr,
-				Token:   token,
-				Version: version,
-				Logger:  logger,
+			if foreground || os.Getenv(chromeBridgeChildEnv) != "" {
+				return runChromeBridgeForeground(addr, token, out)
 			}
-
-			return bridge.ListenAndServe(ctx)
+			return runChromeBridgeBackground(addr, token, out)
 		},
 	}
+
+	cmd.Flags().BoolVar(&foreground, "foreground", false, "Run in foreground (don't daemonize)")
+
+	return cmd
 }
 
-// chromeBridgeError creates an error with the given message.
-func chromeBridgeError(msg string) error {
-	return &chromeBridgeErr{msg: msg}
+// runChromeBridgeForeground runs the bridge in the current process (blocking).
+func runChromeBridgeForeground(addr, token string, out io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
+
+	bridge := &chrome.Bridge{
+		Dialer:  chrome.DefaultDialer{},
+		Addr:    addr,
+		Token:   token,
+		Version: version,
+		Logger:  logger,
+	}
+
+	return bridge.ListenAndServe(ctx)
 }
 
-type chromeBridgeErr struct {
-	msg string
+// runChromeBridgeBackground re-execs the current binary as a detached child process.
+func runChromeBridgeBackground(addr, token string, out io.Writer) error {
+	logPath := chromeBridgeLogPath()
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return errors.WrapWithDetails(err, "opening log file", "path", logPath)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		_ = logFile.Close()
+		return errors.WrapWithDetails(err, "resolving executable path")
+	}
+
+	child := exec.Command(exe, "chrome-bridge", "--foreground")
+	child.Env = append(os.Environ(), chromeBridgeChildEnv+"=1")
+	child.Stderr = logFile
+	child.Stdout = logFile
+	child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	if err := child.Start(); err != nil {
+		_ = logFile.Close()
+		return errors.WrapWithDetails(err, "starting background process")
+	}
+	_ = logFile.Close()
+
+	pid := child.Process.Pid
+
+	// Detach so we don't wait for the child.
+	_ = child.Process.Release()
+
+	socketDir, err := chrome.SocketDir()
+	if err != nil {
+		return errors.WrapWithDetails(err, "resolving socket directory")
+	}
+	sockPath := filepath.Join(socketDir, fmt.Sprintf("%d.sock", pid))
+
+	// Poll for socket to appear (up to 2s).
+	const (
+		pollInterval = 50 * time.Millisecond
+		pollTimeout  = 2 * time.Second
+	)
+	deadline := time.Now().Add(pollTimeout)
+	ready := false
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			ready = true
+			break
+		}
+		time.Sleep(pollInterval)
+	}
+
+	if !ready {
+		_, _ = fmt.Fprintf(out, "Chrome bridge started (PID %d) but socket not yet ready\n", pid)
+		_, _ = fmt.Fprintf(out, "  Log: %s\n", logPath)
+		return nil
+	}
+
+	_, _ = fmt.Fprintf(out, "Chrome bridge started (PID %d)\n", pid)
+	_, _ = fmt.Fprintf(out, "  Socket: %s\n", sockPath)
+	_, _ = fmt.Fprintf(out, "  Log:    %s\n", logPath)
+	return nil
 }
 
-func (e *chromeBridgeErr) Error() string {
-	return e.msg
+// chromeBridgeLogPath returns the path to the chrome bridge log file
+// (~/.human/chrome-bridge.log), creating the directory if needed.
+func chromeBridgeLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".human", "chrome-bridge.log")
+	}
+	dir := filepath.Join(home, ".human")
+	_ = os.MkdirAll(dir, 0o750)
+	return filepath.Join(dir, "chrome-bridge.log")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/internal/chrome"
 	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
@@ -29,6 +30,7 @@ func buildDaemonCmd() *cobra.Command {
 
 func buildDaemonStartCmd() *cobra.Command {
 	var addr string
+	var chromeAddr string
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -44,10 +46,12 @@ func buildDaemonStartCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(out, "Token:", token)
 			_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
 			_, _ = fmt.Fprintln(out, "Listening on:", addr)
+			_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
 			_, _ = fmt.Fprintln(out)
 			_, _ = fmt.Fprintln(out, "Set these env vars in the container:")
 			_, _ = fmt.Fprintf(out, "  HUMAN_DAEMON_ADDR=%s\n", addr)
 			_, _ = fmt.Fprintf(out, "  HUMAN_DAEMON_TOKEN=%s\n", token)
+			_, _ = fmt.Fprintf(out, "  HUMAN_CHROME_ADDR=%s\n", chromeAddr)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -61,11 +65,36 @@ func buildDaemonStartCmd() *cobra.Command {
 				Logger:     logger,
 			}
 
+			// Start chrome proxy server in a separate goroutine.
+			// Use SocketConnector to connect to the real Chrome native
+			// messaging host socket (created by Chrome's extension).
+			socketDir, sdErr := chrome.SocketDir()
+			if sdErr != nil {
+				return fmt.Errorf("resolving socket directory: %w", sdErr)
+			}
+
+			chromeSrv := &chrome.Server{
+				Addr:  chromeAddr,
+				Token: token,
+				Spawner: &chrome.SocketConnector{
+					SocketDir: socketDir,
+					Logger:    logger,
+				},
+				Logger: logger,
+			}
+
+			go func() {
+				if err := chromeSrv.ListenAndServe(ctx); err != nil {
+					logger.Error().Err(err).Msg("chrome proxy server failed")
+				}
+			}()
+
 			return srv.ListenAndServe(ctx)
 		},
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", ":19285", "Listen address (host:port)")
+	cmd.Flags().StringVar(&chromeAddr, "chrome-addr", ":19286", "Chrome proxy listen address (host:port)")
 	return cmd
 }
 
