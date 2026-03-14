@@ -77,7 +77,7 @@ func runChromeBridgeForeground(addr, token string, out io.Writer) error {
 func runChromeBridgeBackground(addr, token string, out io.Writer) error {
 	logPath := chromeBridgeLogPath()
 
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by chromeBridgeLogPath(), not user input
 	if err != nil {
 		return errors.WrapWithDetails(err, "opening log file", "path", logPath)
 	}
@@ -88,7 +88,7 @@ func runChromeBridgeBackground(addr, token string, out io.Writer) error {
 		return errors.WrapWithDetails(err, "resolving executable path")
 	}
 
-	child := exec.Command(exe, "chrome-bridge", "--foreground")
+	child := exec.Command(exe, "chrome-bridge", "--foreground") // #nosec G204 -- re-exec of own binary via os.Executable()
 	child.Env = append(os.Environ(), chromeBridgeChildEnv+"=1")
 	child.Stderr = logFile
 	child.Stdout = logFile
