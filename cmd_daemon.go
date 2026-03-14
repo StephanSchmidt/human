@@ -43,15 +43,19 @@ func buildDaemonStartCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
+			hostIP := resolveHostIP()
+			daemonAddr := replaceHost(addr, hostIP)
+			chromeFullAddr := replaceHost(chromeAddr, hostIP)
+
 			_, _ = fmt.Fprintln(out, "Token:", token)
 			_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
 			_, _ = fmt.Fprintln(out, "Listening on:", addr)
 			_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
 			_, _ = fmt.Fprintln(out)
-			_, _ = fmt.Fprintln(out, "Set these env vars in the container:")
-			_, _ = fmt.Fprintf(out, "  HUMAN_DAEMON_ADDR=%s\n", addr)
-			_, _ = fmt.Fprintf(out, "  HUMAN_DAEMON_TOKEN=%s\n", token)
-			_, _ = fmt.Fprintf(out, "  HUMAN_CHROME_ADDR=%s\n", chromeAddr)
+			_, _ = fmt.Fprintln(out, "Run in the container:")
+			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s\n", daemonAddr)
+			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_TOKEN=%s\n", token)
+			_, _ = fmt.Fprintf(out, "  export HUMAN_CHROME_ADDR=%s\n", chromeFullAddr)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -65,22 +69,27 @@ func buildDaemonStartCmd() *cobra.Command {
 				Logger:     logger,
 			}
 
-			// Start chrome proxy server in a separate goroutine.
-			// Use SocketConnector to connect to the real Chrome native
-			// messaging host socket (created by Chrome's extension).
+			// Start socket relay to accept Chrome native messaging
+			// connections directly, then start the chrome proxy server
+			// using the relay as its ProcessSpawner.
 			socketDir, sdErr := chrome.SocketDir()
 			if sdErr != nil {
 				return fmt.Errorf("resolving socket directory: %w", sdErr)
 			}
 
+			relay := chrome.NewSocketRelay(socketDir, logger)
+
+			go func() {
+				if err := relay.ListenAndServe(ctx); err != nil {
+					logger.Error().Err(err).Msg("socket relay failed")
+				}
+			}()
+
 			chromeSrv := &chrome.Server{
-				Addr:  chromeAddr,
-				Token: token,
-				Spawner: &chrome.SocketConnector{
-					SocketDir: socketDir,
-					Logger:    logger,
-				},
-				Logger: logger,
+				Addr:    chromeAddr,
+				Token:   token,
+				Spawner: relay,
+				Logger:  logger,
 			}
 
 			go func() {
@@ -133,4 +142,30 @@ func buildDaemonStatusCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&addr, "addr", "localhost:19285", "Daemon address to check")
 	return cmd
+}
+
+// resolveHostIP returns the preferred outbound IP of the host.
+// Falls back to "localhost" if detection fails.
+func resolveHostIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "localhost"
+	}
+	defer func() { _ = conn.Close() }()
+
+	addr := conn.LocalAddr().(*net.UDPAddr)
+	return addr.IP.String()
+}
+
+// replaceHost replaces an empty or wildcard host in addr with the given host.
+// e.g. ":19285" → "192.168.1.5:19285", "0.0.0.0:19285" → "192.168.1.5:19285".
+func replaceHost(addr, host string) string {
+	h, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	if h == "" || h == "0.0.0.0" || h == "::" {
+		return net.JoinHostPort(host, port)
+	}
+	return addr
 }
