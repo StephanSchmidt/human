@@ -5,8 +5,6 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/pkg/browser"
-
 	"github.com/StephanSchmidt/human/errors"
 )
 
@@ -15,11 +13,11 @@ type Opener interface {
 	Open(url string) error
 }
 
-// DefaultOpener uses pkg/browser to open URLs.
+// DefaultOpener uses platform-specific commands to open URLs without blocking.
 type DefaultOpener struct{}
 
 func (DefaultOpener) Open(rawURL string) error {
-	return browser.OpenURL(rawURL)
+	return startBrowser(rawURL)
 }
 
 // ValidateURL checks that rawURL is non-empty, parseable, and uses http or https.
