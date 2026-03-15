@@ -27,6 +27,10 @@ As AI agents write more code autonomously, the question becomes: who decides *wh
 
 <img src="human-loop.svg" width="960" alt="human loop: PM Ticket → AI → Dev Ticket">
 
+### Architecture
+
+<img src="architecture.svg" width="960" alt="human architecture">
+
 ## Install
 
 ```bash
