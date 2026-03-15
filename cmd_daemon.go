@@ -14,6 +14,7 @@ import (
 
 	"github.com/StephanSchmidt/human/internal/chrome"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/proxy"
 )
 
 func buildDaemonCmd() *cobra.Command {
@@ -31,6 +32,7 @@ func buildDaemonCmd() *cobra.Command {
 func buildDaemonStartCmd() *cobra.Command {
 	var addr string
 	var chromeAddr string
+	var proxyAddr string
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -51,11 +53,14 @@ func buildDaemonStartCmd() *cobra.Command {
 			_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
 			_, _ = fmt.Fprintln(out, "Listening on:", addr)
 			_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
+			_, _ = fmt.Fprintln(out, "HTTPS proxy on:", proxyAddr)
+			proxyFullAddr := replaceHost(proxyAddr, hostIP)
 			_, _ = fmt.Fprintln(out)
 			_, _ = fmt.Fprintln(out, "Run in the container:")
 			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s\n", daemonAddr)
 			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_TOKEN=%s\n", token)
 			_, _ = fmt.Fprintf(out, "  export HUMAN_CHROME_ADDR=%s\n", chromeFullAddr)
+			_, _ = fmt.Fprintf(out, "  export HUMAN_PROXY_ADDR=%s\n", proxyFullAddr)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -98,12 +103,36 @@ func buildDaemonStartCmd() *cobra.Command {
 				}
 			}()
 
+			proxyCfg, _ := proxy.LoadConfig(".")
+			var policy *proxy.Policy
+			if proxyCfg != nil {
+				policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
+				if err != nil {
+					return fmt.Errorf("invalid proxy policy: %w", err)
+				}
+			} else {
+				policy = proxy.BlockAllPolicy()
+			}
+
+			proxySrv := &proxy.Server{
+				Addr:   proxyAddr,
+				Policy: policy,
+				Logger: logger,
+			}
+
+			go func() {
+				if err := proxySrv.ListenAndServe(ctx); err != nil {
+					logger.Error().Err(err).Msg("https proxy failed")
+				}
+			}()
+
 			return srv.ListenAndServe(ctx)
 		},
 	}
 
 	cmd.Flags().StringVar(&addr, "addr", ":19285", "Listen address (host:port)")
 	cmd.Flags().StringVar(&chromeAddr, "chrome-addr", ":19286", "Chrome proxy listen address (host:port)")
+	cmd.Flags().StringVar(&proxyAddr, "proxy-addr", ":19287", "HTTPS proxy listen address (host:port)")
 	return cmd
 }
 
