@@ -13,7 +13,7 @@ import (
 // to block/allow domains without decrypting traffic.
 type Server struct {
 	Addr   string
-	Policy *Policy
+	Policy Decider
 	Logger zerolog.Logger
 	// Dialer connects to upstream servers. Injected for testing.
 	Dialer func(ctx context.Context, network, address string) (net.Conn, error)

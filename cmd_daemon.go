@@ -33,6 +33,7 @@ func buildDaemonStartCmd() *cobra.Command {
 	var addr string
 	var chromeAddr string
 	var proxyAddr string
+	var interactive bool
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -104,7 +105,7 @@ func buildDaemonStartCmd() *cobra.Command {
 			}()
 
 			proxyCfg, _ := proxy.LoadConfig(".")
-			var policy *proxy.Policy
+			var policy proxy.Decider
 			if proxyCfg != nil {
 				policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
 				if err != nil {
@@ -112,6 +113,12 @@ func buildDaemonStartCmd() *cobra.Command {
 				}
 			} else {
 				policy = proxy.BlockAllPolicy()
+			}
+
+			if interactive {
+				prompt := proxy.NewTerminalPrompt(os.Stdin, os.Stderr)
+				policy = proxy.NewInteractiveDecider(policy, prompt)
+				_, _ = fmt.Fprintln(out, "Interactive proxy mode: unknown domains will prompt for approval")
 			}
 
 			proxySrv := &proxy.Server{
@@ -133,6 +140,7 @@ func buildDaemonStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&addr, "addr", ":19285", "Listen address (host:port)")
 	cmd.Flags().StringVar(&chromeAddr, "chrome-addr", ":19286", "Chrome proxy listen address (host:port)")
 	cmd.Flags().StringVar(&proxyAddr, "proxy-addr", ":19287", "HTTPS proxy listen address (host:port)")
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for unknown domains instead of blocking them")
 	return cmd
 }
 

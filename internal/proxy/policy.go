@@ -14,6 +14,11 @@ const (
 	ModeBlock Mode = "blocklist"
 )
 
+// Decider decides whether a given hostname is allowed to pass through the proxy.
+type Decider interface {
+	Allowed(hostname string) bool
+}
+
 // Policy decides whether a given hostname is allowed to pass through the proxy.
 type Policy struct {
 	mode     Mode
