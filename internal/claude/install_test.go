@@ -80,6 +80,22 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	doneAgentPath := filepath.Join(".claude", "agents", "human-done.md")
 	executeSkillPath := filepath.Join(".claude", "skills", "human-execute", "SKILL.md")
 	executorAgentPath := filepath.Join(".claude", "agents", "human-executor.md")
+	findbugsSkillPath := filepath.Join(".claude", "skills", "human-findbugs", "SKILL.md")
+	findbugsReconAgentPath := filepath.Join(".claude", "agents", "findbugs-recon.md")
+	findbugsLogicAgentPath := filepath.Join(".claude", "agents", "findbugs-logic.md")
+	findbugsErrorsAgentPath := filepath.Join(".claude", "agents", "findbugs-errors.md")
+	findbugsConcurrencyAgentPath := filepath.Join(".claude", "agents", "findbugs-concurrency.md")
+	findbugsAPIAgentPath := filepath.Join(".claude", "agents", "findbugs-api.md")
+	findbugsTriageAgentPath := filepath.Join(".claude", "agents", "findbugs-triage.md")
+	securitySkillPath := filepath.Join(".claude", "skills", "human-security", "SKILL.md")
+	securitySurfaceAgentPath := filepath.Join(".claude", "agents", "security-surface.md")
+	securityInjectionAgentPath := filepath.Join(".claude", "agents", "security-injection.md")
+	securityAuthAgentPath := filepath.Join(".claude", "agents", "security-auth.md")
+	securitySecretsAgentPath := filepath.Join(".claude", "agents", "security-secrets.md")
+	securityDepsAgentPath := filepath.Join(".claude", "agents", "security-deps.md")
+	securityInfraAgentPath := filepath.Join(".claude", "agents", "security-infra.md")
+	securityChainsAgentPath := filepath.Join(".claude", "agents", "security-chains.md")
+	securityTriageAgentPath := filepath.Join(".claude", "agents", "security-triage.md")
 
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 	assert.Equal(t, string(agentContent), string(fw.files[agentPath]))
@@ -93,6 +109,22 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	assert.Equal(t, string(doneAgentContent), string(fw.files[doneAgentPath]))
 	assert.Equal(t, string(executeSkillContent), string(fw.files[executeSkillPath]))
 	assert.Equal(t, string(executorAgentContent), string(fw.files[executorAgentPath]))
+	assert.Equal(t, string(findbugsSkillContent), string(fw.files[findbugsSkillPath]))
+	assert.Equal(t, string(findbugsReconAgentContent), string(fw.files[findbugsReconAgentPath]))
+	assert.Equal(t, string(findbugsLogicAgentContent), string(fw.files[findbugsLogicAgentPath]))
+	assert.Equal(t, string(findbugsErrorsAgentContent), string(fw.files[findbugsErrorsAgentPath]))
+	assert.Equal(t, string(findbugsConcurrencyAgentContent), string(fw.files[findbugsConcurrencyAgentPath]))
+	assert.Equal(t, string(findbugsAPIAgentContent), string(fw.files[findbugsAPIAgentPath]))
+	assert.Equal(t, string(findbugsTriageAgentContent), string(fw.files[findbugsTriageAgentPath]))
+	assert.Equal(t, string(securitySkillContent), string(fw.files[securitySkillPath]))
+	assert.Equal(t, string(securitySurfaceAgentContent), string(fw.files[securitySurfaceAgentPath]))
+	assert.Equal(t, string(securityInjectionAgentContent), string(fw.files[securityInjectionAgentPath]))
+	assert.Equal(t, string(securityAuthAgentContent), string(fw.files[securityAuthAgentPath]))
+	assert.Equal(t, string(securitySecretsAgentContent), string(fw.files[securitySecretsAgentPath]))
+	assert.Equal(t, string(securityDepsAgentContent), string(fw.files[securityDepsAgentPath]))
+	assert.Equal(t, string(securityInfraAgentContent), string(fw.files[securityInfraAgentPath]))
+	assert.Equal(t, string(securityChainsAgentContent), string(fw.files[securityChainsAgentPath]))
+	assert.Equal(t, string(securityTriageAgentContent), string(fw.files[securityTriageAgentPath]))
 }
 
 func TestInstall_SkipsUnchangedFiles(t *testing.T) {
@@ -122,6 +154,38 @@ func TestInstall_SkipsUnchangedFiles(t *testing.T) {
 	fw.files[doneAgentPath] = doneAgentContent
 	fw.files[executeSkillPath] = executeSkillContent
 	fw.files[executorAgentPath] = executorAgentContent
+	findbugsSkillPath := filepath.Join(".claude", "skills", "human-findbugs", "SKILL.md")
+	findbugsReconAgentPath := filepath.Join(".claude", "agents", "findbugs-recon.md")
+	findbugsLogicAgentPath := filepath.Join(".claude", "agents", "findbugs-logic.md")
+	findbugsErrorsAgentPath := filepath.Join(".claude", "agents", "findbugs-errors.md")
+	findbugsConcurrencyAgentPath := filepath.Join(".claude", "agents", "findbugs-concurrency.md")
+	findbugsAPIAgentPath := filepath.Join(".claude", "agents", "findbugs-api.md")
+	findbugsTriageAgentPath := filepath.Join(".claude", "agents", "findbugs-triage.md")
+	fw.files[findbugsSkillPath] = findbugsSkillContent
+	fw.files[findbugsReconAgentPath] = findbugsReconAgentContent
+	fw.files[findbugsLogicAgentPath] = findbugsLogicAgentContent
+	fw.files[findbugsErrorsAgentPath] = findbugsErrorsAgentContent
+	fw.files[findbugsConcurrencyAgentPath] = findbugsConcurrencyAgentContent
+	fw.files[findbugsAPIAgentPath] = findbugsAPIAgentContent
+	fw.files[findbugsTriageAgentPath] = findbugsTriageAgentContent
+	securitySkillPath := filepath.Join(".claude", "skills", "human-security", "SKILL.md")
+	securitySurfaceAgentPath := filepath.Join(".claude", "agents", "security-surface.md")
+	securityInjectionAgentPath := filepath.Join(".claude", "agents", "security-injection.md")
+	securityAuthAgentPath := filepath.Join(".claude", "agents", "security-auth.md")
+	securitySecretsAgentPath := filepath.Join(".claude", "agents", "security-secrets.md")
+	securityDepsAgentPath := filepath.Join(".claude", "agents", "security-deps.md")
+	securityInfraAgentPath := filepath.Join(".claude", "agents", "security-infra.md")
+	securityChainsAgentPath := filepath.Join(".claude", "agents", "security-chains.md")
+	securityTriageAgentPath := filepath.Join(".claude", "agents", "security-triage.md")
+	fw.files[securitySkillPath] = securitySkillContent
+	fw.files[securitySurfaceAgentPath] = securitySurfaceAgentContent
+	fw.files[securityInjectionAgentPath] = securityInjectionAgentContent
+	fw.files[securityAuthAgentPath] = securityAuthAgentContent
+	fw.files[securitySecretsAgentPath] = securitySecretsAgentContent
+	fw.files[securityDepsAgentPath] = securityDepsAgentContent
+	fw.files[securityInfraAgentPath] = securityInfraAgentContent
+	fw.files[securityChainsAgentPath] = securityChainsAgentContent
+	fw.files[securityTriageAgentPath] = securityTriageAgentContent
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
@@ -160,6 +224,8 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	reviewSkillDir := filepath.Join(".claude", "skills", "human-review")
 	doneSkillDir := filepath.Join(".claude", "skills", "human-done")
 	executeSkillDir := filepath.Join(".claude", "skills", "human-execute")
+	findbugsSkillDir := filepath.Join(".claude", "skills", "human-findbugs")
+	securitySkillDir := filepath.Join(".claude", "skills", "human-security")
 	agentDir := filepath.Join(".claude", "agents")
 	assert.True(t, fw.dirs[skillDir], "expected plan skill parent directory to be created")
 	assert.True(t, fw.dirs[readySkillDir], "expected ready skill parent directory to be created")
@@ -167,6 +233,8 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	assert.True(t, fw.dirs[reviewSkillDir], "expected review skill parent directory to be created")
 	assert.True(t, fw.dirs[doneSkillDir], "expected done skill parent directory to be created")
 	assert.True(t, fw.dirs[executeSkillDir], "expected execute skill parent directory to be created")
+	assert.True(t, fw.dirs[findbugsSkillDir], "expected findbugs skill parent directory to be created")
+	assert.True(t, fw.dirs[securitySkillDir], "expected security skill parent directory to be created")
 	assert.True(t, fw.dirs[agentDir], "expected agent parent directory to be created")
 }
 

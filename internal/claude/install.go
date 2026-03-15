@@ -46,6 +46,54 @@ var executeSkillContent []byte
 //go:embed embed/human-executor-agent.md
 var executorAgentContent []byte
 
+//go:embed embed/human-findbugs-skill.md
+var findbugsSkillContent []byte
+
+//go:embed embed/findbugs-recon-agent.md
+var findbugsReconAgentContent []byte
+
+//go:embed embed/findbugs-logic-agent.md
+var findbugsLogicAgentContent []byte
+
+//go:embed embed/findbugs-errors-agent.md
+var findbugsErrorsAgentContent []byte
+
+//go:embed embed/findbugs-concurrency-agent.md
+var findbugsConcurrencyAgentContent []byte
+
+//go:embed embed/findbugs-api-agent.md
+var findbugsAPIAgentContent []byte
+
+//go:embed embed/findbugs-triage-agent.md
+var findbugsTriageAgentContent []byte
+
+//go:embed embed/human-security-skill.md
+var securitySkillContent []byte
+
+//go:embed embed/security-surface-agent.md
+var securitySurfaceAgentContent []byte
+
+//go:embed embed/security-injection-agent.md
+var securityInjectionAgentContent []byte
+
+//go:embed embed/security-auth-agent.md
+var securityAuthAgentContent []byte
+
+//go:embed embed/security-secrets-agent.md
+var securitySecretsAgentContent []byte
+
+//go:embed embed/security-deps-agent.md
+var securityDepsAgentContent []byte
+
+//go:embed embed/security-infra-agent.md
+var securityInfraAgentContent []byte
+
+//go:embed embed/security-chains-agent.md
+var securityChainsAgentContent []byte
+
+//go:embed embed/security-triage-agent.md
+var securityTriageAgentContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -100,6 +148,22 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: doneAgentContent, relPath: filepath.Join("agents", "human-done.md")},
 		{content: executeSkillContent, relPath: filepath.Join("skills", "human-execute", "SKILL.md")},
 		{content: executorAgentContent, relPath: filepath.Join("agents", "human-executor.md")},
+		{content: findbugsSkillContent, relPath: filepath.Join("skills", "human-findbugs", "SKILL.md")},
+		{content: findbugsReconAgentContent, relPath: filepath.Join("agents", "findbugs-recon.md")},
+		{content: findbugsLogicAgentContent, relPath: filepath.Join("agents", "findbugs-logic.md")},
+		{content: findbugsErrorsAgentContent, relPath: filepath.Join("agents", "findbugs-errors.md")},
+		{content: findbugsConcurrencyAgentContent, relPath: filepath.Join("agents", "findbugs-concurrency.md")},
+		{content: findbugsAPIAgentContent, relPath: filepath.Join("agents", "findbugs-api.md")},
+		{content: findbugsTriageAgentContent, relPath: filepath.Join("agents", "findbugs-triage.md")},
+		{content: securitySkillContent, relPath: filepath.Join("skills", "human-security", "SKILL.md")},
+		{content: securitySurfaceAgentContent, relPath: filepath.Join("agents", "security-surface.md")},
+		{content: securityInjectionAgentContent, relPath: filepath.Join("agents", "security-injection.md")},
+		{content: securityAuthAgentContent, relPath: filepath.Join("agents", "security-auth.md")},
+		{content: securitySecretsAgentContent, relPath: filepath.Join("agents", "security-secrets.md")},
+		{content: securityDepsAgentContent, relPath: filepath.Join("agents", "security-deps.md")},
+		{content: securityInfraAgentContent, relPath: filepath.Join("agents", "security-infra.md")},
+		{content: securityChainsAgentContent, relPath: filepath.Join("agents", "security-chains.md")},
+		{content: securityTriageAgentContent, relPath: filepath.Join("agents", "security-triage.md")},
 	}
 
 	for _, f := range files {
