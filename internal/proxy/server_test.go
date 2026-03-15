@@ -1,0 +1,275 @@
+package proxy
+
+import (
+	"context"
+	"crypto/tls"
+	"io"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestServer_allowedConnectionForwards(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"allowed.example.com"})
+	require.NoError(t, err)
+
+	// Start a mock upstream that echoes back "OK".
+	upstreamLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = upstreamLn.Close() }()
+
+	go func() {
+		conn, acceptErr := upstreamLn.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		// Read the replayed ClientHello, then write response.
+		buf := make([]byte, 4096)
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte("UPSTREAM_OK"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:   "127.0.0.1:0",
+		Policy: policy,
+		Logger: zerolog.Nop(),
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("tcp", upstreamLn.Addr().String())
+		},
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = ln.Addr().String()
+	_ = ln.Close()
+
+	go func() {
+		_ = srv.ListenAndServe(ctx)
+	}()
+
+	// Give server time to start.
+	time.Sleep(50 * time.Millisecond)
+
+	// Connect and send a ClientHello with allowed SNI.
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	hello := buildClientHello("allowed.example.com")
+	_, err = conn.Write(hello)
+	require.NoError(t, err)
+
+	// Read upstream response.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "UPSTREAM_OK", string(buf[:n]))
+}
+
+func TestServer_blockedConnectionResets(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"allowed.example.com"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dialed := make(chan struct{}, 1)
+
+	srv := &Server{
+		Addr:   "127.0.0.1:0",
+		Policy: policy,
+		Logger: zerolog.Nop(),
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			dialed <- struct{}{}
+			return nil, net.UnknownNetworkError("should not be called")
+		},
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = ln.Addr().String()
+	_ = ln.Close()
+
+	go func() {
+		_ = srv.ListenAndServe(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Connect with a blocked SNI.
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	hello := buildClientHello("blocked.example.com")
+	_, err = conn.Write(hello)
+	require.NoError(t, err)
+
+	// Connection should be closed by server (blocked).
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	_, err = conn.Read(buf)
+	assert.ErrorIs(t, err, io.EOF)
+
+	// Verify dialer was never called.
+	select {
+	case <-dialed:
+		t.Fatal("dialer should not have been called for blocked domain")
+	default:
+	}
+}
+
+func TestServer_noSNIBlocks(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"*.example.com"})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:   "127.0.0.1:0",
+		Policy: policy,
+		Logger: zerolog.Nop(),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = ln.Addr().String()
+	_ = ln.Close()
+
+	go func() {
+		_ = srv.ListenAndServe(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Send a ClientHello without SNI.
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	hello := buildClientHello("")
+	_, err = conn.Write(hello)
+	require.NoError(t, err)
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	_, err = conn.Read(buf)
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestServer_blockAllPolicy(t *testing.T) {
+	policy := BlockAllPolicy()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:   "127.0.0.1:0",
+		Policy: policy,
+		Logger: zerolog.Nop(),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = ln.Addr().String()
+	_ = ln.Close()
+
+	go func() {
+		_ = srv.ListenAndServe(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	hello := buildClientHello("github.com")
+	_, err = conn.Write(hello)
+	require.NoError(t, err)
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	_, err = conn.Read(buf)
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestServer_realTLSClientHello(t *testing.T) {
+	// Verify the proxy works with a real TLS ClientHello generated by crypto/tls.
+	policy, err := NewPolicy(ModeAllow, []string{"real.example.com"})
+	require.NoError(t, err)
+
+	// Track that upstream was dialed with correct address.
+	dialedAddr := make(chan string, 1)
+
+	// Start a mock upstream that accepts TLS.
+	upstreamLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = upstreamLn.Close() }()
+
+	go func() {
+		conn, acceptErr := upstreamLn.Accept()
+		if acceptErr != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:   "127.0.0.1:0",
+		Policy: policy,
+		Logger: zerolog.Nop(),
+		Dialer: func(_ context.Context, _, address string) (net.Conn, error) {
+			dialedAddr <- address
+			return net.Dial("tcp", upstreamLn.Addr().String())
+		},
+	}
+
+	proxyLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = proxyLn.Addr().String()
+	_ = proxyLn.Close()
+
+	go func() {
+		_ = srv.ListenAndServe(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Use crypto/tls to generate a real ClientHello.
+	go func() {
+		conn, dialErr := net.DialTimeout("tcp", srv.Addr, time.Second)
+		if dialErr != nil {
+			return
+		}
+		tlsConn := tls.Client(conn, &tls.Config{
+			ServerName:         "real.example.com",
+			InsecureSkipVerify: true, //nolint:gosec // test only
+		})
+		_ = tlsConn.SetDeadline(time.Now().Add(2 * time.Second))
+		// Handshake will fail since upstream isn't TLS, but we just need the ClientHello sent.
+		_ = tlsConn.Handshake()
+		_ = tlsConn.Close()
+	}()
+
+	select {
+	case addr := <-dialedAddr:
+		assert.Equal(t, "real.example.com:443", addr)
+	case <-time.After(3 * time.Second):
+		t.Fatal("dialer was not called")
+	}
+}
