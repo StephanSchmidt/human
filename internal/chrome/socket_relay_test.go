@@ -104,8 +104,16 @@ func TestSocketRelay_ChromeBeforeSpawn(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 
-	// Chrome connects first.
-	chromeConn, err := net.Dial("unix", matches[0])
+	// Chrome connects first. Retry to avoid race between file creation and listener readiness.
+	var chromeConn net.Conn
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		chromeConn, err = net.Dial("unix", matches[0])
+		if err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	require.NoError(t, err)
 	defer func() { _ = chromeConn.Close() }()
 
