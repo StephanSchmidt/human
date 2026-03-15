@@ -58,3 +58,55 @@ A 32-byte random hex token is generated on first run of `human daemon start` and
    ```
 
 When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
+
+## HTTPS proxy
+
+The daemon runs a transparent HTTPS proxy on port 19287 that filters outbound traffic from devcontainers using SNI-based domain matching. No certificates or traffic decryption needed.
+
+### Configuration
+
+Add to `.humanconfig.yaml` on the host:
+
+```yaml
+proxy:
+  mode: allowlist    # or "blocklist"
+  domains:
+    - "*.github.com"
+    - "api.openai.com"
+    - "registry.npmjs.org"
+```
+
+| Mode | Behavior |
+|------|----------|
+| `allowlist` | Only listed domains pass, everything else blocked |
+| `blocklist` | Only listed domains blocked, everything else passes |
+| No `proxy:` section | Block all (safe default) |
+
+Wildcard `*.example.com` matches subdomains but not `example.com` itself.
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `HUMAN_PROXY_ADDR` | Proxy address (e.g. `192.168.1.5:19287`). Printed by `human daemon start`. |
+
+### Devcontainer setup
+
+Enable the `proxy` option in the [treehouse](https://github.com/StephanSchmidt/treehouse) devcontainer Feature and pass the proxy address:
+
+```json
+{
+  "features": {
+    "ghcr.io/stephanschmidt/treehouse/human:1": {
+      "proxy": true
+    }
+  },
+  "capAdd": ["NET_ADMIN"],
+  "remoteEnv": {
+    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}"
+  },
+  "postStartCommand": "sudo human-proxy-setup"
+}
+```
+
+The `proxy: true` option installs `iptables` and a setup script at image build time. At container start, `human-proxy-setup` reads `HUMAN_PROXY_ADDR` and redirects outbound HTTPS traffic to the proxy. If the variable is unset, the script skips gracefully.

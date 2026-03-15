@@ -19,7 +19,7 @@
 - **Secure by default** — one credential system for all services, secrets never touch the AI
 - **Token efficient** — 95% fewer tokens vs raw APIs, to not run into daily token limits
 - **Always current** — we track API changes so you don't; update human, and every connector updates with it
-- **Built-in workflows** — `/human-ready`, `/human-plan`, `/human-execute`, `/human-review`, `/human-done`, `/human-bug-plan` — real workflows, not glue code
+- **Built-in workflows** — `/human-ready`, `/human-plan`, `/human-execute`, `/human-review`, `/human-done`, `/human-bug-plan`, `/human-findbugs`, `/human-security` — real workflows, not glue code
 
 ### Why
 
@@ -199,6 +199,48 @@ Logs are written to `~/.human/chrome-bridge.log`.
 
 When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
 
+### HTTPS proxy
+
+The daemon includes a transparent HTTPS proxy on port 19287 that filters outbound traffic from devcontainers by domain. It reads the SNI from TLS ClientHello — no certificates needed, no traffic decryption.
+
+Configure allowed domains in `.humanconfig.yaml`:
+
+```yaml
+proxy:
+  mode: allowlist    # or "blocklist"
+  domains:
+    - "*.github.com"
+    - "api.openai.com"
+    - "registry.npmjs.org"
+```
+
+- `allowlist`: only listed domains pass, everything else blocked
+- `blocklist`: only listed domains blocked, everything else passes
+- No `proxy:` section: block all (safe default)
+
+Enable in `devcontainer.json` using the [treehouse](https://github.com/StephanSchmidt/treehouse) devcontainer Feature:
+
+```json
+{
+  "features": {
+    "ghcr.io/stephanschmidt/treehouse/human:1": {
+      "proxy": true
+    }
+  },
+  "capAdd": ["NET_ADMIN"],
+  "remoteEnv": {
+    "HUMAN_DAEMON_ADDR": "localhost:19285",
+    "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
+    "HUMAN_CHROME_ADDR": "localhost:19286",
+    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}"
+  },
+  "forwardPorts": [19285, 19286],
+  "postStartCommand": "sudo human-proxy-setup"
+}
+```
+
+See the [treehouse README](https://github.com/StephanSchmidt/treehouse#https-proxy) for full setup instructions. The `test-devcontainer/` directory in treehouse provides a working example you can use as a starting point.
+
 ## Claude Code usage
 
 Install the Claude Code skills and agents into your project:
@@ -270,6 +312,26 @@ The `/human-done` skill runs tests, checks each acceptance criterion against the
 ```
 
 The report is written to `.human/done/kan-1.md`.
+
+### Scan for bugs
+
+The `/human-findbugs` skill scans the codebase for bugs using a multi-agent pipeline. It auto-detects technologies and uses concern-based analysis agents to find semantic bugs that static analysis tools miss — logic errors, error handling gaps, race conditions, and security vulnerabilities.
+
+```
+/human-findbugs
+```
+
+No ticket needed. The skill runs three phases: reconnaissance, deep analysis (4 parallel agents), and triage. The final report is written to `.human/bugs/findbugs-<timestamp>.md`.
+
+### Security audit
+
+The `/human-security` skill performs a deep security audit of the codebase using a 4-phase pipeline with 8 specialized agents. It auto-detects technologies, maps the attack surface, runs 5 parallel scanning agents (injection, auth, secrets, dependencies, infrastructure), builds multi-step attack chains connecting individual findings into exploitable paths, then triages everything with OWASP Top 10 coverage.
+
+```
+/human-security
+```
+
+No ticket needed. The final report is written to `.human/security/security-<timestamp>.md`.
 
 ## Setup
 
