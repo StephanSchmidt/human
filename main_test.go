@@ -1056,6 +1056,8 @@ func TestIsLocalSubcommand(t *testing.T) {
 		{[]string{"--verbose", "daemon", "token"}, true},
 		{[]string{"jira", "issues", "list"}, false},
 		{[]string{"--help"}, false},
+		{[]string{"--version"}, true},
+		{[]string{"-v"}, true},
 		{[]string{"--", "daemon"}, false},
 		{[]string{"chrome-bridge"}, true},
 		{[]string{"--verbose", "chrome-bridge"}, true},
@@ -1215,6 +1217,28 @@ func TestPrintStatusesTable(t *testing.T) {
 	assert.Contains(t, out, "unstarted")
 	assert.Contains(t, out, "Custom")
 	assert.Contains(t, out, "-") // empty type shows as "-"
+}
+
+func TestSubcmdFromBinary(t *testing.T) {
+	tests := []struct {
+		arg0 string
+		want string
+	}{
+		{"human", ""},
+		{"human-browser", "browser"},
+		{"/usr/local/bin/human-browser", "browser"},
+		{"/usr/local/bin/human", ""},
+		{"human-browser.exe", "browser"},
+		{"human.exe", ""},
+		{"human-daemon", "daemon"},
+	}
+	for _, tt := range tests {
+		orig := os.Args[0]
+		os.Args[0] = tt.arg0
+		got := subcmdFromBinary()
+		os.Args[0] = orig
+		assert.Equal(t, tt.want, got, "subcmdFromBinary() with os.Args[0]=%q", tt.arg0)
+	}
 }
 
 func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {

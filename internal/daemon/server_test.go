@@ -38,13 +38,14 @@ func echoCmd() *cobra.Command {
 	return root
 }
 
-func startTestServer(t *testing.T, token string) (addr string, cancel context.CancelFunc) {
+func startTestServerWithOpts(t *testing.T, token string, safeMode bool) (addr string, cancel context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	srv := &Server{
 		Addr:       "127.0.0.1:0",
 		Token:      token,
+		SafeMode:   safeMode,
 		CmdFactory: echoCmd,
 		Logger:     zerolog.Nop(),
 	}
@@ -73,6 +74,11 @@ func startTestServer(t *testing.T, token string) (addr string, cancel context.Ca
 
 	t.Cleanup(func() { cancel() })
 	return addr, cancel
+}
+
+func startTestServer(t *testing.T, token string) (addr string, cancel context.CancelFunc) {
+	t.Helper()
+	return startTestServerWithOpts(t, token, false)
 }
 
 func sendRequest(t *testing.T, addr string, req Request) Response {
@@ -176,4 +182,105 @@ func TestServer_InvalidJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(scanner.Bytes(), &resp))
 	assert.Equal(t, 1, resp.ExitCode)
 	assert.Contains(t, resp.Stderr, "invalid request JSON")
+}
+
+func safeCmdFactory() *cobra.Command {
+	root := &cobra.Command{
+		Use:          "test",
+		SilenceUsage: true,
+	}
+	root.PersistentFlags().Bool("safe", false, "safe mode")
+	root.AddCommand(&cobra.Command{
+		Use: "check",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			safe, _ := cmd.Root().PersistentFlags().GetBool("safe")
+			if safe {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "safe-mode-active")
+			} else {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "safe-mode-inactive")
+			}
+			return nil
+		},
+	})
+	return root
+}
+
+func TestServer_SafeModePrependsFlag(t *testing.T) {
+	token := "test-token-safe"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &Server{
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		SafeMode:   true,
+		CmdFactory: safeCmdFactory,
+		Logger:     zerolog.Nop(),
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Cleanup(func() { cancel() })
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"check"},
+	})
+
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Contains(t, resp.Stdout, "safe-mode-active")
+}
+
+func TestServer_SafeModeDisabled(t *testing.T) {
+	token := "test-token-nosafe"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &Server{
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		SafeMode:   false,
+		CmdFactory: safeCmdFactory,
+		Logger:     zerolog.Nop(),
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Cleanup(func() { cancel() })
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"check"},
+	})
+
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Contains(t, resp.Stdout, "safe-mode-inactive")
 }

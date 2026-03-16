@@ -34,6 +34,8 @@ func buildDaemonStartCmd() *cobra.Command {
 	var chromeAddr string
 	var proxyAddr string
 	var interactive bool
+	var safe bool
+	var debug bool
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -58,19 +60,24 @@ func buildDaemonStartCmd() *cobra.Command {
 			proxyFullAddr := replaceHost(proxyAddr, hostIP)
 			_, _ = fmt.Fprintln(out)
 			_, _ = fmt.Fprintln(out, "Run in the container:")
-			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s\n", daemonAddr)
-			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_TOKEN=%s\n", token)
-			_, _ = fmt.Fprintf(out, "  export HUMAN_CHROME_ADDR=%s\n", chromeFullAddr)
-			_, _ = fmt.Fprintf(out, "  export HUMAN_PROXY_ADDR=%s\n", proxyFullAddr)
+			_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
+				daemonAddr, token, chromeFullAddr, proxyFullAddr)
+			_, _ = fmt.Fprintf(out, "  export BROWSER=human-browser\n")
+			_, _ = fmt.Fprintln(out, "  ln -sf $(which human) /usr/local/bin/human-browser  # if not already installed")
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
+			level := zerolog.InfoLevel
+			if debug {
+				level = zerolog.DebugLevel
+			}
+			logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger().Level(level)
 
 			srv := &daemon.Server{
 				Addr:       addr,
 				Token:      token,
+				SafeMode:   safe,
 				CmdFactory: newRootCmd,
 				Logger:     logger,
 			}
@@ -141,6 +148,8 @@ func buildDaemonStartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&chromeAddr, "chrome-addr", ":19286", "Chrome proxy listen address (host:port)")
 	cmd.Flags().StringVar(&proxyAddr, "proxy-addr", ":19287", "HTTPS proxy listen address (host:port)")
 	cmd.Flags().BoolVar(&interactive, "interactive", false, "Prompt for unknown domains instead of blocking them")
+	cmd.Flags().BoolVar(&safe, "safe", os.Getenv("HUMAN_SAFE") == "1", "Block destructive operations for all daemon requests")
+	cmd.Flags().BoolVar(&debug, "debug", false, "Enable debug logging")
 	return cmd
 }
 

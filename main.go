@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/rs/zerolog"
@@ -439,6 +440,7 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	// Global persistent flags.
 	pf := rootCmd.PersistentFlags()
 	pf.String("tracker", "", "Named tracker instance from .humanconfig")
+	pf.Bool("safe", os.Getenv("HUMAN_SAFE") == "1", "Block destructive operations (deletes)")
 
 	// Credential flags — functional but hidden from help (use env vars or .humanconfig).
 	credFlags := []struct{ name, env, help string }{
@@ -605,16 +607,19 @@ func buildInstallCmd() *cobra.Command {
 	return cmd
 }
 
-// isLocalSubcommand returns true if args start with "daemon", "chrome-host",
-// or "chrome-bridge", so that these commands always execute locally rather
-// than being forwarded.
+// isLocalSubcommand returns true if args represent a command that must
+// execute locally rather than being forwarded to the daemon.
 func isLocalSubcommand(args []string) bool {
 	for _, a := range args {
 		if a == "--" {
 			return false
 		}
+		// --version should always run locally to show the client's version.
+		if a == "--version" || a == "-v" {
+			return true
+		}
 		if len(a) > 0 && a[0] == '-' {
-			continue // skip flags
+			continue // skip other flags
 		}
 		return a == "daemon" || a == "chrome-bridge"
 	}
@@ -623,12 +628,30 @@ func isLocalSubcommand(args []string) bool {
 
 // --- main ---
 
+// subcmdFromBinary checks whether the binary was invoked via a symlink
+// like "human-browser" and returns the implied subcommand (e.g. "browser").
+// Returns "" when os.Args[0] is just "human" or unrecognised.
+func subcmdFromBinary() string {
+	base := filepath.Base(os.Args[0]) //nolint:nilaway // os.Args is always set in main
+	// Strip common extensions (.exe on Windows).
+	base = strings.TrimSuffix(base, ".exe")
+	if strings.HasPrefix(base, "human-") {
+		return base[len("human-"):]
+	}
+	return ""
+}
+
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
+	// Busybox-style dispatch: "human-browser URL" → "human browser URL".
+	args := os.Args[1:] //nolint:nilaway // os.Args is always set in main
+	if sub := subcmdFromBinary(); sub != "" {
+		args = append([]string{sub}, args...)
+	}
+
 	// Client mode: forward to daemon if configured.
 	// Skip forwarding for "daemon" subcommands — they must run locally.
-	args := os.Args[1:] //nolint:nilaway // os.Args is always set in main
 	if addr := os.Getenv("HUMAN_DAEMON_ADDR"); addr != "" && !isLocalSubcommand(args) {
 		token := os.Getenv("HUMAN_DAEMON_TOKEN")
 		exitCode, err := daemon.RunRemote(addr, token, args, version)
@@ -640,6 +663,7 @@ func main() {
 	}
 
 	rootCmd := newRootCmd()
+	rootCmd.SetArgs(args)
 	if err := rootCmd.Execute(); err != nil {
 		errors.LogError(err).Msg("command failed")
 		os.Exit(1)

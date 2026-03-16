@@ -9,13 +9,24 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
+
+	"github.com/StephanSchmidt/human/internal/browser"
 )
+
+// defaultBrowserOpener wraps browser.DefaultOpener for production use.
+type defaultBrowserOpener struct{}
+
+func (defaultBrowserOpener) Open(url string) error {
+	return browser.DefaultOpener{}.Open(url)
+}
 
 // Server listens for incoming client connections and executes CLI commands.
 type Server struct {
 	Addr       string
 	Token      string
+	SafeMode   bool
 	CmdFactory func() *cobra.Command
+	Opener     BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
 	Logger     zerolog.Logger
 }
 
@@ -51,14 +62,15 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
-	scanner := bufio.NewScanner(conn)
-	if !scanner.Scan() {
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
 		s.writeError(conn, "failed to read request", 1)
 		return
 	}
 
 	var req Request
-	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+	if err := json.Unmarshal(line, &req); err != nil {
 		s.writeError(conn, "invalid request JSON", 1)
 		return
 	}
@@ -68,7 +80,22 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
+	if s.SafeMode {
+		req.Args = append([]string{"--safe"}, req.Args...)
+	}
+
 	s.Logger.Info().Strs("args", req.Args).Msg("handling request")
+
+	// Intercept browser commands with OAuth redirect_uri for relay.
+	if info, url := isBrowserWithRedirect(req.Args); info != nil {
+		s.Logger.Debug().Int("port", info.Port).Str("path", info.Path).Msg("OAuth redirect detected, starting relay")
+		opener := s.Opener
+		if opener == nil {
+			opener = defaultBrowserOpener{}
+		}
+		s.handleOAuthRelay(conn, reader, info, url, opener)
+		return
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd := s.CmdFactory()
