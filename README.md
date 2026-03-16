@@ -136,6 +136,8 @@ human amplitude --amplitude=product events list
 
 ## Devcontainer / Remote mode
 
+> **Quick start:** Use the [treehouse devcontainer Feature](https://github.com/StephanSchmidt/treehouse) — it installs `human`, sets up OAuth browser forwarding, and optionally configures the HTTPS proxy. Add it to your `devcontainer.json` and you're done.
+
 AI agents running inside devcontainers need access to issue trackers, Notion, Figma, and Amplitude, but credentials should stay on the host. The daemon mode splits `human` into two roles: a **daemon** on the host (holds credentials, executes commands) and a **client** inside the container (forwards CLI args, prints results). You need `human` installed on both sides: on the host (via Homebrew, curl, etc.) to run the daemon, and inside the container (via the devcontainer Feature) as the client. It's the same binary — the mode is determined by the `HUMAN_DAEMON_ADDR` environment variable.
 
 On the host:
@@ -157,7 +159,8 @@ In `devcontainer.json`, add the [devcontainer Feature](https://github.com/Stepha
   "remoteEnv": {
     "HUMAN_DAEMON_ADDR": "localhost:19285",
     "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
-    "HUMAN_CHROME_ADDR": "localhost:19286"
+    "HUMAN_CHROME_ADDR": "localhost:19286",
+    "BROWSER": "human-browser"
   }
 }
 ```
@@ -197,6 +200,12 @@ Logs are written to `~/.human/chrome-bridge.log`.
 
 When `HUMAN_DAEMON_ADDR` is not set, `human` runs in standalone mode — no daemon required.
 
+### OAuth / browser forwarding
+
+Tools like Claude Code require OAuth authentication, which needs to open a browser on the host. The [treehouse Feature](https://github.com/StephanSchmidt/treehouse) handles this automatically by creating a `human-browser` symlink and setting `BROWSER=human-browser`. When Claude Code triggers OAuth, `human-browser` forwards the request to the daemon, which opens the real browser on the host and relays the callback back to the container.
+
+If you're not using the treehouse Feature, add `"BROWSER": "human-browser"` to your `remoteEnv` and ensure the `human-browser` symlink exists in the container (pointing to the `human` binary).
+
 ### HTTPS proxy
 
 The daemon includes a transparent HTTPS proxy on port 19287 that filters outbound traffic from devcontainers by domain. It reads the SNI from TLS ClientHello — no certificates needed, no traffic decryption.
@@ -230,7 +239,8 @@ Enable in `devcontainer.json` using the [treehouse](https://github.com/StephanSc
     "HUMAN_DAEMON_ADDR": "localhost:19285",
     "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
     "HUMAN_CHROME_ADDR": "localhost:19286",
-    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}"
+    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}",
+    "BROWSER": "human-browser"
   },
   "forwardPorts": [19285, 19286],
   "postStartCommand": "sudo human-proxy-setup"
