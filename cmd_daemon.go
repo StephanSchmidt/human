@@ -147,7 +147,7 @@ func buildDaemonStartCmd() *cobra.Command {
 			if fuseErr != nil {
 				logger.Warn().Err(fuseErr).Msg("FUSE .env filter not available")
 			} else {
-				_, _ = fmt.Fprintln(out, "FUSE .env filter:", cwd+"-sec")
+				_, _ = fmt.Fprintf(out, "FUSE .env filter: %s (%s)\n", cwd+"-sec", secMount.Tier())
 				defer func() {
 					if err := secMount.Unmount(); err != nil {
 						logger.Warn().Err(err).Msg("FUSE unmount failed")

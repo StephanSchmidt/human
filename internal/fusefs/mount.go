@@ -1,6 +1,7 @@
 package fusefs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,13 @@ import (
 type MountHandle struct {
 	server     *fuse.Server
 	mountPoint string
+	tier       string
 	logger     zerolog.Logger
+}
+
+// Tier returns a human-readable description of the I/O strategy in use.
+func (h *MountHandle) Tier() string {
+	return h.tier
 }
 
 // Mount creates a FUSE passthrough filesystem at mountPoint that mirrors
@@ -43,14 +50,18 @@ func Mount(sourceDir, mountPoint string, logger zerolog.Logger) (*MountHandle, e
 		return nil, errors.WrapWithDetails(err, "mounting FUSE filesystem", "mountpoint", mountPoint)
 	}
 
+	tier := detectTier(server)
+
 	logger.Info().
 		Str("source", sourceDir).
 		Str("mount", mountPoint).
+		Str("io", tier).
 		Msg("FUSE .env filter mounted")
 
 	return &MountHandle{
 		server:     server,
 		mountPoint: mountPoint,
+		tier:       tier,
 		logger:     logger,
 	}, nil
 }
@@ -63,6 +74,16 @@ func (h *MountHandle) Unmount() error {
 	h.logger.Info().Str("mount", h.mountPoint).Msg("FUSE .env filter unmounted")
 	_ = os.Remove(h.mountPoint)
 	return nil
+}
+
+// detectTier checks kernel capabilities and returns a description of the I/O
+// strategy used for non-.env files.
+func detectTier(server *fuse.Server) string {
+	ks := server.KernelSettings()
+	if ks != nil && ks.Flags64()&fuse.CAP_PASSTHROUGH != 0 {
+		return fmt.Sprintf("passthrough (kernel %d.%d)", ks.Major, ks.Minor)
+	}
+	return "splice"
 }
 
 // IsEnvFile returns true if the filename matches .env patterns:
