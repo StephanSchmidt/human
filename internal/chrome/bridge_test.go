@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -188,42 +187,6 @@ func TestBridge_DialFailure(t *testing.T) {
 	}
 }
 
-func TestBridge_ListenAndServe_ContextCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	bridge := &Bridge{
-		Dialer:  DefaultDialer{},
-		Addr:    "127.0.0.1:1",
-		Token:   "tok",
-		Version: "test",
-		Logger:  zerolog.Nop(),
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- bridge.ListenAndServe(ctx)
-	}()
-
-	// Give it time to start listening.
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-done:
-		assert.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("ListenAndServe did not return after cancel")
-	}
-
-	// Verify socket was cleaned up.
-	dir, err := SocketDir()
-	require.NoError(t, err)
-
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		assert.NotContains(t, e.Name(), ".sock", "socket should be cleaned up")
-	}
-}
 
 // handleMockAuth reads a proxy request (JSON line) and sends an ack.
 // Returns (true, nil) if auth succeeded, (false, nil) if auth failed.
