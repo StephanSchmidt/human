@@ -14,6 +14,7 @@ import (
 
 	"github.com/StephanSchmidt/human/internal/chrome"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/fusefs"
 	"github.com/StephanSchmidt/human/internal/proxy"
 )
 
@@ -139,6 +140,20 @@ func buildDaemonStartCmd() *cobra.Command {
 					logger.Error().Err(err).Msg("https proxy failed")
 				}
 			}()
+
+			// Start FUSE .env filter
+			cwd, _ := os.Getwd()
+			secMount, fuseErr := fusefs.Mount(cwd, cwd+"-sec", logger)
+			if fuseErr != nil {
+				logger.Warn().Err(fuseErr).Msg("FUSE .env filter not available")
+			} else {
+				_, _ = fmt.Fprintln(out, "FUSE .env filter:", cwd+"-sec")
+				defer func() {
+					if err := secMount.Unmount(); err != nil {
+						logger.Warn().Err(err).Msg("FUSE unmount failed")
+					}
+				}()
+			}
 
 			return srv.ListenAndServe(ctx)
 		},
