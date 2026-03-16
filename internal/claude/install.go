@@ -94,6 +94,12 @@ var securityChainsAgentContent []byte
 //go:embed embed/security-triage-agent.md
 var securityTriageAgentContent []byte
 
+//go:embed embed/human-brainstorm-skill.md
+var brainstormSkillContent []byte
+
+//go:embed embed/human-brainstormer-agent.md
+var brainstormerAgentContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -164,6 +170,8 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: securityInfraAgentContent, relPath: filepath.Join("agents", "security-infra.md")},
 		{content: securityChainsAgentContent, relPath: filepath.Join("agents", "security-chains.md")},
 		{content: securityTriageAgentContent, relPath: filepath.Join("agents", "security-triage.md")},
+		{content: brainstormSkillContent, relPath: filepath.Join("skills", "human-brainstorm", "SKILL.md")},
+		{content: brainstormerAgentContent, relPath: filepath.Join("agents", "human-brainstormer.md")},
 	}
 
 	for _, f := range files {

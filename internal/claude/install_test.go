@@ -96,6 +96,8 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	securityInfraAgentPath := filepath.Join(".claude", "agents", "security-infra.md")
 	securityChainsAgentPath := filepath.Join(".claude", "agents", "security-chains.md")
 	securityTriageAgentPath := filepath.Join(".claude", "agents", "security-triage.md")
+	brainstormSkillPath := filepath.Join(".claude", "skills", "human-brainstorm", "SKILL.md")
+	brainstormerAgentPath := filepath.Join(".claude", "agents", "human-brainstormer.md")
 
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 	assert.Equal(t, string(agentContent), string(fw.files[agentPath]))
@@ -125,6 +127,8 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	assert.Equal(t, string(securityInfraAgentContent), string(fw.files[securityInfraAgentPath]))
 	assert.Equal(t, string(securityChainsAgentContent), string(fw.files[securityChainsAgentPath]))
 	assert.Equal(t, string(securityTriageAgentContent), string(fw.files[securityTriageAgentPath]))
+	assert.Equal(t, string(brainstormSkillContent), string(fw.files[brainstormSkillPath]))
+	assert.Equal(t, string(brainstormerAgentContent), string(fw.files[brainstormerAgentPath]))
 }
 
 func TestInstall_SkipsUnchangedFiles(t *testing.T) {
@@ -186,6 +190,10 @@ func TestInstall_SkipsUnchangedFiles(t *testing.T) {
 	fw.files[securityInfraAgentPath] = securityInfraAgentContent
 	fw.files[securityChainsAgentPath] = securityChainsAgentContent
 	fw.files[securityTriageAgentPath] = securityTriageAgentContent
+	brainstormSkillPath := filepath.Join(".claude", "skills", "human-brainstorm", "SKILL.md")
+	brainstormerAgentPath := filepath.Join(".claude", "agents", "human-brainstormer.md")
+	fw.files[brainstormSkillPath] = brainstormSkillContent
+	fw.files[brainstormerAgentPath] = brainstormerAgentContent
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
@@ -226,6 +234,7 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	executeSkillDir := filepath.Join(".claude", "skills", "human-execute")
 	findbugsSkillDir := filepath.Join(".claude", "skills", "human-findbugs")
 	securitySkillDir := filepath.Join(".claude", "skills", "human-security")
+	brainstormSkillDir := filepath.Join(".claude", "skills", "human-brainstorm")
 	agentDir := filepath.Join(".claude", "agents")
 	assert.True(t, fw.dirs[skillDir], "expected plan skill parent directory to be created")
 	assert.True(t, fw.dirs[readySkillDir], "expected ready skill parent directory to be created")
@@ -235,6 +244,7 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	assert.True(t, fw.dirs[executeSkillDir], "expected execute skill parent directory to be created")
 	assert.True(t, fw.dirs[findbugsSkillDir], "expected findbugs skill parent directory to be created")
 	assert.True(t, fw.dirs[securitySkillDir], "expected security skill parent directory to be created")
+	assert.True(t, fw.dirs[brainstormSkillDir], "expected brainstorm skill parent directory to be created")
 	assert.True(t, fw.dirs[agentDir], "expected agent parent directory to be created")
 }
 
