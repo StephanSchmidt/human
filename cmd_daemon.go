@@ -143,7 +143,7 @@ func buildDaemonStartCmd() *cobra.Command {
 
 			// Start FUSE .env filter
 			cwd, _ := os.Getwd()
-			secMount, fuseErr := fusefs.Mount(cwd, cwd+"-sec", logger)
+			secMount, fuseErr := fusefs.Mount(cwd, cwd+"-sec", safe, logger)
 			if fuseErr != nil {
 				logger.Warn().Err(fuseErr).Msg("FUSE .env filter not available")
 			} else {

@@ -13,6 +13,17 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 )
 
+// FileKind classifies a file for the FUSE security filter.
+type FileKind int
+
+const (
+	FileKindNone   FileKind = iota // Not a sensitive file — passthrough.
+	FileKindEnv                    // KEY=VALUE file (.env, .npmrc, .pypirc) — line-by-line redaction.
+	FileKindJSON                   // JSON file (credentials.json, secrets.json) — JSON-aware redaction.
+	FileKindYAML                   // YAML file (secrets.yaml) — YAML-aware redaction.
+	FileKindOpaque                 // Binary/opaque (*.pem, *.key, *.p12, *.pfx) — always empty.
+)
+
 // MountHandle holds a running FUSE mount and allows unmounting.
 type MountHandle struct {
 	server     *fuse.Server
@@ -27,21 +38,23 @@ func (h *MountHandle) Tier() string {
 }
 
 // Mount creates a FUSE passthrough filesystem at mountPoint that mirrors
-// sourceDir. Files matching .env patterns are served as empty and read-only.
-func Mount(sourceDir, mountPoint string, logger zerolog.Logger) (*MountHandle, error) {
+// sourceDir. Sensitive files are redacted or served empty depending on safeMode.
+// When safeMode is true, all sensitive files return empty content (maximum paranoia).
+// When safeMode is false, sensitive files are redacted with structure preserved.
+func Mount(sourceDir, mountPoint string, safeMode bool, logger zerolog.Logger) (*MountHandle, error) {
 	if err := os.MkdirAll(mountPoint, 0o750); err != nil {
 		return nil, errors.WrapWithDetails(err, "creating FUSE mountpoint", "path", mountPoint)
 	}
 
-	root, err := NewSecRoot(sourceDir)
+	root, err := NewSecRoot(sourceDir, safeMode)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "creating FUSE root", "source", sourceDir)
 	}
 
 	server, err := fs.Mount(mountPoint, root, &fs.Options{
 		MountOptions: fuse.MountOptions{
-			FsName:    sourceDir,
-			Name:      "secfs",
+			FsName:     sourceDir,
+			Name:       "secfs",
 			AllowOther: false,
 		},
 	})
@@ -52,11 +65,17 @@ func Mount(sourceDir, mountPoint string, logger zerolog.Logger) (*MountHandle, e
 
 	tier := detectTier(server)
 
+	mode := "redact"
+	if safeMode {
+		mode = "safe (empty)"
+	}
+
 	logger.Info().
 		Str("source", sourceDir).
 		Str("mount", mountPoint).
 		Str("io", tier).
-		Msg("FUSE .env filter mounted")
+		Str("mode", mode).
+		Msg("FUSE secret filter mounted")
 
 	return &MountHandle{
 		server:     server,
@@ -71,13 +90,13 @@ func (h *MountHandle) Unmount() error {
 	if err := h.server.Unmount(); err != nil {
 		return errors.WrapWithDetails(err, "unmounting FUSE", "mountpoint", h.mountPoint)
 	}
-	h.logger.Info().Str("mount", h.mountPoint).Msg("FUSE .env filter unmounted")
+	h.logger.Info().Str("mount", h.mountPoint).Msg("FUSE secret filter unmounted")
 	_ = os.Remove(h.mountPoint)
 	return nil
 }
 
 // detectTier checks kernel capabilities and returns a description of the I/O
-// strategy used for non-.env files.
+// strategy used for non-sensitive files.
 func detectTier(server *fuse.Server) string {
 	ks := server.KernelSettings()
 	if ks != nil && ks.Flags64()&fuse.CAP_PASSTHROUGH != 0 {
@@ -89,6 +108,39 @@ func detectTier(server *fuse.Server) string {
 // IsEnvFile returns true if the filename matches .env patterns:
 // .env, .env.local, .env.production, .env.*, etc.
 func IsEnvFile(name string) bool {
+	return IsSensitiveFile(name) == FileKindEnv
+}
+
+// IsSensitiveFile classifies a filename by its sensitivity.
+func IsSensitiveFile(name string) FileKind {
 	base := filepath.Base(name)
-	return base == ".env" || strings.HasPrefix(base, ".env.")
+	lower := strings.ToLower(base)
+
+	// .env, .env.*
+	if base == ".env" || strings.HasPrefix(base, ".env.") {
+		return FileKindEnv
+	}
+
+	// .npmrc, .pypirc — KEY=VALUE style
+	if lower == ".npmrc" || lower == ".pypirc" {
+		return FileKindEnv
+	}
+
+	// JSON files with secrets
+	if lower == "credentials.json" || lower == "service-account.json" || lower == "secrets.json" {
+		return FileKindJSON
+	}
+
+	// YAML files with secrets
+	if lower == "secrets.yml" || lower == "secrets.yaml" {
+		return FileKindYAML
+	}
+
+	// Opaque binary/key files — always empty
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".pem" || ext == ".key" || ext == ".p12" || ext == ".pfx" {
+		return FileKindOpaque
+	}
+
+	return FileKindNone
 }

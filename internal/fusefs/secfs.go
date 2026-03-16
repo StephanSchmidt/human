@@ -2,6 +2,7 @@ package fusefs
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"syscall"
 
@@ -10,10 +11,11 @@ import (
 )
 
 // SecNode is a FUSE inode that mirrors a real file or directory.
-// For non-.env files, it delegates to LoopbackNode (passthrough).
-// For .env files, it serves empty content and blocks writes.
+// For non-sensitive files, it delegates to LoopbackNode (passthrough).
+// For sensitive files, it serves empty or redacted content and blocks writes.
 type SecNode struct {
 	*fs.LoopbackNode
+	safeMode bool
 }
 
 var _ = (fs.NodeWrapChilder)((*SecNode)(nil))
@@ -26,11 +28,11 @@ func (n *SecNode) WrapChild(_ context.Context, ops fs.InodeEmbedder) fs.InodeEmb
 	if !ok {
 		return ops
 	}
-	return &SecNode{LoopbackNode: lb}
+	return &SecNode{LoopbackNode: lb, safeMode: n.safeMode}
 }
 
-func (n *SecNode) isEnv() bool {
-	return IsEnvFile(filepath.Base(n.Path(n.root())))
+func (n *SecNode) fileKind() FileKind {
+	return IsSensitiveFile(filepath.Base(n.Path(n.root())))
 }
 
 func (n *SecNode) root() *fs.Inode {
@@ -40,24 +42,78 @@ func (n *SecNode) root() *fs.Inode {
 	return n.Root()
 }
 
-// Open intercepts .env files and returns an empty read-only handle.
-// All other files delegate to LoopbackNode.Open for passthrough I/O.
-func (n *SecNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
-	if n.isEnv() {
-		return &emptyFileHandle{}, fuse.FOPEN_DIRECT_IO, fs.OK
-	}
-	return n.LoopbackNode.Open(ctx, flags)
+// realPath returns the full path to the backing file on disk.
+func (n *SecNode) realPath() string {
+	return filepath.Join(n.RootData.Path, n.Path(n.root()))
 }
 
-// Getattr for .env files reports size 0.
+// Open intercepts sensitive files and returns a protected handle.
+// All other files delegate to LoopbackNode.Open for passthrough I/O.
+func (n *SecNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
+	kind := n.fileKind()
+	if kind == FileKindNone {
+		return n.LoopbackNode.Open(ctx, flags)
+	}
+
+	// Safe mode or opaque files: return empty content.
+	if n.safeMode || kind == FileKindOpaque {
+		return &emptyFileHandle{}, fuse.FOPEN_DIRECT_IO, fs.OK
+	}
+
+	// Redact mode: read the real file, redact, and serve from memory.
+	content, err := os.ReadFile(n.realPath())
+	if err != nil {
+		return nil, 0, fs.ToErrno(err)
+	}
+
+	var redacted []byte
+	switch kind {
+	case FileKindEnv:
+		redacted = RedactEnv(content)
+	case FileKindJSON, FileKindYAML:
+		// JSON/YAML redaction not yet implemented — return empty for safety.
+		redacted = nil
+	default:
+		redacted = nil
+	}
+
+	return &redactedFileHandle{data: redacted}, fuse.FOPEN_DIRECT_IO, fs.OK
+}
+
+// Getattr for sensitive files reports the redacted (or zero) size.
 func (n *SecNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOut) syscall.Errno {
 	errno := n.LoopbackNode.Getattr(ctx, f, out)
 	if errno != fs.OK {
 		return errno
 	}
-	if n.isEnv() {
-		out.Size = 0
+
+	kind := n.fileKind()
+	if kind == FileKindNone {
+		return fs.OK
 	}
+
+	// Safe mode or opaque files: report size 0.
+	if n.safeMode || kind == FileKindOpaque {
+		out.Size = 0
+		return fs.OK
+	}
+
+	// Redact mode: report redacted content size.
+	content, err := os.ReadFile(n.realPath())
+	if err != nil {
+		// Fall back to 0 if unreadable.
+		out.Size = 0
+		return fs.OK
+	}
+
+	var redacted []byte
+	switch kind {
+	case FileKindEnv:
+		redacted = RedactEnv(content)
+	default:
+		redacted = nil
+	}
+	out.Size = uint64(len(redacted))
 	return fs.OK
 }
 
@@ -81,8 +137,37 @@ func (h *emptyFileHandle) Getattr(_ context.Context, out *fuse.AttrOut) syscall.
 	return fs.OK
 }
 
+// redactedFileHandle serves redacted content from memory and rejects writes.
+type redactedFileHandle struct {
+	data []byte
+}
+
+var _ = (fs.FileReader)((*redactedFileHandle)(nil))
+var _ = (fs.FileWriter)((*redactedFileHandle)(nil))
+var _ = (fs.FileGetattrer)((*redactedFileHandle)(nil))
+
+func (h *redactedFileHandle) Read(_ context.Context, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
+	if off >= int64(len(h.data)) {
+		return fuse.ReadResultData(nil), fs.OK
+	}
+	end := off + int64(len(dest))
+	if end > int64(len(h.data)) {
+		end = int64(len(h.data))
+	}
+	return fuse.ReadResultData(h.data[off:end]), fs.OK
+}
+
+func (h *redactedFileHandle) Write(_ context.Context, _ []byte, _ int64) (uint32, syscall.Errno) {
+	return 0, syscall.EROFS
+}
+
+func (h *redactedFileHandle) Getattr(_ context.Context, out *fuse.AttrOut) syscall.Errno {
+	out.Size = uint64(len(h.data))
+	return fs.OK
+}
+
 // NewSecRoot creates a new SecNode-based loopback root for the given directory.
-func NewSecRoot(rootPath string) (fs.InodeEmbedder, error) {
+func NewSecRoot(rootPath string, safeMode bool) (fs.InodeEmbedder, error) {
 	var st syscall.Stat_t
 	if err := syscall.Stat(rootPath, &st); err != nil {
 		return nil, err
@@ -94,7 +179,7 @@ func NewSecRoot(rootPath string) (fs.InodeEmbedder, error) {
 	}
 
 	lb := &fs.LoopbackNode{RootData: root}
-	sec := &SecNode{LoopbackNode: lb}
+	sec := &SecNode{LoopbackNode: lb, safeMode: safeMode}
 	root.RootNode = sec
 	return sec, nil
 }
