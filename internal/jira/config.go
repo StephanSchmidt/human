@@ -15,6 +15,7 @@ type Config struct {
 	User        string `mapstructure:"user"`
 	Key         string `mapstructure:"key"`
 	Description string `mapstructure:"description"`
+	Safe        bool   `mapstructure:"safe"`
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -51,6 +52,7 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 			URL:         cfg.URL,
 			User:        cfg.User,
 			Description: cfg.Description,
+			Safe:        cfg.Safe,
 			Provider:    New(cfg.URL, cfg.User, cfg.Key),
 		})
 	}

@@ -3,6 +3,7 @@ jiras:
     url: https://yourorg.atlassian.net
     user: you@example.com
     description: "Product backlog and sprint planning for the main product"
+    safe: true  # block destructive operations (deletes) for this instance
     # key comes from env: export JIRA_MYORG_KEY=your-api-token
 
 githubs:

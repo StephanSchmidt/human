@@ -15,6 +15,7 @@ type Config struct {
 	Org         string `mapstructure:"org"`
 	Token       string `mapstructure:"token"`
 	Description string `mapstructure:"description"`
+	Safe        bool   `mapstructure:"safe"`
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -54,6 +55,7 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 			Kind:        "azuredevops",
 			URL:         cfg.URL,
 			Description: cfg.Description,
+			Safe:        cfg.Safe,
 			Provider:    New(cfg.URL, cfg.Org, cfg.Token),
 		})
 	}

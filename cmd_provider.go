@@ -38,11 +38,17 @@ func resolveProvider(cmd *cobra.Command, kind string) (tracker.Provider, func(),
 		return nil, nil, err
 	}
 
+	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
+	p := instance.Provider
+	if safeFlag || instance.Safe {
+		p = tracker.NewSafeProvider(p, instance.Name)
+	}
+
 	auditPath := auditLogPath()
-	ap, auditErr := tracker.NewAuditProvider(instance.Provider, instance.Name, instance.Kind, auditPath)
+	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
 	if auditErr != nil {
 		fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
-		return instance.Provider, func() {}, nil
+		return p, func() {}, nil
 	}
 	return ap, func() { _ = ap.Close() }, nil
 }

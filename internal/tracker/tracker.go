@@ -245,6 +245,7 @@ type Instance struct {
 	URL         string // display URL
 	User        string // display user (Jira only)
 	Description string // optional human-readable description of what this tracker is for
+	Safe        bool   // when true, destructive operations (deletes) are blocked
 	Provider    Provider
 }
 
