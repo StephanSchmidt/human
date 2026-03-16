@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/hanwen/go-fuse/v2 v2.9.0
 	github.com/rs/zerolog v1.34.0
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
