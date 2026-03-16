@@ -14,18 +14,12 @@
 
 **The everything framework for AI development.** Claude is the engine. human is everything else. One tool. One install. Everything works.
 
-- **All connectors included** — Jira, Notion, Figma, Amplitude, GitHub, GitLab, Linear, Azure DevOps, Shortcut — every integration ships with human
-- **One-command setup** — `human init` configures every connector, every project, every developer
-- **Secure by default** — one credential system for all services, secrets never touch the AI
-- **Token efficient** — 95% fewer tokens vs raw APIs, to not run into daily token limits
-- **Always current** — we track API changes so you don't; update human, and every connector updates with it
-- **Built-in workflows** — `/human-ready`, `/human-plan`, `/human-execute`, `/human-review`, `/human-done`, `/human-bug-plan`, `/human-findbugs`, `/human-security` — real workflows, not glue code
-
-### Why
-
-As AI agents write more code autonomously, the question becomes: who decides *what* gets built? With `human`, an AI reads a product ticket from the issue tracker, creates an implementation ticket with a plan, and a human reviews it before coding starts.
-
-<img src="human-loop.svg" width="960" alt="human loop: PM Ticket → AI → Dev Ticket">
+- Connectors to issue trackers, documentation in a secure way
+- Open URLS in devcontainers
+- MCP OAuth callbacks in devcontainers
+- Firewall/Proxy for devcontainers
+- Chrome-Claude Code Bridge from inside devcontainers
+- Alls the skills you need for development
 
 ### Architecture
 
@@ -266,6 +260,17 @@ In Claude Code:
 ```
 
 The skill checks six criteria: clear description, acceptance criteria, scope, dependencies, context, and edge cases. For anything missing or incomplete, it asks you to provide the information. The completed assessment is written to `.human/ready/kan-1.md`.
+
+### Brainstorm approaches
+
+The `/human-brainstorm` skill explores the codebase, asks clarifying questions one at a time, and generates 2-3 implementation approaches with trade-offs. You pick the approach, and the result is saved for reference.
+
+```
+/human-brainstorm KAN-1
+/human-brainstorm "add caching layer for API responses"
+```
+
+The brainstorm is written to `.human/brainstorms/<identifier>.md`. Run `/human-plan` next to turn the chosen approach into a concrete implementation plan.
 
 ### Create an implementation plan
 
