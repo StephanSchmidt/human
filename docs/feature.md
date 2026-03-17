@@ -33,6 +33,17 @@
   - Delegates to the `human-ready` agent to fetch and evaluate the ticket
   - Presents the agent's assessment, then asks the user to fill in each missing or partial item via `AskUserQuestion`
   - Writes the completed readiness assessment to `.human/ready/<key>.md` (lowercased key)
+- **`/human-brainstorm` skill** (`.claude/skills/human-brainstorm/SKILL.md`)
+  - Accepts `<ticket-key or topic>` argument
+  - Two-phase process using the `human-brainstormer` agent:
+    1. Phase 1: Gathers context (fetches ticket if key, explores codebase) and suggests clarifying questions
+    2. Phase 2: Generates 2-3 implementation approaches with trade-offs, pros/cons, complexity estimates, and a recommendation
+  - Asks clarifying questions one at a time via `AskUserQuestion`
+  - User picks the approach, result is written to `.human/brainstorms/<identifier>.md`
+- **`human-brainstormer` agent** (`.claude/agents/human-brainstormer.md`)
+  - Tools: Bash, Read, Grep, Glob, Write
+  - Phase 1 (Context gathering): Fetches ticket, explores codebase for relevant code and patterns, returns context summary with 3-5 clarifying questions
+  - Phase 2 (Generate approaches): Incorporates clarification answers, generates 2-3 distinct approaches with affected files, pros/cons, complexity estimates, risks, and a recommendation
 - **`/human-plan` skill** (`.claude/skills/human-plan/SKILL.md`)
   - Accepts `<ticket-key>` argument
   - Delegates to the `human-planner` agent with prompt `Create an implementation plan for ticket <key>`
