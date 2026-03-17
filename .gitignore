@@ -6,5 +6,6 @@ coverage.out
 logo/
 .claude/
 .devcontainer/
+.human/
 .humanconfig
 .humanconfig.yaml
