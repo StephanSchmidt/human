@@ -35,7 +35,7 @@ Or with Homebrew:
 
 ```bash
 brew install stephanschmidt/tap/human
-```
+``` 
 
 Or with [mise](https://mise.jdx.dev):
 
