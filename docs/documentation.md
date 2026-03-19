@@ -158,7 +158,7 @@ A 32-byte random hex token is generated on first run of `human daemon start` and
    {
      "forwardPorts": [19285],
      "remoteEnv": {
-       "HUMAN_DAEMON_ADDR": "localhost:19285",
+       "HUMAN_DAEMON_ADDR": "host.docker.internal:19285",
        "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>"
      }
    }

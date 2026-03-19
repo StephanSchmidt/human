@@ -44,7 +44,7 @@ A 32-byte random hex token is generated on first run of `human daemon start` and
    {
      "forwardPorts": [19285],
      "remoteEnv": {
-       "HUMAN_DAEMON_ADDR": "localhost:19285",
+       "HUMAN_DAEMON_ADDR": "host.docker.internal:19285",
        "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>"
      }
    }
@@ -88,11 +88,11 @@ Wildcard `*.example.com` matches subdomains but not `example.com` itself.
 
 | Variable | Description |
 |----------|-------------|
-| `HUMAN_PROXY_ADDR` | Proxy address (e.g. `192.168.1.5:19287`). Printed by `human daemon start`. |
+| `HUMAN_PROXY_ADDR` | Proxy address. Defaults to `host.docker.internal:19287` in generated configs. |
 
 ### Devcontainer setup
 
-Enable the `proxy` option in the [treehouse](https://github.com/StephanSchmidt/treehouse) devcontainer Feature and pass the proxy address:
+Enable the `proxy` option in the [treehouse](https://github.com/StephanSchmidt/treehouse) devcontainer Feature:
 
 ```json
 {
@@ -103,10 +103,12 @@ Enable the `proxy` option in the [treehouse](https://github.com/StephanSchmidt/t
   },
   "capAdd": ["NET_ADMIN"],
   "remoteEnv": {
-    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}"
+    "HUMAN_PROXY_ADDR": "host.docker.internal:19287"
   },
   "postStartCommand": "sudo human-proxy-setup"
 }
 ```
+
+The generated config uses `host.docker.internal:19287` by default — Docker's built-in DNS name that resolves to the host machine. No manual env var export needed.
 
 The `proxy: true` option installs `iptables` and a setup script at image build time. At container start, `human-proxy-setup` reads `HUMAN_PROXY_ADDR` and redirects outbound HTTPS traffic to the proxy. If the variable is unset, the script skips gracefully.

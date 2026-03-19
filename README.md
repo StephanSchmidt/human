@@ -157,9 +157,9 @@ In `devcontainer.json`, add the [devcontainer Feature](https://github.com/Stepha
   },
   "forwardPorts": [19285, 19286],
   "remoteEnv": {
-    "HUMAN_DAEMON_ADDR": "localhost:19285",
+    "HUMAN_DAEMON_ADDR": "host.docker.internal:19285",
     "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
-    "HUMAN_CHROME_ADDR": "localhost:19286",
+    "HUMAN_CHROME_ADDR": "host.docker.internal:19286",
     "BROWSER": "human-browser"
   }
 }
@@ -236,10 +236,10 @@ Enable in `devcontainer.json` using the [treehouse](https://github.com/StephanSc
   },
   "capAdd": ["NET_ADMIN"],
   "remoteEnv": {
-    "HUMAN_DAEMON_ADDR": "localhost:19285",
+    "HUMAN_DAEMON_ADDR": "host.docker.internal:19285",
     "HUMAN_DAEMON_TOKEN": "<paste from 'human daemon token'>",
-    "HUMAN_CHROME_ADDR": "localhost:19286",
-    "HUMAN_PROXY_ADDR": "${localEnv:HUMAN_PROXY_ADDR}",
+    "HUMAN_CHROME_ADDR": "host.docker.internal:19286",
+    "HUMAN_PROXY_ADDR": "host.docker.internal:19287",
     "BROWSER": "human-browser"
   },
   "forwardPorts": [19285, 19286],

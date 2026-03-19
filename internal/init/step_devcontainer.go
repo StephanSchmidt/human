@@ -85,8 +85,7 @@ func (s *devcontainerStep) Run(w io.Writer, fw claude.FileWriter) ([]string, err
 	hints := []string{
 		"Next steps (run on the host before starting the container):",
 		"  1. Start the daemon:  human daemon start",
-		"  2. Export the env vars printed by 'human daemon start'",
-		"  3. Start container:   devcontainer up --workspace-folder .",
+		"  2. Start container:  export HUMAN_DAEMON_TOKEN=$(human daemon token) && devcontainer up --workspace-folder .",
 	}
 	if _, lookErr := exec.LookPath("devcontainer"); lookErr != nil {
 		hints = append(hints, "Install the devcontainer CLI with: npm install -g @devcontainers/cli")
@@ -99,8 +98,10 @@ const devcontainerDir = ".devcontainer"
 const devcontainerPath = ".devcontainer/devcontainer.json"
 
 type devcontainerConfig struct {
+	Name             string                 `json:"name"`
 	Image            string                 `json:"image"`
 	Features         map[string]interface{} `json:"features"`
+	RunArgs          []string               `json:"runArgs,omitempty"`
 	CapAdd           []string               `json:"capAdd,omitempty"`
 	ForwardPorts     []int                  `json:"forwardPorts"`
 	RemoteEnv        map[string]string      `json:"remoteEnv"`
@@ -108,6 +109,7 @@ type devcontainerConfig struct {
 }
 
 const humanFeatureKey = "ghcr.io/stephanschmidt/treehouse/human:1"
+const claudeFeatureKey = "ghcr.io/anthropics/devcontainer-features/claude-code:1"
 
 // ensureHumanFeature reads an existing devcontainer.json and adds the human
 // feature if it is missing. Returns hints if the file was updated.
@@ -157,27 +159,30 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	}
 
 	features := map[string]interface{}{
-		humanFeatureKey: featureOpts,
+		humanFeatureKey:  featureOpts,
+		claudeFeatureKey: map[string]interface{}{},
 	}
 	for _, stack := range stacks {
 		features[stack.FeatureKey] = map[string]interface{}{}
 	}
 
 	cfg := devcontainerConfig{
-		Image:    "mcr.microsoft.com/devcontainers/universal:2",
+		Name:     "human secure container",
+		Image:    "mcr.microsoft.com/devcontainers/base:ubuntu",
 		Features: features,
+		RunArgs:  []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
 		RemoteEnv: map[string]string{ // #nosec G101 -- template reference, not a credential
-			"HUMAN_DAEMON_ADDR":  "localhost:19285",
+			"HUMAN_DAEMON_ADDR":  "host.docker.internal:19285",
 			"HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}",
-			"HUMAN_CHROME_ADDR":  "localhost:19286",
+			"HUMAN_CHROME_ADDR":  "host.docker.internal:19286",
 			"BROWSER":            "human-browser",
 		},
 	}
 
 	if proxy {
 		cfg.CapAdd = []string{"NET_ADMIN"}
-		cfg.RemoteEnv["HUMAN_PROXY_ADDR"] = "${localEnv:HUMAN_PROXY_ADDR}"
+		cfg.RemoteEnv["HUMAN_PROXY_ADDR"] = "host.docker.internal:19287"
 		cfg.PostStartCommand = "sudo human-proxy-setup && human install --agent claude"
 	} else {
 		cfg.PostStartCommand = "human install --agent claude"
