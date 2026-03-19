@@ -1061,6 +1061,10 @@ func TestIsLocalSubcommand(t *testing.T) {
 		{[]string{"--", "daemon"}, false},
 		{[]string{"chrome-bridge"}, true},
 		{[]string{"--verbose", "chrome-bridge"}, true},
+		{[]string{"install", "--agent", "claude"}, true},
+		{[]string{"--verbose", "install"}, true},
+		{[]string{"init"}, true},
+		{[]string{"--verbose", "init"}, true},
 	}
 	for _, tt := range tests {
 		got := isLocalSubcommand(tt.args)

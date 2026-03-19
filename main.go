@@ -621,7 +621,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge"
+		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init"
 	}
 	return false
 }
