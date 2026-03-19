@@ -224,6 +224,7 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
 	_, _ = fmt.Fprintln(w, "  human browser https://example.com")
 	_, _ = fmt.Fprintln(w, "  human daemon start")
+	_, _ = fmt.Fprintln(w, "  human daemon stop")
 	_, _ = fmt.Fprintln(w, "  human daemon token")
 	_, _ = fmt.Fprintln(w, "  human daemon status")
 }
