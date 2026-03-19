@@ -14,6 +14,17 @@ import (
 // huhPrompter implements initpkg.Prompter using charmbracelet/huh forms.
 type huhPrompter struct{}
 
+func (h huhPrompter) ConfirmAddTrackers() (bool, error) {
+	add := true
+	err := huh.NewConfirm().
+		Title("Add trackers to the config?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&add).
+		Run()
+	return add, err
+}
+
 func (h huhPrompter) ConfirmOverwrite() (bool, error) {
 	var overwrite bool
 	err := huh.NewConfirm().
@@ -127,6 +138,73 @@ func (h huhPrompter) PromptInstance(svc initpkg.ServiceType) (map[string]string,
 	return values, nil
 }
 
+func (h huhPrompter) ConfirmDevcontainer() (bool, error) {
+	create := true
+	err := huh.NewConfirm().
+		Title("Create devcontainer configuration?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&create).
+		Run()
+	return create, err
+}
+
+func (h huhPrompter) ConfirmOverwriteDevcontainer() (bool, error) {
+	var overwrite bool
+	err := huh.NewConfirm().
+		Title(".devcontainer/devcontainer.json already exists. Overwrite?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&overwrite).
+		Run()
+	return overwrite, err
+}
+
+func (h huhPrompter) SelectStacks(available []initpkg.StackType) ([]initpkg.StackType, error) {
+	options := make([]huh.Option[int], len(available))
+	for i, stack := range available {
+		options[i] = huh.NewOption(stack.Label, i)
+	}
+
+	theme := huh.ThemeCharm()
+	theme.Focused.SelectedPrefix = lipgloss.NewStyle().SetString("[x] ")
+	theme.Focused.UnselectedPrefix = lipgloss.NewStyle().SetString("[ ] ")
+	theme.Blurred.SelectedPrefix = theme.Focused.SelectedPrefix
+	theme.Blurred.UnselectedPrefix = theme.Focused.UnselectedPrefix
+
+	var indices []int
+	ms := huh.NewMultiSelect[int]().
+		Title("Select language stacks for the devcontainer").
+		Description("space/x to toggle, enter to confirm (none is fine)").
+		Options(options...).
+		Filterable(false).
+		Value(&indices)
+
+	err := huh.NewForm(huh.NewGroup(ms)).
+		WithTheme(theme).
+		Run()
+	if err != nil {
+		return nil, err
+	}
+
+	selected := make([]initpkg.StackType, len(indices))
+	for i, idx := range indices {
+		selected[i] = available[idx]
+	}
+	return selected, nil
+}
+
+func (h huhPrompter) ConfirmProxy() (bool, error) {
+	proxy := true
+	err := huh.NewConfirm().
+		Title("Enable HTTPS proxy (firewall)?").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&proxy).
+		Run()
+	return proxy, err
+}
+
 func (h huhPrompter) ConfirmAgentInstall() (bool, error) {
 	install := true
 	err := huh.NewConfirm().
@@ -148,7 +226,12 @@ and optionally install Claude Code agent integration.
 Credentials are never stored in the config file — the wizard prints
 the environment variables you need to set.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return initpkg.RunInit(cmd.OutOrStdout(), huhPrompter{}, claude.OSFileWriter{})
+			steps := []initpkg.WizardStep{
+				initpkg.NewServicesStep(huhPrompter{}),
+				initpkg.NewDevcontainerStep(huhPrompter{}),
+				initpkg.NewAgentInstallStep(huhPrompter{}),
+			}
+			return initpkg.RunInit(cmd.OutOrStdout(), steps, claude.OSFileWriter{})
 		},
 	}
 }

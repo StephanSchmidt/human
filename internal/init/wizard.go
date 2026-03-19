@@ -4,13 +4,27 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"text/template"
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude"
 )
+
+// WizardStep is a self-contained phase of the init wizard.
+// Run returns optional follow-up hints (e.g. install instructions) to be
+// printed after the wizard finishes, plus any error.
+type WizardStep interface {
+	Name() string
+	Run(w io.Writer, fw claude.FileWriter) (hints []string, err error)
+}
+
+// Prompter is a composite interface embedding all step-specific prompter interfaces.
+type Prompter interface {
+	ServicesPrompter
+	DevcontainerPrompter
+	AgentInstallPrompter
+}
 
 // ServiceType describes a configurable service with its YAML key, defaults, and env var pattern.
 type ServiceType struct {
@@ -74,14 +88,6 @@ func ServiceRegistry() []ServiceType {
 			EnvVars:     []string{"KEY", "SECRET"}, EnvPrefix: "AMPLITUDE",
 		},
 	}
-}
-
-// Prompter abstracts TUI interactions for testability.
-type Prompter interface {
-	ConfirmOverwrite() (bool, error)
-	SelectServices(available []ServiceType) ([]ServiceType, error)
-	PromptInstance(svc ServiceType) (map[string]string, error)
-	ConfirmAgentInstall() (bool, error)
 }
 
 // serviceInstance holds the values collected for one service instance.
@@ -186,86 +192,50 @@ const configTemplate = `{{- range $i, $section := .Sections }}{{ if $i }}
 {{- end }}
 `
 
-// configPath is the filename written by RunInit.
+// StackType describes a language stack that can be added as a devcontainer feature.
+type StackType struct {
+	Label      string // display name, e.g. "Go"
+	FeatureKey string // devcontainer feature reference, e.g. "ghcr.io/devcontainers/features/go:1"
+}
+
+// StackRegistry returns all available language stacks.
+func StackRegistry() []StackType {
+	return []StackType{
+		{Label: "Go", FeatureKey: "ghcr.io/devcontainers/features/go:1"},
+		{Label: "Rust", FeatureKey: "ghcr.io/devcontainers/features/rust:1"},
+		{Label: "Node.js", FeatureKey: "ghcr.io/devcontainers/features/node:1"},
+		{Label: "Python", FeatureKey: "ghcr.io/devcontainers/features/python:1"},
+		{Label: "Java", FeatureKey: "ghcr.io/devcontainers/features/java:1"},
+		{Label: "Ruby", FeatureKey: "ghcr.io/devcontainers/features/ruby:1"},
+		{Label: ".NET", FeatureKey: "ghcr.io/devcontainers/features/dotnet:2"},
+		{Label: "PHP", FeatureKey: "ghcr.io/devcontainers/features/php:1"},
+	}
+}
+
+// configPath is the filename written by the services step.
 const configPath = ".humanconfig.yaml"
 
-// RunInit orchestrates the init wizard.
-func RunInit(w io.Writer, prompter Prompter, fw claude.FileWriter) error {
-	// Step 1: Check for existing config.
-	if _, err := os.Stat(configPath); err == nil {
-		overwrite, promptErr := prompter.ConfirmOverwrite()
-		if promptErr != nil {
-			return errors.WrapWithDetails(promptErr, "confirming overwrite")
+// RunInit orchestrates the init wizard by running each step in sequence.
+// Follow-up hints from all steps are printed after the final "Done!" line.
+func RunInit(w io.Writer, steps []WizardStep, fw claude.FileWriter) error {
+	var allHints []string
+	for _, step := range steps {
+		hints, err := step.Run(w, fw)
+		if err != nil {
+			return errors.WrapWithDetails(err, "wizard step %s", "step", step.Name())
 		}
-		if !overwrite {
-			_, _ = fmt.Fprintln(w, "Aborted — existing .humanconfig.yaml kept.")
-			return nil
-		}
-	}
-
-	// Step 2: Select services.
-	registry := ServiceRegistry()
-	selected, err := prompter.SelectServices(registry)
-	if err != nil {
-		return errors.WrapWithDetails(err, "selecting services")
-	}
-	if len(selected) == 0 {
-		_, _ = fmt.Fprintln(w, "No services selected — nothing to configure.")
-		return nil
-	}
-
-	// Step 3: Prompt per-service details.
-	var instances []serviceInstance
-	for _, svc := range selected {
-		values, promptErr := prompter.PromptInstance(svc)
-		if promptErr != nil {
-			return errors.WrapWithDetails(promptErr, "configuring service",
-				"service", svc.Label)
-		}
-		instances = append(instances, serviceInstance{Service: svc, Values: values})
-	}
-
-	// Step 4: Generate and write config.
-	yaml, err := GenerateConfig(instances)
-	if err != nil {
-		return err
-	}
-
-	if err := fw.WriteFile(configPath, []byte(yaml), 0o644); err != nil {
-		return errors.WrapWithDetails(err, "writing config file",
-			"path", configPath)
-	}
-	_, _ = fmt.Fprintf(w, "Wrote %s\n", configPath)
-
-	// Step 5: Print env vars to set.
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Set these environment variables:")
-	for _, inst := range instances {
-		name := inst.Values["name"]
-		for _, suffix := range inst.Service.EnvVars {
-			envName := EnvVarName(inst.Service.EnvPrefix, name, suffix)
-			_, _ = fmt.Fprintf(w, "  export %s=your-%s\n", envName, strings.ToLower(suffix))
-		}
-	}
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Tip: Use a secret manager to inject tokens instead of hardcoding them.")
-	_, _ = fmt.Fprintln(w, "  1Password CLI (op) is free for personal use: https://1password.com/downloads/command-line")
-	_, _ = fmt.Fprintln(w, "  Example: export JIRA_WORK_TOKEN=$(op read 'op://Vault/Jira/token')")
-
-	// Step 6: Optionally install agents.
-	installAgents, err := prompter.ConfirmAgentInstall()
-	if err != nil {
-		return errors.WrapWithDetails(err, "confirming agent install")
-	}
-	if installAgents {
-		_, _ = fmt.Fprintln(w)
-		_, _ = fmt.Fprintln(w, "Installing Claude Code integration...")
-		if err := claude.Install(w, fw, false); err != nil {
-			return err
-		}
+		allHints = append(allHints, hints...)
 	}
 
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, "Done! Run 'human tracker list --table' to verify.")
+
+	if len(allHints) > 0 {
+		_, _ = fmt.Fprintln(w)
+		for _, hint := range allHints {
+			_, _ = fmt.Fprintln(w, hint)
+		}
+	}
+
 	return nil
 }
