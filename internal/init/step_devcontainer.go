@@ -110,6 +110,7 @@ type devcontainerConfig struct {
 
 const humanFeatureKey = "ghcr.io/stephanschmidt/treehouse/human:1"
 const claudeFeatureKey = "ghcr.io/anthropics/devcontainer-features/claude-code:1"
+const nodeFeatureKey = "ghcr.io/devcontainers/features/node:1"
 
 // ensureHumanFeature reads an existing devcontainer.json and adds the human
 // feature if it is missing. Returns hints if the file was updated.
@@ -159,6 +160,7 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	}
 
 	features := map[string]interface{}{
+		nodeFeatureKey:   map[string]interface{}{"version": "22"},
 		humanFeatureKey:  featureOpts,
 		claudeFeatureKey: map[string]interface{}{},
 	}
@@ -167,10 +169,10 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	}
 
 	cfg := devcontainerConfig{
-		Name:     "human secure container",
-		Image:    "mcr.microsoft.com/devcontainers/base:ubuntu",
-		Features: features,
-		RunArgs:  []string{"--add-host=host.docker.internal:host-gateway"},
+		Name:         "human secure container",
+		Image:        "mcr.microsoft.com/devcontainers/base:ubuntu",
+		Features:     features,
+		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
 		RemoteEnv: map[string]string{ // #nosec G101 -- template reference, not a credential
 			"HUMAN_DAEMON_ADDR":  "host.docker.internal:19285",
@@ -183,9 +185,9 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	if proxy {
 		cfg.CapAdd = []string{"NET_ADMIN"}
 		cfg.RemoteEnv["HUMAN_PROXY_ADDR"] = "host.docker.internal:19287"
-		cfg.PostStartCommand = "sudo human-proxy-setup && human install --agent claude"
+		cfg.PostStartCommand = "sudo human-proxy-setup && human install --agent claude && human chrome-bridge"
 	} else {
-		cfg.PostStartCommand = "human install --agent claude"
+		cfg.PostStartCommand = "human install --agent claude && human chrome-bridge"
 	}
 
 	return cfg

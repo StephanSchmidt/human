@@ -8,33 +8,34 @@ import (
 	"strings"
 	"testing"
 
+	"io"
+
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"io"
 )
 
 // mockPrompter implements Prompter for testing.
 type mockPrompter struct {
-	overwrite                bool
-	overwriteErr             error
-	confirmAddTrackers       bool
-	confirmAddTrackersErr    error
-	selected                 []ServiceType
-	selectErr                error
-	instanceValues           []map[string]string
-	instanceErr              error
-	installAgents            bool
-	installErr               error
-	promptIdx                int
-	confirmDevcontainer      bool
-	confirmDevcontainerErr   error
-	confirmOverwriteDevcont  bool
-	confirmOverwriteDevErr   error
-	confirmProxy             bool
-	confirmProxyErr          error
-	selectedStacks           []StackType
-	selectStacksErr          error
+	overwrite               bool
+	overwriteErr            error
+	confirmAddTrackers      bool
+	confirmAddTrackersErr   error
+	selected                []ServiceType
+	selectErr               error
+	instanceValues          []map[string]string
+	instanceErr             error
+	installAgents           bool
+	installErr              error
+	promptIdx               int
+	confirmDevcontainer     bool
+	confirmDevcontainerErr  error
+	confirmOverwriteDevcont bool
+	confirmOverwriteDevErr  error
+	confirmProxy            bool
+	confirmProxyErr         error
+	selectedStacks          []StackType
+	selectStacksErr         error
 }
 
 func (m *mockPrompter) ConfirmOverwrite() (bool, error) {
@@ -622,6 +623,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 
 	data := string(fw.files[".devcontainer/devcontainer.json"])
 	assert.Contains(t, data, "mcr.microsoft.com/devcontainers/base:ubuntu")
+	assert.Contains(t, data, "ghcr.io/devcontainers/features/node:1")
 	assert.Contains(t, data, "ghcr.io/stephanschmidt/treehouse/human:1")
 	assert.Contains(t, data, "HUMAN_DAEMON_ADDR")
 	assert.Contains(t, data, "HUMAN_DAEMON_TOKEN")
@@ -630,6 +632,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 	assert.NotContains(t, data, "capAdd")
 	assert.Contains(t, data, "ghcr.io/anthropics/devcontainer-features/claude-code:1")
 	assert.Contains(t, data, "human install --agent claude")
+	assert.Contains(t, data, "human chrome-bridge")
 	assert.NotContains(t, data, "human-proxy-setup")
 	assert.NotContains(t, data, "HUMAN_PROXY_ADDR")
 }
@@ -658,6 +661,7 @@ func TestDevcontainerStep_WithProxy(t *testing.T) {
 	assert.Contains(t, data, "sudo human-proxy-setup")
 	assert.Contains(t, data, "ghcr.io/anthropics/devcontainer-features/claude-code:1")
 	assert.Contains(t, data, "human install --agent claude")
+	assert.Contains(t, data, "human chrome-bridge")
 	assert.Contains(t, data, "HUMAN_PROXY_ADDR")
 	assert.Contains(t, data, `"proxy": true`)
 	assert.Contains(t, data, `"BROWSER": "human-browser"`)
