@@ -248,4 +248,3 @@ func TestOAuthRelay_NonOAuthBrowserUnchanged(t *testing.T) {
 	assert.Equal(t, 0, resp.ExitCode)
 	assert.Equal(t, "hello\n", resp.Stdout)
 }
-

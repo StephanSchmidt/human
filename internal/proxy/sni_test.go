@@ -39,11 +39,11 @@ func buildClientHello(serverName string) []byte {
 	// ClientHello body:
 	// version(2) + random(32) + sessionID len(1) + ciphers len(2) + one cipher(2) + comp len(1) + comp(1)
 	hello := make([]byte, 0, 256)
-	hello = append(hello, 0x03, 0x03)           // client version TLS 1.2
-	hello = append(hello, make([]byte, 32)...)   // random
-	hello = append(hello, 0x00)                  // session ID length = 0
+	hello = append(hello, 0x03, 0x03)             // client version TLS 1.2
+	hello = append(hello, make([]byte, 32)...)    // random
+	hello = append(hello, 0x00)                   // session ID length = 0
 	hello = append(hello, 0x00, 0x02, 0x00, 0x2f) // cipher suites: length=2, TLS_RSA_WITH_AES_128_CBC_SHA
-	hello = append(hello, 0x01, 0x00)            // compression: length=1, null
+	hello = append(hello, 0x01, 0x00)             // compression: length=1, null
 	hello = append(hello, extensions...)
 
 	// Handshake message: type(1) + length(3) + body

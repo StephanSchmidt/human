@@ -32,8 +32,8 @@ func makeLine(t *testing.T, typ, model string, ts time.Time, input, output, cach
 			"usage": map[string]int{
 				"input_tokens":                input,
 				"output_tokens":               output,
-				"cache_creation_input_tokens":  cacheCreate,
-				"cache_read_input_tokens":      cacheRead,
+				"cache_creation_input_tokens": cacheCreate,
+				"cache_read_input_tokens":     cacheRead,
 			},
 		},
 	}

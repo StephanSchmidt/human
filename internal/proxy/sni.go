@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	tlsRecordHandshake = 0x16
+	tlsRecordHandshake   = 0x16
 	handshakeClientHello = 0x01
 	extServerName        = 0x0000
 	sniHostNameType      = 0x00

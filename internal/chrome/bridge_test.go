@@ -187,7 +187,6 @@ func TestBridge_DialFailure(t *testing.T) {
 	}
 }
 
-
 // handleMockAuth reads a proxy request (JSON line) and sends an ack.
 // Returns (true, nil) if auth succeeded, (false, nil) if auth failed.
 func handleMockAuth(conn net.Conn, expectedToken string) (bool, error) {
