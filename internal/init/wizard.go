@@ -196,14 +196,15 @@ const configTemplate = `{{- range $i, $section := .Sections }}{{ if $i }}
 type StackType struct {
 	Label      string // display name, e.g. "Go"
 	FeatureKey string // devcontainer feature reference, e.g. "ghcr.io/devcontainers/features/go:1"
+	Fixed      bool   // always included, cannot be deselected (shown as pre-checked)
 }
 
 // StackRegistry returns all available language stacks.
 func StackRegistry() []StackType {
 	return []StackType{
+		{Label: "Node.js 22 (required by Claude Code)", FeatureKey: "ghcr.io/devcontainers/features/node:1", Fixed: true},
 		{Label: "Go", FeatureKey: "ghcr.io/devcontainers/features/go:1"},
 		{Label: "Rust", FeatureKey: "ghcr.io/devcontainers/features/rust:1"},
-		{Label: "Node.js", FeatureKey: "ghcr.io/devcontainers/features/node:1"},
 		{Label: "Python", FeatureKey: "ghcr.io/devcontainers/features/python:1"},
 		{Label: "Java", FeatureKey: "ghcr.io/devcontainers/features/java:1"},
 		{Label: "Ruby", FeatureKey: "ghcr.io/devcontainers/features/ruby:1"},

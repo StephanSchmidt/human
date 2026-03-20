@@ -166,13 +166,20 @@ func (h huhPrompter) SelectStacks(available []initpkg.StackType) ([]initpkg.Stac
 		options[i] = huh.NewOption(stack.Label, i)
 	}
 
+	// Pre-select fixed stacks (e.g. Node.js required by Claude Code).
+	var indices []int
+	for i, stack := range available {
+		if stack.Fixed {
+			indices = append(indices, i)
+		}
+	}
+
 	theme := huh.ThemeCharm()
 	theme.Focused.SelectedPrefix = lipgloss.NewStyle().SetString("[x] ")
 	theme.Focused.UnselectedPrefix = lipgloss.NewStyle().SetString("[ ] ")
 	theme.Blurred.SelectedPrefix = theme.Focused.SelectedPrefix
 	theme.Blurred.UnselectedPrefix = theme.Focused.UnselectedPrefix
 
-	var indices []int
 	ms := huh.NewMultiSelect[int]().
 		Title("Select language stacks for the devcontainer").
 		Description("space/x to toggle, enter to confirm (none is fine)").
@@ -187,10 +194,19 @@ func (h huhPrompter) SelectStacks(available []initpkg.StackType) ([]initpkg.Stac
 		return nil, err
 	}
 
-	selected := make([]initpkg.StackType, len(indices))
-	for i, idx := range indices {
-		selected[i] = available[idx]
+	// Ensure fixed stacks are always included.
+	selected := make([]initpkg.StackType, 0, len(indices))
+	seen := map[int]bool{}
+	for _, idx := range indices {
+		seen[idx] = true
+		selected = append(selected, available[idx])
 	}
+	for i, stack := range available {
+		if stack.Fixed && !seen[i] {
+			selected = append(selected, stack)
+		}
+	}
+
 	return selected, nil
 }
 

@@ -165,6 +165,9 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 		claudeFeatureKey: map[string]interface{}{},
 	}
 	for _, stack := range stacks {
+		if stack.Fixed {
+			continue // already added with pinned options above
+		}
 		features[stack.FeatureKey] = map[string]interface{}{}
 	}
 

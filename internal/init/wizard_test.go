@@ -807,7 +807,7 @@ func TestStackRegistry_AllStacks(t *testing.T) {
 	}
 	assert.Contains(t, labels, "Go")
 	assert.Contains(t, labels, "Rust")
-	assert.Contains(t, labels, "Node.js")
+	assert.Contains(t, labels, "Node.js 22 (required by Claude Code)")
 	assert.Contains(t, labels, "Python")
 	assert.Contains(t, labels, "Java")
 	assert.Contains(t, labels, "Ruby")
@@ -825,7 +825,7 @@ func TestDevcontainerStep_WithStacks(t *testing.T) {
 	prompter := &mockPrompter{
 		confirmDevcontainer: true,
 		confirmProxy:        false,
-		selectedStacks:      []StackType{reg[0], reg[3]}, // Go, Python
+		selectedStacks:      []StackType{reg[1], reg[3]}, // Go, Python
 	}
 	step := NewDevcontainerStep(prompter)
 	fw := newMockFileWriter()
@@ -850,7 +850,7 @@ func TestDevcontainerStep_StacksWithProxy(t *testing.T) {
 	prompter := &mockPrompter{
 		confirmDevcontainer: true,
 		confirmProxy:        true,
-		selectedStacks:      []StackType{reg[1]}, // Rust
+		selectedStacks:      []StackType{reg[2]}, // Rust
 	}
 	step := NewDevcontainerStep(prompter)
 	fw := newMockFileWriter()
