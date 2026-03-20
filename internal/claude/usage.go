@@ -75,14 +75,46 @@ type jsonlLine struct {
 
 func classifyModel(model string) string {
 	m := strings.ToLower(model)
+
+	// Determine the family name.
+	var family string
 	switch {
 	case strings.Contains(m, "opus"):
-		return "opus"
+		family = "opus"
 	case strings.Contains(m, "haiku"):
-		return "haiku"
+		family = "haiku"
 	default:
-		return "sonnet"
+		family = "sonnet"
 	}
+
+	// Extract version from patterns like "claude-opus-4-6" or "claude-sonnet-4-5-20250929".
+	// After the family name there should be "-major-minor" digits.
+	idx := strings.Index(m, family)
+	if idx < 0 {
+		return family
+	}
+	rest := m[idx+len(family):]
+	// rest should start with "-<major>-<minor>..." e.g. "-4-6" or "-4-5-20250929"
+	parts := strings.Split(strings.TrimPrefix(rest, "-"), "-")
+	if len(parts) >= 2 && isVersionDigit(parts[0]) && isVersionDigit(parts[1]) {
+		return family + " " + parts[0] + "." + parts[1]
+	}
+
+	return family
+}
+
+// isVersionDigit returns true for short numeric strings (1-2 digits)
+// that represent version numbers, not date stamps like "20250514".
+func isVersionDigit(s string) bool {
+	if len(s) == 0 || len(s) > 2 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ModelUsage holds aggregated token counts for one model class.
@@ -186,7 +218,7 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 		if grandTotal > 0 {
 			pct = float64(totalTokens(mu)) / float64(grandTotal) * 100
 		}
-		_, err := fmt.Fprintf(w, "  %-7s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
+		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
 			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
 			formatTokens(mu.CacheCreate), formatTokens(mu.CacheRead))
 		if err != nil {

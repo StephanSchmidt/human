@@ -70,12 +70,12 @@ func TestCalculateUsage(t *testing.T) {
 	outOfWindow := time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC)
 
 	lines := [][]byte{
-		makeLine(t, "assistant", "claude-sonnet-4-20250514", inWindow, 1_000_000, 0, 0, 0),
-		makeLine(t, "assistant", "claude-opus-4-20250514", inWindow, 0, 1_000_000, 0, 0),
+		makeLine(t, "assistant", "claude-sonnet-4-5-20250929", inWindow, 1_000_000, 0, 0, 0),
+		makeLine(t, "assistant", "claude-opus-4-6", inWindow, 0, 1_000_000, 0, 0),
 		// Out of window — should be ignored
-		makeLine(t, "assistant", "claude-sonnet-4-20250514", outOfWindow, 1_000_000, 0, 0, 0),
+		makeLine(t, "assistant", "claude-sonnet-4-5-20250929", outOfWindow, 1_000_000, 0, 0, 0),
 		// Wrong type — should be ignored
-		makeLine(t, "human", "claude-sonnet-4-20250514", inWindow, 1_000_000, 0, 0, 0),
+		makeLine(t, "human", "claude-sonnet-4-5-20250929", inWindow, 1_000_000, 0, 0, 0),
 		// Malformed line — should be skipped
 		[]byte(`{invalid json`),
 	}
@@ -86,16 +86,16 @@ func TestCalculateUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sonnet := summary.Models["sonnet"]
+	sonnet := summary.Models["sonnet 4.5"]
 	if sonnet == nil {
-		t.Fatal("expected sonnet model entry")
+		t.Fatal("expected sonnet 4.5 model entry")
 	}
 	if sonnet.InputTokens != 1_000_000 {
 		t.Errorf("sonnet input = %d, want 1000000", sonnet.InputTokens)
 	}
-	opus := summary.Models["opus"]
+	opus := summary.Models["opus 4.6"]
 	if opus == nil {
-		t.Fatal("expected opus model entry")
+		t.Fatal("expected opus 4.6 model entry")
 	}
 	if opus.OutputTokens != 1_000_000 {
 		t.Errorf("opus output = %d, want 1000000", opus.OutputTokens)
@@ -107,7 +107,7 @@ func TestCalculateUsageCacheTokens(t *testing.T) {
 	inWindow := time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC)
 
 	lines := [][]byte{
-		makeLine(t, "assistant", "claude-sonnet-4-20250514", inWindow, 0, 0, 1_000_000, 1_000_000),
+		makeLine(t, "assistant", "claude-sonnet-4-5-20250929", inWindow, 0, 0, 1_000_000, 1_000_000),
 	}
 
 	w := fakeWalker{lines: lines}
@@ -115,9 +115,9 @@ func TestCalculateUsageCacheTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sonnet := summary.Models["sonnet"]
+	sonnet := summary.Models["sonnet 4.5"]
 	if sonnet == nil {
-		t.Fatal("expected sonnet model entry")
+		t.Fatal("expected sonnet 4.5 model entry")
 	}
 	if sonnet.CacheCreate != 1_000_000 {
 		t.Errorf("sonnet cache_create = %d, want 1000000", sonnet.CacheCreate)
@@ -131,8 +131,8 @@ func TestFormatUsage(t *testing.T) {
 	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 	summary := &UsageSummary{
 		Models: map[string]*ModelUsage{
-			"sonnet": {InputTokens: 1_000_000, OutputTokens: 500_000},
-			"opus":   {OutputTokens: 1_000_000},
+			"sonnet 4.5": {InputTokens: 1_000_000, OutputTokens: 500_000},
+			"opus 4.6":   {OutputTokens: 1_000_000},
 		},
 	}
 	var buf bytes.Buffer
@@ -141,11 +141,11 @@ func TestFormatUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "opus") {
-		t.Errorf("should contain opus, got: %s", got)
+	if !strings.Contains(got, "opus 4.6") {
+		t.Errorf("should contain opus 4.6, got: %s", got)
 	}
-	if !strings.Contains(got, "sonnet") {
-		t.Errorf("should contain sonnet, got: %s", got)
+	if !strings.Contains(got, "sonnet 4.5") {
+		t.Errorf("should contain sonnet 4.5, got: %s", got)
 	}
 	if !strings.Contains(got, "10:00") {
 		t.Errorf("should contain window start, got: %s", got)
@@ -178,9 +178,16 @@ func TestClassifyModel(t *testing.T) {
 		model string
 		want  string
 	}{
+		{"claude-opus-4-6", "opus 4.6"},
+		{"claude-opus-4-5-20251101", "opus 4.5"},
 		{"claude-opus-4-20250514", "opus"},
+		{"claude-sonnet-4-6", "sonnet 4.6"},
+		{"claude-sonnet-4-5-20250929", "sonnet 4.5"},
 		{"claude-sonnet-4-20250514", "sonnet"},
-		{"claude-haiku-3-5-20241022", "haiku"},
+		{"claude-haiku-4-5-20251001", "haiku 4.5"},
+		{"claude-haiku-3-5-20241022", "haiku 3.5"},
+		{"sonnet", "sonnet"},
+		{"haiku", "haiku"},
 		{"some-unknown-model", "sonnet"},
 	}
 	for _, tt := range tests {
