@@ -219,6 +219,8 @@ func printExamples(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  human figma file comments <file-key>")
 	_, _ = fmt.Fprintln(w, "  human amplitude events list")
 	_, _ = fmt.Fprintln(w, "  human amplitude cohorts list")
+	_, _ = fmt.Fprintln(w, "  human telegram list")
+	_, _ = fmt.Fprintln(w, "  human telegram get 123456789")
 	_, _ = fmt.Fprintln(w, "  human tracker list")
 	_, _ = fmt.Fprintln(w, "  human init")
 	_, _ = fmt.Fprintln(w, "  human install --agent claude")
@@ -382,7 +384,7 @@ func newRootCmd() *cobra.Command {
 		Long: `Unified CLI to list, read, create, delete, and comment on issues
 across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut.
 Search and read content from Notion workspaces. Browse Figma designs.
-Queries Amplitude product analytics.
+Queries Amplitude product analytics. Reads Telegram bot messages.
 
 Use it to:
   - fetch a ticket before planning implementation
@@ -393,6 +395,7 @@ Use it to:
   - search Notion for meeting notes, specs, and docs
   - browse Figma files, components, and comments
   - query Amplitude events, funnels, retention, and cohorts
+  - read pending Telegram bot messages
 
 All trackers share the same command structure:
   human <tracker> issues list   — JSON array of issues
@@ -415,6 +418,8 @@ Tools:
   human figma file components KEY — published components
   human amplitude events list   — event types with active users
   human amplitude cohorts list  — behavioral cohorts
+  human telegram list            — pending bot messages
+  human telegram get UPDATE_ID   — specific message details
 
 Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/env vars.`,
 		Version: version + " (" + commit + ") " + date,
@@ -521,6 +526,11 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	amplitudeCmd := buildAmplitudeCommands()
 	amplitudeCmd.GroupID = "tools"
 	rootCmd.AddCommand(amplitudeCmd)
+
+	// --- Telegram (tools) ---
+	telegramCmd := buildTelegramCommands()
+	telegramCmd.GroupID = "tools"
+	rootCmd.AddCommand(telegramCmd)
 
 	// --- Static commands ---
 	trackerCmd := buildTrackerCmd()
