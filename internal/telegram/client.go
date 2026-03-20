@@ -72,6 +72,28 @@ func (c *Client) GetUpdate(ctx context.Context, updateID int) (*Update, error) {
 		"updateID", updateID)
 }
 
+// AckUpdate acknowledges all updates up to and including updateID by calling
+// getUpdates with offset = updateID + 1. This permanently removes those
+// updates from the pending queue.
+func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
+	path := fmt.Sprintf("/bot%s/getUpdates?offset=%d&limit=0", c.token, updateID+1)
+	resp, err := c.doRequest(ctx, http.MethodGet, path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result getUpdatesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return errors.WrapWithDetails(err, "decoding Telegram response")
+	}
+	if !result.OK {
+		return errors.WithDetails(
+			fmt.Sprintf("Telegram API error: %s", result.Description))
+	}
+	return nil
+}
+
 func (c *Client) doRequest(ctx context.Context, method, path string) (*http.Response, error) {
 	if err := tracker.ValidateURL(c.baseURL); err != nil {
 		return nil, err

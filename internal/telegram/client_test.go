@@ -188,6 +188,34 @@ func TestGetUpdate_notFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "update 999 not found")
 }
 
+func TestAckUpdate_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Contains(t, r.URL.RawQuery, "offset=102")
+		assert.Contains(t, r.URL.RawQuery, "limit=0")
+		_, _ = fmt.Fprint(w, `{"ok": true, "result": []}`)
+	}))
+	defer srv.Close()
+
+	client := New("test-token")
+	client.baseURL = srv.URL
+	err := client.AckUpdate(context.Background(), 101)
+	require.NoError(t, err)
+}
+
+func TestAckUpdate_apiError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"ok": false, "description": "Unauthorized"}`)
+	}))
+	defer srv.Close()
+
+	client := New("test-token")
+	client.baseURL = srv.URL
+	err := client.AckUpdate(context.Background(), 101)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Unauthorized")
+}
+
 func TestSanitizeTokenInPath(t *testing.T) {
 	assert.Equal(t, "/bot<REDACTED>/getUpdates", sanitizeTokenInPath("/bot123:ABC/getUpdates", "123:ABC"))
 	assert.Equal(t, "/bot/getUpdates", sanitizeTokenInPath("/bot/getUpdates", ""))

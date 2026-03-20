@@ -25,6 +25,11 @@ type TelegramMessageGetter interface {
 	GetUpdate(ctx context.Context, updateID int) (*telegram.Update, error)
 }
 
+// TelegramAcker acknowledges updates up to a given update ID.
+type TelegramAcker interface {
+	AckUpdate(ctx context.Context, updateID int) error
+}
+
 func buildTelegramCommands() *cobra.Command {
 	telegramCmd := &cobra.Command{
 		Use:   "telegram",
@@ -71,6 +76,25 @@ func buildTelegramCommands() *cobra.Command {
 	}
 	getCmd.Flags().BoolVar(&getTable, "table", false, "Output as human-readable table instead of JSON")
 	telegramCmd.AddCommand(getCmd)
+
+	// --- ack ---
+	ackCmd := &cobra.Command{
+		Use:   "ack UPDATE_ID",
+		Short: "Mark messages up to UPDATE_ID as read",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			inst, err := resolveTelegramInstance(cmd)
+			if err != nil {
+				return err
+			}
+			updateID, err := strconv.Atoi(args[0])
+			if err != nil {
+				return errors.WithDetails("UPDATE_ID must be an integer", "value", args[0])
+			}
+			return runTelegramAck(cmd.Context(), inst.Client, cmd.OutOrStdout(), updateID)
+		},
+	}
+	telegramCmd.AddCommand(ackCmd)
 
 	return telegramCmd
 }
@@ -130,6 +154,14 @@ func runTelegramGet(ctx context.Context, client TelegramMessageGetter, out io.Wr
 		return printTelegramGetTable(out, detail)
 	}
 	return printTelegramGetJSON(out, detail)
+}
+
+func runTelegramAck(ctx context.Context, client TelegramAcker, out io.Writer, updateID int) error {
+	if err := client.AckUpdate(ctx, updateID); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(out, "Acknowledged updates up to %d\n", updateID)
+	return nil
 }
 
 // --- Filtering ---

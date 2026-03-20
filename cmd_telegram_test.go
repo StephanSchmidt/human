@@ -17,6 +17,7 @@ import (
 type mockTelegramClient struct {
 	getUpdatesFn func(ctx context.Context, limit int) ([]telegram.Update, error)
 	getUpdateFn  func(ctx context.Context, updateID int) (*telegram.Update, error)
+	ackUpdateFn  func(ctx context.Context, updateID int) error
 }
 
 func (m *mockTelegramClient) GetUpdates(ctx context.Context, limit int) ([]telegram.Update, error) {
@@ -25,6 +26,10 @@ func (m *mockTelegramClient) GetUpdates(ctx context.Context, limit int) ([]teleg
 
 func (m *mockTelegramClient) GetUpdate(ctx context.Context, updateID int) (*telegram.Update, error) {
 	return m.getUpdateFn(ctx, updateID)
+}
+
+func (m *mockTelegramClient) AckUpdate(ctx context.Context, updateID int) error {
+	return m.ackUpdateFn(ctx, updateID)
 }
 
 // --- list tests ---
@@ -332,6 +337,34 @@ func TestRunTelegramGet_AllowedUserPasses(t *testing.T) {
 	assert.Contains(t, buf.String(), `"update_id": 100`)
 }
 
+// --- ack tests ---
+
+func TestRunTelegramAck_Success(t *testing.T) {
+	client := &mockTelegramClient{
+		ackUpdateFn: func(_ context.Context, updateID int) error {
+			assert.Equal(t, 101, updateID)
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runTelegramAck(context.Background(), client, &buf, 101)
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "Acknowledged updates up to 101")
+}
+
+func TestRunTelegramAck_Error(t *testing.T) {
+	client := &mockTelegramClient{
+		ackUpdateFn: func(_ context.Context, _ int) error {
+			return fmt.Errorf("unauthorized")
+		},
+	}
+
+	var buf bytes.Buffer
+	err := runTelegramAck(context.Background(), client, &buf, 101)
+	assert.EqualError(t, err, "unauthorized")
+}
+
 // --- command tree tests ---
 
 func TestRootCmd_hasTelegramSubcommand(t *testing.T) {
@@ -355,6 +388,7 @@ func TestTelegramCmd_hasSubcommands(t *testing.T) {
 	}
 	assert.True(t, subNames["list"], "expected 'list' subcommand")
 	assert.True(t, subNames["get UPDATE_ID"], "expected 'get' subcommand")
+	assert.True(t, subNames["ack UPDATE_ID"], "expected 'ack' subcommand")
 }
 
 // --- text truncation in table ---
