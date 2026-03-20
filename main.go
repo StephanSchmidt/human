@@ -547,6 +547,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	chromeBridgeCmd.GroupID = "utility"
 	rootCmd.AddCommand(chromeBridgeCmd)
 
+	usageCmd := buildUsageCmd()
+	usageCmd.GroupID = "utility"
+	rootCmd.AddCommand(usageCmd)
+
 	return rootCmd
 }
 
@@ -622,7 +626,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init"
+		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage"
 	}
 	return false
 }
