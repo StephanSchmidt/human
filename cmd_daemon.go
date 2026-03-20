@@ -120,8 +120,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 
 	// Start socket relay to accept Chrome native messaging
-	// connections directly, then start the chrome proxy server
-	// using the relay as its ProcessSpawner.
+	// connections directly (harmless, may be useful later).
 	socketDir, sdErr := chrome.SocketDir()
 	if sdErr != nil {
 		return fmt.Errorf("resolving socket directory: %w", sdErr)
@@ -135,11 +134,21 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		}
 	}()
 
+	// Chrome proxy: spawn claude --claude-in-chrome-mcp on the host
+	// and translate between 4-byte LE socket framing and JSON-RPC stdio.
+	claudePath, lookErr := exec.LookPath("claude")
+	if lookErr != nil {
+		logger.Warn().Err(lookErr).Msg("claude not found in PATH, chrome proxy will fail on connection")
+	}
+
 	chromeSrv := &chrome.Server{
-		Addr:    chromeAddr,
-		Token:   token,
-		Spawner: relay,
-		Logger:  logger,
+		Addr:  chromeAddr,
+		Token: token,
+		Translator: &chrome.McpTranslator{
+			ClaudePath: claudePath,
+			Logger:     logger,
+		},
+		Logger: logger,
 	}
 
 	go func() {

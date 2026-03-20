@@ -2,11 +2,11 @@ package chrome
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,15 +15,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func startTestChromeServer(t *testing.T, token string, spawner ProcessSpawner) (addr string, cancel context.CancelFunc) {
+// mockMcpScript creates a shell script that acts as a mock claude --claude-in-chrome-mcp.
+// It handles the init handshake and echoes tool calls back as success responses.
+func mockMcpScript(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mock-mcp.sh")
+
+	content := `#!/bin/sh
+# Read initialize request
+read -r line
+# Write initialize response
+echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{},"logging":{}},"serverInfo":{"name":"mock","version":"1.0"}}}'
+# Read initialized notification
+read -r line
+# Echo tool calls as responses (extract id with sed)
+while read -r line; do
+  id=$(echo "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}"
+done
+`
+	require.NoError(t, os.WriteFile(script, []byte(content), 0o755))
+	return script
+}
+
+func startTestChromeServer(t *testing.T, token string, translator *McpTranslator) (addr string, cancel context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	srv := &Server{
-		Addr:    "127.0.0.1:0",
-		Token:   token,
-		Spawner: spawner,
-		Logger:  zerolog.Nop(),
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		Translator: translator,
+		Logger:     zerolog.Nop(),
 	}
 
 	ln, err := net.Listen("tcp", srv.Addr)
@@ -53,18 +77,13 @@ func startTestChromeServer(t *testing.T, token string, spawner ProcessSpawner) (
 
 func TestChromeServer_ProxySession(t *testing.T) {
 	token := "chrome-test-token"
-	stdinBuf := &bytes.Buffer{}
-	blocker := &blockingReader{done: make(chan struct{})}
-
-	spawner := &funcSpawner{
-		fn: func(_ context.Context) (io.WriteCloser, io.ReadCloser, func() error, error) {
-			return nopWriteCloser{stdinBuf}, nopReadCloser{blocker}, func() error { return nil }, nil
-		},
-	}
-	addr, _ := startTestChromeServer(t, token, spawner)
+	script := mockMcpScript(t)
+	translator := &McpTranslator{ClaudePath: script, Logger: zerolog.Nop()}
+	addr, _ := startTestChromeServer(t, token, translator)
 
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
 
 	// Send auth request.
 	req := proxyRequest{Token: token}
@@ -80,29 +99,24 @@ func TestChromeServer_ProxySession(t *testing.T) {
 	assert.True(t, ack.OK)
 	assert.Empty(t, ack.Error)
 
-	// Write data to the proxied connection.
-	clientData := []byte("client-request")
-	_, err = conn.Write(clientData)
+	// Send a tool call as a 4-byte LE framed message.
+	toolCall := `{"method":"execute_tool","params":{"client_id":"claude-code","tool":"test_tool","args":{"key":"value"}}}`
+	require.NoError(t, WriteMessage(conn, []byte(toolCall)))
+
+	// Read the response (4-byte LE framed).
+	resp, err := ReadMessage(conn)
 	require.NoError(t, err)
-	_ = conn.Close()
 
-	time.Sleep(100 * time.Millisecond)
-	close(blocker.done)
-
-	assert.Equal(t, clientData, stdinBuf.Bytes())
+	var respObj map[string]any
+	require.NoError(t, json.Unmarshal(resp, &respObj))
+	assert.NotNil(t, respObj["result"], "expected result in response")
 }
 
 func TestChromeServer_AuthRejection(t *testing.T) {
 	token := "correct-token"
-	blocker := &blockingReader{done: make(chan struct{})}
-	defer close(blocker.done)
-
-	spawner := &funcSpawner{
-		fn: func(_ context.Context) (io.WriteCloser, io.ReadCloser, func() error, error) {
-			return nopWriteCloser{&bytes.Buffer{}}, nopReadCloser{blocker}, func() error { return nil }, nil
-		},
-	}
-	addr, _ := startTestChromeServer(t, token, spawner)
+	// Translator won't be used — auth fails first. Use dummy path.
+	translator := &McpTranslator{ClaudePath: "/nonexistent", Logger: zerolog.Nop()}
+	addr, _ := startTestChromeServer(t, token, translator)
 
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	require.NoError(t, err)
@@ -123,15 +137,8 @@ func TestChromeServer_AuthRejection(t *testing.T) {
 
 func TestChromeServer_InvalidJSON(t *testing.T) {
 	token := "test-token"
-	blocker := &blockingReader{done: make(chan struct{})}
-	defer close(blocker.done)
-
-	spawner := &funcSpawner{
-		fn: func(_ context.Context) (io.WriteCloser, io.ReadCloser, func() error, error) {
-			return nopWriteCloser{&bytes.Buffer{}}, nopReadCloser{blocker}, func() error { return nil }, nil
-		},
-	}
-	addr, _ := startTestChromeServer(t, token, spawner)
+	translator := &McpTranslator{ClaudePath: "/nonexistent", Logger: zerolog.Nop()}
+	addr, _ := startTestChromeServer(t, token, translator)
 
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	require.NoError(t, err)

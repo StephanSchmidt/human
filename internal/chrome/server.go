@@ -13,10 +13,10 @@ import (
 
 // Server listens for chrome-proxy connections on its own TCP port.
 type Server struct {
-	Addr    string
-	Token   string
-	Spawner ProcessSpawner
-	Logger  zerolog.Logger
+	Addr       string
+	Token      string
+	Translator *McpTranslator
+	Logger     zerolog.Logger
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
@@ -74,7 +74,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	s.writeAck(conn, true, "")
 
-	if err := ForwardProxy(ctx, conn, s.Spawner, s.Logger); err != nil {
+	if err := s.Translator.Serve(ctx, conn); err != nil {
 		s.Logger.Warn().Err(err).Msg("chrome proxy error")
 	}
 }

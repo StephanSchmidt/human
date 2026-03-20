@@ -67,6 +67,14 @@ func (b *Bridge) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return errors.WrapWithDetails(err, "listening on unix socket", "path", sockPath)
 	}
+
+	// Match native host socket permissions (0600) so Claude Code's
+	// validateSocketSecurity accepts our socket.
+	if err := os.Chmod(sockPath, 0o600); err != nil {
+		_ = ln.Close()
+		return errors.WrapWithDetails(err, "setting socket permissions", "path", sockPath)
+	}
+
 	defer func() {
 		_ = ln.Close()
 		_ = os.Remove(sockPath)
