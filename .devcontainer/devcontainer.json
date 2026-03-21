@@ -2,10 +2,11 @@
   "name": "human secure container",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
+    "ghcr.io/devcontainers/features/go:1": {},
     "ghcr.io/devcontainers/features/node:1": {
       "version": "22"
     },
-    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
     "ghcr.io/stephanschmidt/treehouse/human:1": {
       "proxy": true
     }
@@ -27,5 +28,5 @@
     "HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}",
     "HUMAN_PROXY_ADDR": "host.docker.internal:19287"
   },
-  "postStartCommand": "sudo human-proxy-setup && human install --agent claude && human chrome-bridge"
+  "postStartCommand": "sudo human-proxy-setup \u0026\u0026 human install --agent claude \u0026\u0026 human chrome-bridge"
 }
