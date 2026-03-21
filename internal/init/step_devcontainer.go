@@ -87,9 +87,7 @@ func (s *devcontainerStep) Run(w io.Writer, fw claude.FileWriter) ([]string, err
 		"  1. Start the daemon:  human daemon start",
 		"  2. Start container:  export HUMAN_DAEMON_TOKEN=$(human daemon token) && devcontainer up --workspace-folder .",
 	}
-	if _, lookErr := exec.LookPath("devcontainer"); lookErr != nil {
-		hints = append(hints, "Install the devcontainer CLI with: npm install -g @devcontainers/cli")
-	}
+	hints = append(hints, checkDevcontainerPrereqs()...)
 
 	return hints, nil
 }
@@ -151,6 +149,18 @@ func ensureHumanFeature(w io.Writer, fw claude.FileWriter) ([]string, error) {
 
 	_, _ = fmt.Fprintln(w, "Added human feature to existing devcontainer config.")
 	return nil, nil
+}
+
+// checkDevcontainerPrereqs returns hints for missing prerequisites (Docker, devcontainer CLI).
+func checkDevcontainerPrereqs() []string {
+	var hints []string
+	if _, err := exec.LookPath("docker"); err != nil {
+		hints = append(hints, "Docker is not installed. Install it from https://docs.docker.com/get-docker/")
+	}
+	if _, err := exec.LookPath("devcontainer"); err != nil {
+		hints = append(hints, "devcontainer CLI is not installed. Install it with: npm install -g @devcontainers/cli")
+	}
+	return hints
 }
 
 func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig {

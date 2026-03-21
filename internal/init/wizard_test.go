@@ -887,6 +887,17 @@ func TestDevcontainerStep_SelectStacksError(t *testing.T) {
 	assert.Contains(t, err.Error(), "selecting language stacks")
 }
 
+func TestCheckDevcontainerPrereqs_ReturnsSlice(t *testing.T) {
+	hints := checkDevcontainerPrereqs()
+	// We can't control what's installed in CI, but verify the function
+	// returns a slice and each entry mentions a known tool.
+	for _, hint := range hints {
+		assert.True(t,
+			strings.Contains(hint, "Docker") || strings.Contains(hint, "devcontainer"),
+			"unexpected hint: %s", hint)
+	}
+}
+
 // --- Integration: full wizard with real steps ---
 
 func TestRunInit_FullWizardFlow(t *testing.T) {
