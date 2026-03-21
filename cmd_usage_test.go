@@ -78,6 +78,7 @@ func TestRunUsage(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
+	cmd.SetContext(context.Background())
 
 	err := runUsage(cmd, finder, now)
 	if err != nil {
@@ -108,6 +109,7 @@ func TestRunUsageEmpty(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
+	cmd.SetContext(context.Background())
 
 	err := runUsage(cmd, finder, now)
 	if err != nil {
@@ -130,6 +132,7 @@ func TestRunUsageFallback(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
+	cmd.SetContext(context.Background())
 
 	// This will attempt to read from ~/.claude/projects — may or may not have data.
 	err := runUsage(cmd, finder, now)
@@ -167,6 +170,7 @@ func TestRunUsageMultiInstance(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := &cobra.Command{}
 	cmd.SetOut(&buf)
+	cmd.SetContext(context.Background())
 
 	err := runUsage(cmd, finder, now)
 	if err != nil {

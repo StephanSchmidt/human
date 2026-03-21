@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,25 +24,72 @@ func buildUsageCmd() *cobra.Command {
 }
 
 func runUsage(cmd *cobra.Command, finder claude.InstanceFinder, now time.Time) error {
-	instances, err := finder.FindInstances(cmd.Context())
-	if err != nil || len(instances) == 0 {
-		// Fallback: local host only.
-		home, homeErr := os.UserHomeDir()
-		if homeErr != nil {
-			return homeErr
-		}
-		root := filepath.Join(home, ".claude", "projects")
-		summary, calcErr := claude.CalculateUsage(claude.OSDirWalker{}, root, now)
-		if calcErr != nil {
-			return calcErr
-		}
-		return claude.FormatUsage(cmd.OutOrStdout(), summary, now)
+	w := cmd.OutOrStdout()
+
+	instances, _ := finder.FindInstances(cmd.Context())
+	if err := printUsage(w, instances, now); err != nil {
+		return err
 	}
 
+	// Extract container IDs from discovered instances so tmux pane detection
+	// can also match panes running "docker exec" into those containers.
+	var containerIDs []string
+	for _, inst := range instances {
+		if inst.Source == "container" && inst.ContainerID != "" {
+			containerIDs = append(containerIDs, inst.ContainerID)
+		}
+	}
+
+	// Append tmux pane listing (best-effort, never fails the command).
+	runner := claude.OSCommandRunner{}
+	tmuxClient := &claude.OSTmuxClient{Runner: runner}
+	procLister := &claude.OSProcessLister{Runner: runner}
+	panes, tmuxErr := claude.FindClaudePanes(cmd.Context(), tmuxClient, procLister, containerIDs)
+	if tmuxErr == nil && len(panes) > 0 {
+		_ = claude.FormatTmuxPanes(w, panes)
+	}
+
+	return nil
+}
+
+func printUsage(w io.Writer, instances []claude.Instance, now time.Time) error {
+	if len(instances) == 0 {
+		return printLocalUsage(w, now)
+	}
+	return printInstanceUsage(w, instances, now)
+}
+
+func printLocalUsage(w io.Writer, now time.Time) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(home, ".claude", "projects")
+	summary, err := claude.CalculateUsage(claude.OSDirWalker{}, root, now)
+	if err != nil {
+		return err
+	}
+	return claude.FormatUsage(w, summary, now)
+}
+
+func printInstanceUsage(w io.Writer, instances []claude.Instance, now time.Time) error {
+	results := collectResults(instances, now)
+
+	switch {
+	case len(results) == 0:
+		return claude.FormatUsage(w, &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}}, now)
+	case len(results) == 1:
+		return claude.FormatUsage(w, results[0].Summary, now)
+	default:
+		return claude.FormatMultiUsage(w, results, now)
+	}
+}
+
+func collectResults(instances []claude.Instance, now time.Time) []claude.InstanceUsage {
 	var results []claude.InstanceUsage
 	for _, inst := range instances {
-		summary, calcErr := claude.CalculateUsage(inst.Walker, inst.Root, now)
-		if calcErr != nil {
+		summary, err := claude.CalculateUsage(inst.Walker, inst.Root, now)
+		if err != nil {
 			continue
 		}
 		state := claude.StateUnknown
@@ -52,15 +100,7 @@ func runUsage(cmd *cobra.Command, finder claude.InstanceFinder, now time.Time) e
 		}
 		results = append(results, claude.InstanceUsage{Instance: inst, Summary: summary, State: state})
 	}
-
-	if len(results) <= 1 {
-		// Backward-compatible single-instance format.
-		if len(results) == 1 {
-			return claude.FormatUsage(cmd.OutOrStdout(), results[0].Summary, now)
-		}
-		return claude.FormatUsage(cmd.OutOrStdout(), &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}}, now)
-	}
-	return claude.FormatMultiUsage(cmd.OutOrStdout(), results, now)
+	return results
 }
 
 func buildFinder() claude.InstanceFinder {
