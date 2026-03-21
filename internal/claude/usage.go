@@ -169,6 +169,30 @@ func CalculateUsage(walker DirWalker, root string, now time.Time) (*UsageSummary
 	return summary, nil
 }
 
+func formatBytes(b uint64) string {
+	const (
+		gib = 1024 * 1024 * 1024
+		mib = 1024 * 1024
+	)
+	switch {
+	case b >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(b)/float64(gib))
+	default:
+		return fmt.Sprintf("%.0f MiB", float64(b)/float64(mib))
+	}
+}
+
+func formatMemory(mem *MemoryInfo) string {
+	if mem == nil {
+		return ""
+	}
+	usage := formatBytes(mem.Usage)
+	if mem.Limit > 0 && mem.Limit < 1<<62 {
+		return fmt.Sprintf("mem: %s / %s", usage, formatBytes(mem.Limit))
+	}
+	return fmt.Sprintf("mem: %s", usage)
+}
+
 func formatTokens(n int) string {
 	switch {
 	case n >= 1_000_000:
@@ -302,7 +326,11 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 
 	// Print each instance with per-instance percentages.
 	for _, iu := range instances {
-		if _, err := fmt.Fprintf(w, "\n%s %s\n", iu.Instance.Label, iu.State); err != nil {
+		header := fmt.Sprintf("\n%s %s", iu.Instance.Label, iu.State)
+		if mem := formatMemory(iu.Instance.Memory); mem != "" {
+			header += "  " + mem
+		}
+		if _, err := fmt.Fprintf(w, "%s\n", header); err != nil {
 			return err
 		}
 		var instanceTotal int

@@ -3,6 +3,7 @@ package claude
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 
 	"github.com/docker/docker/api/types/container"
@@ -73,6 +74,23 @@ func (e *engineDockerClient) Exec(ctx context.Context, containerID string, cmd [
 	}
 
 	return inspect.ExitCode, &stdout, nil
+}
+
+func (e *engineDockerClient) ContainerStats(ctx context.Context, containerID string) (*MemoryInfo, error) {
+	resp, err := e.cli.ContainerStatsOneShot(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var stats container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return nil, err
+	}
+	return &MemoryInfo{
+		Usage: stats.MemoryStats.Usage,
+		Limit: stats.MemoryStats.Limit,
+	}, nil
 }
 
 func (e *engineDockerClient) Close() error {

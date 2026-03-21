@@ -270,7 +270,11 @@ func TestFormatMultiUsage(t *testing.T) {
 			State: StateBusy,
 		},
 		{
-			Instance: Instance{Label: `Container "dev-myapp" (abc123)`, Source: "container"},
+			Instance: Instance{
+				Label:  `Container "dev-myapp" (abc123)`,
+				Source: "container",
+				Memory: &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024},
+			},
 			Summary: &UsageSummary{Models: map[string]*ModelUsage{
 				"opus 4.6": {InputTokens: 500_000, OutputTokens: 200_000, CacheCreate: 100_000, CacheRead: 50_000},
 			}},
@@ -295,8 +299,8 @@ func TestFormatMultiUsage(t *testing.T) {
 	if !strings.Contains(got, "Host (PID 12345) 🔴") {
 		t.Errorf("should contain host label with state, got: %s", got)
 	}
-	if !strings.Contains(got, `Container "dev-myapp" (abc123) 🟢`) {
-		t.Errorf("should contain container label with state, got: %s", got)
+	if !strings.Contains(got, `Container "dev-myapp" (abc123) 🟢  mem: 512 MiB / 2.0 GiB`) {
+		t.Errorf("should contain container label with state and memory, got: %s", got)
 	}
 
 	// Check Total section.
@@ -312,6 +316,47 @@ func TestFormatMultiUsage(t *testing.T) {
 	}
 	if !strings.Contains(totalSection, "opus 4.6") {
 		t.Errorf("Total should contain opus 4.6, got: %s", totalSection)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		b    uint64
+		want string
+	}{
+		{0, "0 MiB"},
+		{256 * 1024 * 1024, "256 MiB"},
+		{512 * 1024 * 1024, "512 MiB"},
+		{1024 * 1024 * 1024, "1.0 GiB"},
+		{2 * 1024 * 1024 * 1024, "2.0 GiB"},
+		{3 * 1024 * 1024 * 1024 / 2, "1.5 GiB"},
+	}
+	for _, tt := range tests {
+		got := formatBytes(tt.b)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestFormatMemory(t *testing.T) {
+	tests := []struct {
+		name string
+		mem  *MemoryInfo
+		want string
+	}{
+		{"nil", nil, ""},
+		{"usage only", &MemoryInfo{Usage: 512 * 1024 * 1024}, "mem: 512 MiB"},
+		{"with limit", &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024}, "mem: 512 MiB / 2.0 GiB"},
+		{"huge limit treated as unlimited", &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 1 << 62}, "mem: 512 MiB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatMemory(tt.mem)
+			if got != tt.want {
+				t.Errorf("formatMemory() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

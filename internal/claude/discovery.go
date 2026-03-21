@@ -14,6 +14,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// MemoryInfo holds memory usage and limit for a container.
+type MemoryInfo struct {
+	Usage uint64 // current memory usage in bytes
+	Limit uint64 // memory limit in bytes (0 = unlimited)
+}
+
 // Instance represents a discovered Claude Code instance.
 type Instance struct {
 	Label       string      // e.g. "Host (PID 7046)" or `Container "dev-myapp" (abc123)`
@@ -21,6 +27,7 @@ type Instance struct {
 	Walker      DirWalker   // how to read its JSONL data
 	StateReader StateReader // determines busy/ready state
 	Root        string      // JSONL root path (or virtual path for containers)
+	Memory      *MemoryInfo // memory usage (containers only)
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -44,6 +51,7 @@ func (OSCommandRunner) Run(ctx context.Context, name string, args ...string) ([]
 type DockerClient interface {
 	ListContainers(ctx context.Context) ([]ContainerInfo, error)
 	Exec(ctx context.Context, containerID string, cmd []string) (int, io.Reader, error)
+	ContainerStats(ctx context.Context, containerID string) (*MemoryInfo, error)
 	Close() error
 }
 
@@ -153,12 +161,15 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			name = shortID
 		}
 
+		mem, _ := d.Client.ContainerStats(ctx, ctr.ID)
+
 		instances = append(instances, Instance{
 			Label:       fmt.Sprintf("Container %q (%s)", name, shortID),
 			Source:      "container",
 			Walker:      &ByteWalker{Data: data},
 			StateReader: &ByteStateReader{Data: data},
 			Root:        "/container/" + shortID,
+			Memory:      mem,
 		})
 	}
 	return instances, nil

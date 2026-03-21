@@ -24,11 +24,17 @@ func (m *mockRunner) Run(_ context.Context, _ string, _ ...string) ([]byte, erro
 
 // --- mock DockerClient ---
 
+type mockStatsResult struct {
+	mem *MemoryInfo
+	err error
+}
+
 type mockDockerClient struct {
 	containers []ContainerInfo
 	listErr    error
 	// execResults maps containerID+cmd-key to result
-	execResults map[string]mockExecResult
+	execResults  map[string]mockExecResult
+	statsResults map[string]mockStatsResult
 }
 
 type mockExecResult struct {
@@ -49,6 +55,16 @@ func (m *mockDockerClient) Exec(_ context.Context, containerID string, cmd []str
 		}
 	}
 	return 1, nil, errors.New("no exec result configured")
+}
+
+func (m *mockDockerClient) ContainerStats(_ context.Context, containerID string) (*MemoryInfo, error) {
+	if m.statsResults == nil {
+		return nil, errors.New("no stats configured")
+	}
+	if result, ok := m.statsResults[containerID]; ok {
+		return result.mem, result.err
+	}
+	return nil, errors.New("no stats for container")
 }
 
 func (m *mockDockerClient) Close() error { return nil }
@@ -144,6 +160,9 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 			"abc123def456|pgrep": {exitCode: 0, data: []byte("1\n")},
 			"abc123def456|sh":    {exitCode: 0, data: jsonlData},
 		},
+		statsResults: map[string]mockStatsResult{
+			"abc123def456": {mem: &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024}},
+		},
 	}
 
 	finder := &DockerFinder{Client: dc}
@@ -162,6 +181,15 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 	}
 	if !strings.Contains(instances[0].Label, "abc123def456") {
 		t.Errorf("label = %q, want to contain abc123def456", instances[0].Label)
+	}
+	if instances[0].Memory == nil {
+		t.Fatal("expected memory info, got nil")
+	}
+	if instances[0].Memory.Usage != 512*1024*1024 {
+		t.Errorf("memory usage = %d, want %d", instances[0].Memory.Usage, 512*1024*1024)
+	}
+	if instances[0].Memory.Limit != 2*1024*1024*1024 {
+		t.Errorf("memory limit = %d, want %d", instances[0].Memory.Limit, 2*1024*1024*1024)
 	}
 }
 
