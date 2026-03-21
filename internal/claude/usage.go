@@ -227,3 +227,98 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 	}
 	return nil
 }
+
+// InstanceUsage pairs an Instance with its calculated usage.
+type InstanceUsage struct {
+	Instance Instance
+	Summary  *UsageSummary
+	State    InstanceState
+}
+
+// MergeUsage adds all model usage from src into dst.
+func MergeUsage(dst, src *UsageSummary) {
+	for model, srcMU := range src.Models {
+		if srcMU == nil {
+			continue
+		}
+		dstMU := dst.Models[model]
+		if dstMU == nil {
+			dstMU = &ModelUsage{}
+			dst.Models[model] = dstMU
+		}
+		dstMU.InputTokens += srcMU.InputTokens
+		dstMU.OutputTokens += srcMU.OutputTokens
+		dstMU.CacheCreate += srcMU.CacheCreate
+		dstMU.CacheRead += srcMU.CacheRead
+	}
+}
+
+func formatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
+	models := make([]string, 0, len(summary.Models))
+	for m := range summary.Models {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+
+	for _, model := range models {
+		mu, ok := summary.Models[model]
+		if !ok || mu == nil {
+			continue
+		}
+		pct := 0.0
+		if grandTotal > 0 {
+			pct = float64(totalTokens(mu)) / float64(grandTotal) * 100
+		}
+		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
+			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
+			formatTokens(mu.CacheCreate), formatTokens(mu.CacheRead))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FormatMultiUsage writes per-instance and aggregated total usage.
+func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) error {
+	ws := WindowStart(now)
+	we := WindowEnd(ws)
+
+	if _, err := fmt.Fprintf(w, "Claude usage [%02d:00 – %02d:00 UTC]\n", ws.Hour(), we.Hour()); err != nil {
+		return err
+	}
+
+	// Compute grand total across all instances for percentages.
+	total := &UsageSummary{Models: make(map[string]*ModelUsage)}
+	for _, iu := range instances {
+		MergeUsage(total, iu.Summary)
+	}
+	var grandTotal int
+	for _, mu := range total.Models {
+		if mu != nil {
+			grandTotal += totalTokens(mu)
+		}
+	}
+
+	// Print each instance with per-instance percentages.
+	for _, iu := range instances {
+		if _, err := fmt.Fprintf(w, "\n%s %s\n", iu.Instance.Label, iu.State); err != nil {
+			return err
+		}
+		var instanceTotal int
+		for _, mu := range iu.Summary.Models {
+			if mu != nil {
+				instanceTotal += totalTokens(mu)
+			}
+		}
+		if err := formatModelRows(w, iu.Summary, instanceTotal); err != nil {
+			return err
+		}
+	}
+
+	// Print aggregated total.
+	if _, err := fmt.Fprintf(w, "\nTotal:\n"); err != nil {
+		return err
+	}
+	return formatModelRows(w, total, grandTotal)
+}

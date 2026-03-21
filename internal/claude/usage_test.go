@@ -211,3 +211,122 @@ func TestFormatUsageEmpty(t *testing.T) {
 		t.Errorf("empty summary should show header, got: %s", got)
 	}
 }
+
+func TestMergeUsage(t *testing.T) {
+	dst := &UsageSummary{Models: map[string]*ModelUsage{
+		"opus 4.6": {InputTokens: 100, OutputTokens: 50},
+	}}
+	src := &UsageSummary{Models: map[string]*ModelUsage{
+		"opus 4.6":   {InputTokens: 200, OutputTokens: 100, CacheCreate: 10},
+		"sonnet 4.5": {InputTokens: 300},
+	}}
+
+	MergeUsage(dst, src)
+
+	opus := dst.Models["opus 4.6"]
+	if opus == nil {
+		t.Fatal("expected opus 4.6 in dst after merge")
+	}
+	if opus.InputTokens != 300 {
+		t.Errorf("opus input = %d, want 300", opus.InputTokens)
+	}
+	if opus.OutputTokens != 150 {
+		t.Errorf("opus output = %d, want 150", opus.OutputTokens)
+	}
+	if opus.CacheCreate != 10 {
+		t.Errorf("opus cache_create = %d, want 10", opus.CacheCreate)
+	}
+	sonnet := dst.Models["sonnet 4.5"]
+	if sonnet == nil {
+		t.Fatal("expected sonnet 4.5 in dst after merge")
+	}
+	if sonnet.InputTokens != 300 {
+		t.Errorf("sonnet input = %d, want 300", sonnet.InputTokens)
+	}
+}
+
+func TestMergeUsage_NilModels(t *testing.T) {
+	dst := &UsageSummary{Models: map[string]*ModelUsage{}}
+	src := &UsageSummary{Models: map[string]*ModelUsage{
+		"opus 4.6": nil,
+	}}
+
+	MergeUsage(dst, src)
+
+	if len(dst.Models) != 0 {
+		t.Errorf("expected 0 models, got %d", len(dst.Models))
+	}
+}
+
+func TestFormatMultiUsage(t *testing.T) {
+	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+
+	instances := []InstanceUsage{
+		{
+			Instance: Instance{Label: "Host (PID 12345)", Source: "host"},
+			Summary: &UsageSummary{Models: map[string]*ModelUsage{
+				"sonnet 4.5": {InputTokens: 1_000_000, OutputTokens: 500_000},
+			}},
+			State: StateBusy,
+		},
+		{
+			Instance: Instance{Label: `Container "dev-myapp" (abc123)`, Source: "container"},
+			Summary: &UsageSummary{Models: map[string]*ModelUsage{
+				"opus 4.6": {InputTokens: 500_000, OutputTokens: 200_000, CacheCreate: 100_000, CacheRead: 50_000},
+			}},
+			State: StateReady,
+		},
+	}
+
+	var buf bytes.Buffer
+	err := FormatMultiUsage(&buf, instances, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+
+	// Check header.
+	if !strings.Contains(got, "Claude usage [10:00") {
+		t.Errorf("should contain window header, got: %s", got)
+	}
+
+	// Check instance labels with state.
+	if !strings.Contains(got, "Host (PID 12345) 🔴") {
+		t.Errorf("should contain host label with state, got: %s", got)
+	}
+	if !strings.Contains(got, `Container "dev-myapp" (abc123) 🟢`) {
+		t.Errorf("should contain container label with state, got: %s", got)
+	}
+
+	// Check Total section.
+	if !strings.Contains(got, "Total:") {
+		t.Errorf("should contain Total section, got: %s", got)
+	}
+
+	// Check that both models appear in Total.
+	totalIdx := strings.Index(got, "Total:")
+	totalSection := got[totalIdx:]
+	if !strings.Contains(totalSection, "sonnet 4.5") {
+		t.Errorf("Total should contain sonnet 4.5, got: %s", totalSection)
+	}
+	if !strings.Contains(totalSection, "opus 4.6") {
+		t.Errorf("Total should contain opus 4.6, got: %s", totalSection)
+	}
+}
+
+func TestFormatMultiUsage_Empty(t *testing.T) {
+	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	err := FormatMultiUsage(&buf, nil, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "Claude usage") {
+		t.Errorf("should contain header, got: %s", got)
+	}
+	if !strings.Contains(got, "Total:") {
+		t.Errorf("should contain Total, got: %s", got)
+	}
+}
