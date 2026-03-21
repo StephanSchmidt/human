@@ -28,6 +28,7 @@ type Instance struct {
 	StateReader StateReader // determines busy/ready state
 	Root        string      // JSONL root path (or virtual path for containers)
 	Memory      *MemoryInfo // memory usage (containers only)
+	ContainerID string      // full Docker container ID (containers only)
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -170,6 +171,7 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			StateReader: &ByteStateReader{Data: data},
 			Root:        "/container/" + shortID,
 			Memory:      mem,
+			ContainerID: ctr.ID,
 		})
 	}
 	return instances, nil
