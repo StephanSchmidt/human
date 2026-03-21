@@ -55,6 +55,20 @@ Or add as a [devcontainer Feature](https://github.com/StephanSchmidt/treehouse):
 { "features": { "ghcr.io/stephanschmidt/treehouse/human:1": {} } }
 ```
 
+## Secure devcontainer
+
+```bash
+cd /path/to/your/project
+human init
+```
+
+The wizard configures your services, generates `devcontainer.json` with daemon, Chrome proxy, firewall, and installs the Claude Code integration. Set the API tokens it prints, then start:
+
+```bash
+human daemon start
+devcontainer up --workspace-folder .
+```
+
 ## CLI usage
 
 Use `--table` for human-readable output. Quick commands auto-detect the tracker from key format and configuration:
