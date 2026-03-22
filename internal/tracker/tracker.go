@@ -132,10 +132,15 @@ func FindTracker(ctx context.Context, key string, instances []Instance) (*FindRe
 	return probeInstances(ctx, key, matching)
 }
 
+// probeTimeout is the per-provider timeout for probing instances.
+const probeTimeout = 10 * time.Second
+
 // probeInstances tries GetIssue on each instance and returns the first success.
 func probeInstances(ctx context.Context, key string, instances []Instance) (*FindResult, error) {
 	for _, inst := range instances {
-		_, err := inst.Provider.GetIssue(ctx, key)
+		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+		_, err := inst.Provider.GetIssue(probeCtx, key)
+		cancel()
 		if err == nil {
 			return &FindResult{
 				Provider: inst.Kind,

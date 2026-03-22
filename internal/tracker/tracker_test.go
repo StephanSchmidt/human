@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -346,4 +347,32 @@ func TestFindTracker_unrecognizedFormat(t *testing.T) {
 	_, err := FindTracker(context.Background(), "!!!invalid", instances)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unrecognized key format")
+}
+
+// slowProvider blocks in GetIssue until the context is cancelled.
+type slowProvider struct {
+	stubProvider
+}
+
+func (slowProvider) GetIssue(ctx context.Context, _ string) (*Issue, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestFindTracker_probeTimesOut(t *testing.T) {
+	instances := []Instance{
+		{Name: "slow", Kind: "jira", Provider: slowProvider{}},
+		{Name: "fast", Kind: "linear", Provider: fakeProvider{}}, // succeeds immediately
+	}
+
+	start := time.Now()
+	result, err := FindTracker(context.Background(), "KAN-42", instances)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.Equal(t, "linear", result.Provider)
+	assert.Equal(t, "KAN", result.Project)
+	// Should complete in ~probeTimeout (10s), not hang forever.
+	// In practice it finishes in ~10s; give generous upper bound.
+	assert.Less(t, elapsed, 15*time.Second, "should not hang forever")
 }
