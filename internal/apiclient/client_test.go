@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -287,4 +288,37 @@ func TestValidateURL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNew_defaultTimeout(t *testing.T) {
+	c := New("https://example.com")
+	hc, ok := c.http.(*http.Client)
+	require.True(t, ok, "default http doer should be *http.Client")
+	assert.Equal(t, DefaultTimeout, hc.Timeout)
+}
+
+func TestWithTimeout(t *testing.T) {
+	c := New("https://example.com", WithTimeout(5*time.Second))
+	hc, ok := c.http.(*http.Client)
+	require.True(t, ok)
+	assert.Equal(t, 5*time.Second, hc.Timeout)
+}
+
+func TestWithHTTPDoer_overridesTimeout(t *testing.T) {
+	mock := &errDoer{err: fmt.Errorf("mock")}
+	c := New("https://example.com", WithTimeout(5*time.Second), WithHTTPDoer(mock))
+	assert.Equal(t, mock, c.http, "WithHTTPDoer should take precedence over WithTimeout")
+}
+
+func TestDo_timeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithTimeout(50*time.Millisecond), WithProviderName("slow"))
+	_, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requesting slow")
 }

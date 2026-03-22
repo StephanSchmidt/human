@@ -6,9 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/StephanSchmidt/human/errors"
 )
+
+// DefaultTimeout is the HTTP client timeout applied when no custom HTTPDoer is provided.
+const DefaultTimeout = 30 * time.Second
 
 // ValidateURL checks that rawURL is a valid HTTP(S) URL.
 // This guards against SSRF by rejecting non-HTTP schemes.
@@ -40,6 +44,7 @@ type Client struct {
 	providerName   string
 	errorFormatter ErrorFormatter
 	http           HTTPDoer
+	timeout        time.Duration
 }
 
 // Option configures a Client.
@@ -52,10 +57,13 @@ func New(baseURL string, opts ...Option) *Client {
 		auth:       NoAuth(),
 		urlBuilder: StandardURL(),
 		headers:    make(map[string]string),
-		http:       http.DefaultClient,
+		timeout:    DefaultTimeout,
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.http == nil {
+		c.http = &http.Client{Timeout: c.timeout}
 	}
 	return c
 }
@@ -90,6 +98,12 @@ func WithProviderName(name string) Option {
 // WithErrorFormatter sets a custom error formatter.
 func WithErrorFormatter(ef ErrorFormatter) Option {
 	return func(c *Client) { c.errorFormatter = ef }
+}
+
+// WithTimeout sets the HTTP client timeout. Only effective when no custom
+// HTTPDoer is provided via WithHTTPDoer.
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = d }
 }
 
 // WithHTTPDoer sets the HTTP client used for requests.
