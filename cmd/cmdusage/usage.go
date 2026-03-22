@@ -1,4 +1,4 @@
-package main
+package cmdusage
 
 import (
 	"io"
@@ -12,18 +12,20 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 )
 
-func buildUsageCmd() *cobra.Command {
+// BuildUsageCmd creates the "usage" command.
+func BuildUsageCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "usage",
 		Short: "Show Claude Code token usage for the current 5-hour window",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			finder := buildFinder()
-			return runUsage(cmd, finder, time.Now())
+			return RunUsage(cmd, finder, time.Now())
 		},
 	}
 }
 
-func runUsage(cmd *cobra.Command, finder claude.InstanceFinder, now time.Time) error {
+// RunUsage executes the usage command logic.
+func RunUsage(cmd *cobra.Command, finder claude.InstanceFinder, now time.Time) error {
 	w := cmd.OutOrStdout()
 
 	instances, _ := finder.FindInstances(cmd.Context())

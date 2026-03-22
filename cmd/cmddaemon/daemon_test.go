@@ -1,4 +1,4 @@
-package main
+package cmddaemon
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 func TestDaemonStartCmd_InteractiveRequiresForeground(t *testing.T) {
 	t.Setenv(daemonChildEnv, "")
 
-	cmd := buildDaemonStartCmd()
+	cmd := buildDaemonStartCmd(nil, "")
 	cmd.SetArgs([]string{"--interactive"})
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
@@ -26,20 +26,20 @@ func TestDaemonStartCmd_InteractiveRequiresForeground(t *testing.T) {
 }
 
 func TestDaemonStartCmd_ForegroundFlag(t *testing.T) {
-	cmd := buildDaemonStartCmd()
+	cmd := buildDaemonStartCmd(nil, "")
 	fg := cmd.Flags().Lookup("foreground")
 	require.NotNil(t, fg, "expected --foreground flag to exist")
 	assert.Equal(t, "false", fg.DefValue)
 }
 
 func TestDaemonLogPath(t *testing.T) {
-	p := daemonLogPath()
+	p := DaemonLogPath()
 	assert.Contains(t, p, "daemon.log")
 	assert.Contains(t, p, ".human")
 }
 
 func TestDaemonPidPath(t *testing.T) {
-	p := daemonPidPath()
+	p := DaemonPidPath()
 	assert.Contains(t, p, "daemon.pid")
 	assert.Contains(t, p, ".human")
 }
@@ -50,7 +50,7 @@ func TestWriteAndReadPidFile(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	pid := os.Getpid()
-	err := writePidFile(pid)
+	err := WritePidFile(pid)
 	require.NoError(t, err)
 
 	// Verify the file exists with correct content.
@@ -58,13 +58,13 @@ func TestWriteAndReadPidFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, strconv.Itoa(pid), string(data))
 
-	// readAlivePid should find our own process alive.
-	gotPid, alive := readAlivePid()
+	// ReadAlivePid should find our own process alive.
+	gotPid, alive := ReadAlivePid()
 	assert.Equal(t, pid, gotPid)
 	assert.True(t, alive)
 
 	// Clean up.
-	removePidFile()
+	RemovePidFile()
 	_, err = os.Stat(filepath.Join(tmpDir, ".human", "daemon.pid"))
 	assert.True(t, os.IsNotExist(err))
 }
@@ -73,7 +73,7 @@ func TestReadAlivePid_NoPidFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	pid, alive := readAlivePid()
+	pid, alive := ReadAlivePid()
 	assert.Equal(t, 0, pid)
 	assert.False(t, alive)
 }
@@ -83,10 +83,10 @@ func TestReadAlivePid_DeadProcess(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// Write a PID that almost certainly doesn't exist.
-	err := writePidFile(999999999)
+	err := WritePidFile(999999999)
 	require.NoError(t, err)
 
-	pid, alive := readAlivePid()
+	pid, alive := ReadAlivePid()
 	assert.Equal(t, 999999999, pid)
 	assert.False(t, alive)
 }
@@ -115,7 +115,7 @@ func TestBuildDaemonStatusCmd_PidInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	// No PID file, unreachable addr → "not running".
+	// No PID file, unreachable addr -> "not running".
 	cmd := buildDaemonStatusCmd()
 	cmd.SetArgs([]string{"--addr", "localhost:19999"})
 	var buf bytes.Buffer
@@ -132,7 +132,7 @@ func TestBuildDaemonStatusCmd_WithPidNotReachable(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 
 	// Write our own PID so the file exists and process is "alive".
-	err := writePidFile(os.Getpid())
+	err := WritePidFile(os.Getpid())
 	require.NoError(t, err)
 
 	cmd := buildDaemonStatusCmd()
@@ -148,7 +148,7 @@ func TestBuildDaemonStatusCmd_WithPidNotReachable(t *testing.T) {
 }
 
 func TestDaemonCmd_StopRegistered(t *testing.T) {
-	cmd := buildDaemonCmd()
+	cmd := BuildDaemonCmd(nil, "")
 	found := false
 	for _, sub := range cmd.Commands() {
 		if sub.Name() == "stop" {

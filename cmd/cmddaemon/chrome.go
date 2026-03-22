@@ -1,4 +1,4 @@
-package main
+package cmddaemon
 
 import (
 	"context"
@@ -19,7 +19,8 @@ import (
 
 const chromeBridgeChildEnv = "_HUMAN_CHROME_BRIDGE_CHILD"
 
-func buildChromeBridgeCmd() *cobra.Command {
+// BuildChromeBridgeCmd creates the "chrome-bridge" command.
+func BuildChromeBridgeCmd(version string) *cobra.Command {
 	var foreground bool
 
 	cmd := &cobra.Command{
@@ -43,7 +44,7 @@ Requires HUMAN_CHROME_ADDR and HUMAN_DAEMON_TOKEN environment variables.`,
 			out := cmd.OutOrStdout()
 
 			if foreground || os.Getenv(chromeBridgeChildEnv) != "" {
-				return runChromeBridgeForeground(addr, token, out)
+				return runChromeBridgeForeground(addr, token, version, out)
 			}
 			return runChromeBridgeBackground(addr, token, out)
 		},
@@ -55,7 +56,7 @@ Requires HUMAN_CHROME_ADDR and HUMAN_DAEMON_TOKEN environment variables.`,
 }
 
 // runChromeBridgeForeground runs the bridge in the current process (blocking).
-func runChromeBridgeForeground(addr, token string, _ io.Writer) error {
+func runChromeBridgeForeground(addr, token, version string, _ io.Writer) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -74,9 +75,9 @@ func runChromeBridgeForeground(addr, token string, _ io.Writer) error {
 
 // runChromeBridgeBackground re-execs the current binary as a detached child process.
 func runChromeBridgeBackground(addr, token string, out io.Writer) error {
-	logPath := chromeBridgeLogPath()
+	logPath := ChromeBridgeLogPath()
 
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by chromeBridgeLogPath(), not user input
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by ChromeBridgeLogPath(), not user input
 	if err != nil {
 		return errors.WrapWithDetails(err, "opening log file", "path", logPath)
 	}
@@ -137,9 +138,9 @@ func runChromeBridgeBackground(addr, token string, out io.Writer) error {
 	return nil
 }
 
-// chromeBridgeLogPath returns the path to the chrome bridge log file
+// ChromeBridgeLogPath returns the path to the chrome bridge log file
 // (~/.human/chrome-bridge.log), creating the directory if needed.
-func chromeBridgeLogPath() string {
+func ChromeBridgeLogPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".human", "chrome-bridge.log")

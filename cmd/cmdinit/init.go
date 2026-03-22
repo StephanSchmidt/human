@@ -1,4 +1,4 @@
-package main
+package cmdinit
 
 import (
 	"fmt"
@@ -232,7 +232,8 @@ func (h huhPrompter) ConfirmAgentInstall() (bool, error) {
 	return install, err
 }
 
-func buildInitCmd() *cobra.Command {
+// BuildInitCmd creates the "init" command.
+func BuildInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Interactive setup wizard for .humanconfig.yaml",

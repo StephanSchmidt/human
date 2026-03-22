@@ -1,4 +1,4 @@
-package main
+package cmdnotion
 
 import (
 	"context"
@@ -13,27 +13,27 @@ import (
 	"github.com/StephanSchmidt/human/internal/notion"
 )
 
-// NotionSearcher searches the Notion workspace.
-type NotionSearcher interface {
+// notionSearcher searches the Notion workspace.
+type notionSearcher interface {
 	Search(ctx context.Context, query string) ([]notion.SearchResult, error)
 }
 
-// NotionPageGetter retrieves a page as markdown.
-type NotionPageGetter interface {
+// notionPageGetter retrieves a page as markdown.
+type notionPageGetter interface {
 	GetPage(ctx context.Context, pageID string) (string, error)
 }
 
-// NotionDatabaseQuerier queries a database.
-type NotionDatabaseQuerier interface {
+// notionDatabaseQuerier queries a database.
+type notionDatabaseQuerier interface {
 	QueryDatabase(ctx context.Context, dbID string) ([]notion.DatabaseRow, error)
 }
 
-// NotionDatabaseLister lists shared databases.
-type NotionDatabaseLister interface {
+// notionDatabaseLister lists shared databases.
+type notionDatabaseLister interface {
 	ListDatabases(ctx context.Context) ([]notion.DatabaseEntry, error)
 }
 
-func buildNotionCommands() *cobra.Command {
+func BuildNotionCommands() *cobra.Command {
 	notionCmd := &cobra.Command{
 		Use:   "notion",
 		Short: "Notion workspace tools",
@@ -149,7 +149,7 @@ func resolveNotionClient(cmd *cobra.Command) (*notion.Client, error) {
 
 // --- Business logic functions ---
 
-func runNotionSearch(ctx context.Context, client NotionSearcher, out io.Writer, query string, table bool) error {
+func runNotionSearch(ctx context.Context, client notionSearcher, out io.Writer, query string, table bool) error {
 	results, err := client.Search(ctx, query)
 	if err != nil {
 		return err
@@ -160,7 +160,7 @@ func runNotionSearch(ctx context.Context, client NotionSearcher, out io.Writer, 
 	return printSearchJSON(out, results)
 }
 
-func runNotionPageGet(ctx context.Context, client NotionPageGetter, out io.Writer, pageID string) error {
+func runNotionPageGet(ctx context.Context, client notionPageGetter, out io.Writer, pageID string) error {
 	md, err := client.GetPage(ctx, pageID)
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func runNotionPageGet(ctx context.Context, client NotionPageGetter, out io.Write
 	return nil
 }
 
-func runNotionDatabaseQuery(ctx context.Context, client NotionDatabaseQuerier, out io.Writer, dbID string, table bool) error {
+func runNotionDatabaseQuery(ctx context.Context, client notionDatabaseQuerier, out io.Writer, dbID string, table bool) error {
 	rows, err := client.QueryDatabase(ctx, dbID)
 	if err != nil {
 		return err
@@ -180,7 +180,7 @@ func runNotionDatabaseQuery(ctx context.Context, client NotionDatabaseQuerier, o
 	return printDatabaseRowsJSON(out, rows)
 }
 
-func runNotionDatabasesList(ctx context.Context, client NotionDatabaseLister, out io.Writer, table bool) error {
+func runNotionDatabasesList(ctx context.Context, client notionDatabaseLister, out io.Writer, table bool) error {
 	entries, err := client.ListDatabases(ctx)
 	if err != nil {
 		return err

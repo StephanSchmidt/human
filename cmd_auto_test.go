@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/StephanSchmidt/human/cmd/cmdauto"
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -235,7 +237,7 @@ func TestAutoList_noConfiguredTrackers(t *testing.T) {
 
 func TestPrintAutoHints_afterGet(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "linear", "HUM-4", "HUM", "get")
+	cmdauto.PrintAutoHints(&buf, "linear", "HUM-4", "HUM", "get")
 
 	out := buf.String()
 	assert.Contains(t, out, "Detected tracker: linear")
@@ -246,7 +248,7 @@ func TestPrintAutoHints_afterGet(t *testing.T) {
 
 func TestPrintAutoHints_afterList(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "linear", "", "HUM", "list")
+	cmdauto.PrintAutoHints(&buf, "linear", "", "HUM", "list")
 
 	out := buf.String()
 	assert.Contains(t, out, "Detected tracker: linear")
@@ -257,7 +259,7 @@ func TestPrintAutoHints_afterList(t *testing.T) {
 
 func TestPrintAutoHints_afterGet_includesStatuses(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "jira", "KAN-1", "KAN", "get")
+	cmdauto.PrintAutoHints(&buf, "jira", "KAN-1", "KAN", "get")
 
 	out := buf.String()
 	assert.Contains(t, out, "human jira issue  statuses KAN-1")
@@ -265,7 +267,7 @@ func TestPrintAutoHints_afterGet_includesStatuses(t *testing.T) {
 
 func TestPrintAutoHints_afterStatuses(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "jira", "KAN-1", "KAN", "statuses")
+	cmdauto.PrintAutoHints(&buf, "jira", "KAN-1", "KAN", "statuses")
 
 	out := buf.String()
 	assert.Contains(t, out, "Detected tracker: jira")
@@ -274,7 +276,7 @@ func TestPrintAutoHints_afterStatuses(t *testing.T) {
 
 func TestPrintAutoHints_afterStatus(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "linear", "ENG-1", "ENG", "status")
+	cmdauto.PrintAutoHints(&buf, "linear", "ENG-1", "ENG", "status")
 
 	out := buf.String()
 	assert.Contains(t, out, "Detected tracker: linear")
@@ -283,7 +285,7 @@ func TestPrintAutoHints_afterStatus(t *testing.T) {
 
 func TestPrintAutoHints_afterGet_noProject(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "shortcut", "123", "", "get")
+	cmdauto.PrintAutoHints(&buf, "shortcut", "123", "", "get")
 
 	out := buf.String()
 	assert.Contains(t, out, "Detected tracker: shortcut")
@@ -293,7 +295,7 @@ func TestPrintAutoHints_afterGet_noProject(t *testing.T) {
 
 func TestPrintAutoHints_afterList_noProject(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "jira", "", "", "list")
+	cmdauto.PrintAutoHints(&buf, "jira", "", "", "list")
 
 	out := buf.String()
 	assert.Contains(t, out, "human jira issue  get <KEY>")
@@ -302,7 +304,7 @@ func TestPrintAutoHints_afterList_noProject(t *testing.T) {
 
 func TestPrintAutoHints_getShowsBothHints(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "github", "octocat/repo#42", "octocat/repo", "get")
+	cmdauto.PrintAutoHints(&buf, "github", "octocat/repo#42", "octocat/repo", "get")
 
 	out := buf.String()
 	assert.Contains(t, out, "human github issues list --project=octocat/repo")
@@ -311,7 +313,7 @@ func TestPrintAutoHints_getShowsBothHints(t *testing.T) {
 
 func TestPrintAutoHints_listShowsBothHints(t *testing.T) {
 	var buf bytes.Buffer
-	printAutoHints(&buf, "jira", "", "KAN", "list")
+	cmdauto.PrintAutoHints(&buf, "jira", "", "KAN", "list")
 
 	out := buf.String()
 	assert.Contains(t, out, "human jira issue  get <KEY>")
@@ -418,7 +420,7 @@ func TestRootCmd_hasAutoCommands(t *testing.T) {
 
 func TestPrintExamples_includesQuickCommands(t *testing.T) {
 	var buf bytes.Buffer
-	printExamples(&buf)
+	cmdutil.PrintExamples(&buf)
 
 	out := buf.String()
 	assert.Contains(t, out, "Quick commands (auto-detect tracker):")

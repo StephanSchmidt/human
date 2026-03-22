@@ -1,4 +1,4 @@
-package main
+package cmdamplitude
 
 import (
 	"context"
@@ -8,60 +8,62 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/amplitude"
 )
 
 // --- Interfaces ---
 
-// AmplitudeEventLister lists event types.
-type AmplitudeEventLister interface {
+// amplitudeEventLister lists event types.
+type amplitudeEventLister interface {
 	ListEvents(ctx context.Context) ([]amplitude.EventType, error)
 }
 
-// AmplitudeSegmentationQuerier runs segmentation queries.
-type AmplitudeSegmentationQuerier interface {
+// amplitudeSegmentationQuerier runs segmentation queries.
+type amplitudeSegmentationQuerier interface {
 	QuerySegmentation(ctx context.Context, eventType, start, end, metric, interval string) (*amplitude.SegmentationResult, error)
 }
 
-// AmplitudeTaxonomyEventLister lists taxonomy events.
-type AmplitudeTaxonomyEventLister interface {
+// amplitudeTaxonomyEventLister lists taxonomy events.
+type amplitudeTaxonomyEventLister interface {
 	ListTaxonomyEvents(ctx context.Context) ([]amplitude.TaxonomyEvent, error)
 }
 
-// AmplitudeTaxonomyUserPropLister lists taxonomy user properties.
-type AmplitudeTaxonomyUserPropLister interface {
+// amplitudeTaxonomyUserPropLister lists taxonomy user properties.
+type amplitudeTaxonomyUserPropLister interface {
 	ListTaxonomyUserProperties(ctx context.Context) ([]amplitude.TaxonomyUserProperty, error)
 }
 
-// AmplitudeFunnelQuerier runs funnel queries.
-type AmplitudeFunnelQuerier interface {
+// amplitudeFunnelQuerier runs funnel queries.
+type amplitudeFunnelQuerier interface {
 	QueryFunnel(ctx context.Context, events []string, start, end string) (*amplitude.FunnelResult, error)
 }
 
-// AmplitudeRetentionQuerier runs retention queries.
-type AmplitudeRetentionQuerier interface {
+// amplitudeRetentionQuerier runs retention queries.
+type amplitudeRetentionQuerier interface {
 	QueryRetention(ctx context.Context, startEvent, returnEvent, start, end string) (*amplitude.RetentionResult, error)
 }
 
-// AmplitudeUserSearcher searches for users.
-type AmplitudeUserSearcher interface {
+// amplitudeUserSearcher searches for users.
+type amplitudeUserSearcher interface {
 	SearchUsers(ctx context.Context, query string) ([]amplitude.UserMatch, error)
 }
 
-// AmplitudeUserActivityGetter gets user activity.
-type AmplitudeUserActivityGetter interface {
+// amplitudeUserActivityGetter gets user activity.
+type amplitudeUserActivityGetter interface {
 	GetUserActivity(ctx context.Context, amplitudeID string) (*amplitude.UserActivity, error)
 }
 
-// AmplitudeCohortLister lists cohorts.
-type AmplitudeCohortLister interface {
+// amplitudeCohortLister lists cohorts.
+type amplitudeCohortLister interface {
 	ListCohorts(ctx context.Context) ([]amplitude.Cohort, error)
 }
 
 // --- Command builders ---
 
-func buildAmplitudeCommands() *cobra.Command {
+// BuildAmplitudeCommands returns the top-level "amplitude" command tree.
+func BuildAmplitudeCommands() *cobra.Command {
 	ampCmd := &cobra.Command{
 		Use:   "amplitude",
 		Short: "Amplitude product analytics",
@@ -201,7 +203,7 @@ func buildAmplitudeFunnelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			eventList := splitIDs(events)
+			eventList := cmdutil.SplitIDs(events)
 			return runAmplitudeFunnel(cmd.Context(), client, cmd.OutOrStdout(), eventList, start, end, table)
 		},
 	}
@@ -349,7 +351,7 @@ func resolveAmplitudeClient(cmd *cobra.Command) (*amplitude.Client, error) {
 
 // --- Business logic functions ---
 
-func runAmplitudeEventsList(ctx context.Context, client AmplitudeEventLister, out io.Writer, table bool) error {
+func runAmplitudeEventsList(ctx context.Context, client amplitudeEventLister, out io.Writer, table bool) error {
 	events, err := client.ListEvents(ctx)
 	if err != nil {
 		return err
@@ -357,10 +359,10 @@ func runAmplitudeEventsList(ctx context.Context, client AmplitudeEventLister, ou
 	if table {
 		return printAmplitudeEventsTable(out, events)
 	}
-	return printJSON(out, events)
+	return cmdutil.PrintJSON(out, events)
 }
 
-func runAmplitudeEventsQuery(ctx context.Context, client AmplitudeSegmentationQuerier, out io.Writer, event, start, end, metric, interval string, table bool) error {
+func runAmplitudeEventsQuery(ctx context.Context, client amplitudeSegmentationQuerier, out io.Writer, event, start, end, metric, interval string, table bool) error {
 	result, err := client.QuerySegmentation(ctx, event, start, end, metric, interval)
 	if err != nil {
 		return err
@@ -368,10 +370,10 @@ func runAmplitudeEventsQuery(ctx context.Context, client AmplitudeSegmentationQu
 	if table {
 		return printAmplitudeSegmentationTable(out, result)
 	}
-	return printJSON(out, result)
+	return cmdutil.PrintJSON(out, result)
 }
 
-func runAmplitudeTaxonomyEvents(ctx context.Context, client AmplitudeTaxonomyEventLister, out io.Writer, table bool) error {
+func runAmplitudeTaxonomyEvents(ctx context.Context, client amplitudeTaxonomyEventLister, out io.Writer, table bool) error {
 	events, err := client.ListTaxonomyEvents(ctx)
 	if err != nil {
 		return err
@@ -379,10 +381,10 @@ func runAmplitudeTaxonomyEvents(ctx context.Context, client AmplitudeTaxonomyEve
 	if table {
 		return printAmplitudeTaxonomyEventsTable(out, events)
 	}
-	return printJSON(out, events)
+	return cmdutil.PrintJSON(out, events)
 }
 
-func runAmplitudeTaxonomyUserProps(ctx context.Context, client AmplitudeTaxonomyUserPropLister, out io.Writer, table bool) error {
+func runAmplitudeTaxonomyUserProps(ctx context.Context, client amplitudeTaxonomyUserPropLister, out io.Writer, table bool) error {
 	props, err := client.ListTaxonomyUserProperties(ctx)
 	if err != nil {
 		return err
@@ -390,10 +392,10 @@ func runAmplitudeTaxonomyUserProps(ctx context.Context, client AmplitudeTaxonomy
 	if table {
 		return printAmplitudeTaxonomyUserPropsTable(out, props)
 	}
-	return printJSON(out, props)
+	return cmdutil.PrintJSON(out, props)
 }
 
-func runAmplitudeFunnel(ctx context.Context, client AmplitudeFunnelQuerier, out io.Writer, events []string, start, end string, table bool) error {
+func runAmplitudeFunnel(ctx context.Context, client amplitudeFunnelQuerier, out io.Writer, events []string, start, end string, table bool) error {
 	result, err := client.QueryFunnel(ctx, events, start, end)
 	if err != nil {
 		return err
@@ -401,10 +403,10 @@ func runAmplitudeFunnel(ctx context.Context, client AmplitudeFunnelQuerier, out 
 	if table {
 		return printAmplitudeFunnelTable(out, result)
 	}
-	return printJSON(out, result)
+	return cmdutil.PrintJSON(out, result)
 }
 
-func runAmplitudeRetention(ctx context.Context, client AmplitudeRetentionQuerier, out io.Writer, startEvent, returnEvent, start, end string, table bool) error {
+func runAmplitudeRetention(ctx context.Context, client amplitudeRetentionQuerier, out io.Writer, startEvent, returnEvent, start, end string, table bool) error {
 	result, err := client.QueryRetention(ctx, startEvent, returnEvent, start, end)
 	if err != nil {
 		return err
@@ -412,10 +414,10 @@ func runAmplitudeRetention(ctx context.Context, client AmplitudeRetentionQuerier
 	if table {
 		return printAmplitudeRetentionTable(out, result)
 	}
-	return printJSON(out, result)
+	return cmdutil.PrintJSON(out, result)
 }
 
-func runAmplitudeUserSearch(ctx context.Context, client AmplitudeUserSearcher, out io.Writer, query string, table bool) error {
+func runAmplitudeUserSearch(ctx context.Context, client amplitudeUserSearcher, out io.Writer, query string, table bool) error {
 	matches, err := client.SearchUsers(ctx, query)
 	if err != nil {
 		return err
@@ -423,10 +425,10 @@ func runAmplitudeUserSearch(ctx context.Context, client AmplitudeUserSearcher, o
 	if table {
 		return printAmplitudeUserSearchTable(out, matches)
 	}
-	return printJSON(out, matches)
+	return cmdutil.PrintJSON(out, matches)
 }
 
-func runAmplitudeUserActivity(ctx context.Context, client AmplitudeUserActivityGetter, out io.Writer, amplitudeID string, table bool) error {
+func runAmplitudeUserActivity(ctx context.Context, client amplitudeUserActivityGetter, out io.Writer, amplitudeID string, table bool) error {
 	activity, err := client.GetUserActivity(ctx, amplitudeID)
 	if err != nil {
 		return err
@@ -434,10 +436,10 @@ func runAmplitudeUserActivity(ctx context.Context, client AmplitudeUserActivityG
 	if table {
 		return printAmplitudeUserActivityTable(out, activity)
 	}
-	return printJSON(out, activity)
+	return cmdutil.PrintJSON(out, activity)
 }
 
-func runAmplitudeCohortsList(ctx context.Context, client AmplitudeCohortLister, out io.Writer, table bool) error {
+func runAmplitudeCohortsList(ctx context.Context, client amplitudeCohortLister, out io.Writer, table bool) error {
 	cohorts, err := client.ListCohorts(ctx)
 	if err != nil {
 		return err
@@ -445,7 +447,7 @@ func runAmplitudeCohortsList(ctx context.Context, client AmplitudeCohortLister, 
 	if table {
 		return printAmplitudeCohortsTable(out, cohorts)
 	}
-	return printJSON(out, cohorts)
+	return cmdutil.PrintJSON(out, cohorts)
 }
 
 // --- Output formatters ---

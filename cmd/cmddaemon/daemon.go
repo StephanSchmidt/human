@@ -1,4 +1,4 @@
-package main
+package cmddaemon
 
 import (
 	"context"
@@ -23,20 +23,21 @@ import (
 
 const daemonChildEnv = "_HUMAN_DAEMON_CHILD"
 
-func buildDaemonCmd() *cobra.Command {
+// BuildDaemonCmd creates the "daemon" command tree.
+func BuildDaemonCmd(cmdFactory func() *cobra.Command, version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run human as a daemon for remote (devcontainer) access",
 	}
 
-	cmd.AddCommand(buildDaemonStartCmd())
+	cmd.AddCommand(buildDaemonStartCmd(cmdFactory, version))
 	cmd.AddCommand(buildDaemonTokenCmd())
 	cmd.AddCommand(buildDaemonStatusCmd())
 	cmd.AddCommand(buildDaemonStopCmd())
 	return cmd
 }
 
-func buildDaemonStartCmd() *cobra.Command {
+func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobra.Command {
 	var addr string
 	var chromeAddr string
 	var proxyAddr string
@@ -55,7 +56,7 @@ func buildDaemonStartCmd() *cobra.Command {
 			}
 
 			if foreground || os.Getenv(daemonChildEnv) != "" {
-				return runDaemonForeground(cmd, addr, chromeAddr, proxyAddr, interactive, safe, debug)
+				return runDaemonForeground(cmd, addr, chromeAddr, proxyAddr, interactive, safe, debug, cmdFactory, version)
 			}
 			return runDaemonBackground(cmd, addr, chromeAddr, proxyAddr, safe, debug)
 		},
@@ -73,16 +74,18 @@ func buildDaemonStartCmd() *cobra.Command {
 
 // runDaemonForeground runs the daemon in the current process (blocking).
 // It writes a PID file on start and removes it on shutdown.
-func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool) error {
+func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool, cmdFactory func() *cobra.Command, version string) error {
+	_ = version // reserved for future use
+
 	token, err := daemon.LoadOrCreateToken()
 	if err != nil {
 		return fmt.Errorf("failed to load/create token: %w", err)
 	}
 
-	if err := writePidFile(os.Getpid()); err != nil {
+	if err := WritePidFile(os.Getpid()); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
-	defer removePidFile()
+	defer RemovePidFile()
 
 	out := cmd.OutOrStdout()
 	hostIP := resolveHostIP()
@@ -115,7 +118,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		Addr:       addr,
 		Token:      token,
 		SafeMode:   safe,
-		CmdFactory: newRootCmd,
+		CmdFactory: cmdFactory,
 		Logger:     logger,
 	}
 
@@ -200,13 +203,13 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	out := cmd.OutOrStdout()
 
 	// Check if already running.
-	if pid, alive := readAlivePid(); alive {
+	if pid, alive := ReadAlivePid(); alive {
 		_, _ = fmt.Fprintf(out, "Daemon is already running (PID %d)\n", pid)
 		return nil
 	}
 
-	logPath := daemonLogPath()
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by daemonLogPath(), not user input
+	logPath := DaemonLogPath()
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by DaemonLogPath(), not user input
 	if err != nil {
 		return fmt.Errorf("opening log file: %w", err)
 	}
@@ -309,7 +312,7 @@ func buildDaemonStatusCmd() *cobra.Command {
 		Short: "Check if a daemon is reachable",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
-			pid, pidAlive := readAlivePid()
+			pid, pidAlive := ReadAlivePid()
 
 			conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 			if err != nil {
@@ -342,10 +345,10 @@ func buildDaemonStopCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 
-			pid, alive := readAlivePid()
+			pid, alive := ReadAlivePid()
 			if !alive {
 				_, _ = fmt.Fprintln(out, "Daemon is not running")
-				removePidFile()
+				RemovePidFile()
 				return nil
 			}
 
@@ -371,7 +374,7 @@ func buildDaemonStopCmd() *cobra.Command {
 				return fmt.Errorf("daemon (PID %d) did not exit within timeout", pid)
 			}
 
-			removePidFile()
+			RemovePidFile()
 			_, _ = fmt.Fprintln(out, "Daemon stopped")
 			return nil
 		},
@@ -380,7 +383,8 @@ func buildDaemonStopCmd() *cobra.Command {
 
 // --- PID file helpers ---
 
-func daemonLogPath() string {
+// DaemonLogPath returns the path to the daemon log file.
+func DaemonLogPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".human", "daemon.log")
@@ -390,7 +394,8 @@ func daemonLogPath() string {
 	return filepath.Join(dir, "daemon.log")
 }
 
-func daemonPidPath() string {
+// DaemonPidPath returns the path to the daemon PID file.
+func DaemonPidPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".human", "daemon.pid")
@@ -400,18 +405,20 @@ func daemonPidPath() string {
 	return filepath.Join(dir, "daemon.pid")
 }
 
-func writePidFile(pid int) error {
-	return os.WriteFile(daemonPidPath(), []byte(strconv.Itoa(pid)), 0o600)
+// WritePidFile writes the PID to the PID file.
+func WritePidFile(pid int) error {
+	return os.WriteFile(DaemonPidPath(), []byte(strconv.Itoa(pid)), 0o600)
 }
 
-func removePidFile() {
-	_ = os.Remove(daemonPidPath())
+// RemovePidFile removes the PID file.
+func RemovePidFile() {
+	_ = os.Remove(DaemonPidPath())
 }
 
-// readAlivePid reads the PID file and checks if the process is alive.
+// ReadAlivePid reads the PID file and checks if the process is alive.
 // Returns (0, false) if no PID file exists or the process is dead.
-func readAlivePid() (int, bool) {
-	data, err := os.ReadFile(daemonPidPath()) // #nosec G304 -- path is built by daemonPidPath(), not user input
+func ReadAlivePid() (int, bool) {
+	data, err := os.ReadFile(DaemonPidPath()) // #nosec G304 -- path is built by DaemonPidPath(), not user input
 	if err != nil {
 		return 0, false
 	}

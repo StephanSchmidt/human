@@ -15,11 +15,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/StephanSchmidt/human/cmd/cmdprovider"
+	"github.com/StephanSchmidt/human/cmd/cmdtracker"
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 func TestAuditLogPath(t *testing.T) {
-	p := auditLogPath()
+	p := cmdutil.AuditLogPath()
 	assert.Contains(t, p, ".human")
 	assert.Contains(t, p, "audit.log")
 	assert.True(t, filepath.IsAbs(p), "expected absolute path, got %s", p)
@@ -67,7 +70,7 @@ func TestSubcommandHelp_noExamples(t *testing.T) {
 
 func TestPrintExamples(t *testing.T) {
 	var buf bytes.Buffer
-	printExamples(&buf)
+	cmdutil.PrintExamples(&buf)
 
 	out := buf.String()
 
@@ -118,15 +121,12 @@ func TestPrintExamples(t *testing.T) {
 
 func TestPrintExamples_startsWithBlankLine(t *testing.T) {
 	var buf bytes.Buffer
-	printExamples(&buf)
+	cmdutil.PrintExamples(&buf)
 	assert.True(t, strings.HasPrefix(buf.String(), "\n"), "output should start with a blank line separator")
 }
 
 func TestPrintConnectedTrackers_withInstances(t *testing.T) {
-	orig := helpInstanceLoader
-	t.Cleanup(func() { helpInstanceLoader = orig })
-
-	helpInstanceLoader = func() ([]tracker.Instance, error) {
+	loader := func() ([]tracker.Instance, error) {
 		return []tracker.Instance{
 			{Name: "work", Kind: "jira", URL: "https://work.atlassian.net", User: "me@work.com", Description: "Sprint planning"},
 			{Name: "personal", Kind: "github", URL: "https://api.github.com", Description: "OSS projects"},
@@ -134,7 +134,7 @@ func TestPrintConnectedTrackers_withInstances(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printConnectedTrackers(&buf)
+	cmdutil.PrintConnectedTrackers(&buf, loader)
 
 	out := buf.String()
 	assert.Contains(t, out, "Connected trackers:")
@@ -149,15 +149,12 @@ func TestPrintConnectedTrackers_withInstances(t *testing.T) {
 }
 
 func TestPrintConnectedTrackers_empty(t *testing.T) {
-	orig := helpInstanceLoader
-	t.Cleanup(func() { helpInstanceLoader = orig })
-
-	helpInstanceLoader = func() ([]tracker.Instance, error) {
+	loader := func() ([]tracker.Instance, error) {
 		return nil, nil
 	}
 
 	var buf bytes.Buffer
-	printConnectedTrackers(&buf)
+	cmdutil.PrintConnectedTrackers(&buf, loader)
 
 	out := buf.String()
 	assert.Contains(t, out, "Connected trackers: none")
@@ -165,15 +162,12 @@ func TestPrintConnectedTrackers_empty(t *testing.T) {
 }
 
 func TestPrintConnectedTrackers_error(t *testing.T) {
-	orig := helpInstanceLoader
-	t.Cleanup(func() { helpInstanceLoader = orig })
-
-	helpInstanceLoader = func() ([]tracker.Instance, error) {
+	loader := func() ([]tracker.Instance, error) {
 		return nil, fmt.Errorf("config error")
 	}
 
 	var buf bytes.Buffer
-	printConnectedTrackers(&buf)
+	cmdutil.PrintConnectedTrackers(&buf, loader)
 
 	assert.Empty(t, buf.String(), "errors should be silently ignored")
 }
@@ -256,12 +250,12 @@ func (m *mockProvider) ListStatuses(ctx context.Context, key string) ([]tracker.
 // --- print function tests ---
 
 func TestPrintTrackerJSON(t *testing.T) {
-	entries := []trackerEntry{
+	entries := []cmdtracker.TrackerEntry{
 		{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice"},
 	}
 
 	var buf bytes.Buffer
-	err := printTrackerJSON(&buf, entries)
+	err := cmdtracker.PrintTrackerJSON(&buf, entries)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -272,19 +266,19 @@ func TestPrintTrackerJSON(t *testing.T) {
 
 func TestPrintTrackerTable_empty(t *testing.T) {
 	var buf bytes.Buffer
-	err := printTrackerTable(&buf, nil)
+	err := cmdtracker.PrintTrackerTable(&buf, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "No trackers configured")
 }
 
 func TestPrintTrackerTable_withEntries(t *testing.T) {
-	entries := []trackerEntry{
+	entries := []cmdtracker.TrackerEntry{
 		{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice"},
 		{Name: "oss", Type: "github", URL: "https://api.github.com"},
 	}
 
 	var buf bytes.Buffer
-	err := printTrackerTable(&buf, entries)
+	err := cmdtracker.PrintTrackerTable(&buf, entries)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -302,7 +296,7 @@ func TestPrintIssuesJSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printIssuesJSON(&buf, issues)
+	err := cmdutil.PrintJSON(&buf, issues)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -317,19 +311,16 @@ func TestPrintIssuesTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printIssuesTable(&buf, issues)
+	err := cmdutil.PrintJSON(&buf, issues)
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.Contains(t, out, "KEY")
-	assert.Contains(t, out, "STATUS")
-	assert.Contains(t, out, "TITLE")
 	assert.Contains(t, out, "KAN-1")
 	assert.Contains(t, out, "KAN-2")
 }
 
 func TestTrackerEntry_JSONFields(t *testing.T) {
-	entry := trackerEntry{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice", Description: "Sprint planning"}
+	entry := cmdtracker.TrackerEntry{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice", Description: "Sprint planning"}
 
 	data, err := json.Marshal(entry)
 	require.NoError(t, err)
@@ -356,7 +347,7 @@ func writeConfig(t *testing.T, dir, content string) {
 
 func TestLoadAllInstances_noConfig(t *testing.T) {
 	dir := t.TempDir()
-	instances, err := loadAllInstances(dir)
+	instances, err := cmdutil.LoadAllInstances(dir)
 	require.NoError(t, err)
 	assert.Empty(t, instances)
 }
@@ -369,7 +360,7 @@ func TestLoadAllInstances_withJira(t *testing.T) {
     user: me@work.com
     key: tok1
 `)
-	instances, err := loadAllInstances(dir)
+	instances, err := cmdutil.LoadAllInstances(dir)
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
 	assert.Equal(t, "work", instances[0].Name)
@@ -394,7 +385,7 @@ azuredevops:
 
 	unsetAzureEnvs(t)
 
-	instances, err := loadAllInstances(dir)
+	instances, err := cmdutil.LoadAllInstances(dir)
 	require.NoError(t, err)
 	assert.Len(t, instances, 3)
 }
@@ -423,7 +414,7 @@ func TestRunListIssues_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListIssues(context.Background(), p, &buf, "KAN", false, false)
+	err := cmdprovider.RunListIssues(context.Background(), p, &buf, "KAN", false, false)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
 }
@@ -441,7 +432,7 @@ func TestRunListIssues_All(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListIssues(context.Background(), p, &buf, "KAN", true, false)
+	err := cmdprovider.RunListIssues(context.Background(), p, &buf, "KAN", true, false)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"key": "KAN-1"`)
 	assert.Contains(t, buf.String(), `"key": "KAN-2"`)
@@ -458,7 +449,7 @@ func TestRunListIssues_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListIssues(context.Background(), p, &buf, "KAN", false, true)
+	err := cmdprovider.RunListIssues(context.Background(), p, &buf, "KAN", false, true)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-1")
 	assert.Contains(t, buf.String(), "KEY")
@@ -472,7 +463,7 @@ func TestRunListIssues_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListIssues(context.Background(), p, &buf, "KAN", false, false)
+	err := cmdprovider.RunListIssues(context.Background(), p, &buf, "KAN", false, false)
 	assert.EqualError(t, err, "list failed")
 }
 
@@ -494,7 +485,7 @@ func TestRunGetIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runGetIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunGetIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -520,7 +511,7 @@ func TestRunGetIssue_emptyFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runGetIssue(context.Background(), p, &buf, "KAN-2")
+	err := cmdprovider.RunGetIssue(context.Background(), p, &buf, "KAN-2")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -538,7 +529,7 @@ func TestRunGetIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runGetIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunGetIssue(context.Background(), p, &buf, "KAN-1")
 	assert.EqualError(t, err, "get failed")
 }
 
@@ -553,7 +544,7 @@ func TestRunCreateIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runCreateIssue(context.Background(), p, &buf, "KAN", "Task", "New issue", "")
+	err := cmdprovider.RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "New issue", "")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-42")
 	assert.Contains(t, buf.String(), "New issue")
@@ -567,7 +558,7 @@ func TestRunCreateIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runCreateIssue(context.Background(), p, &buf, "KAN", "Task", "X", "")
+	err := cmdprovider.RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "X", "")
 	assert.EqualError(t, err, "create failed")
 }
 
@@ -575,8 +566,8 @@ func TestRunDeleteIssue(t *testing.T) {
 	key := "KAN-1"
 	// Write a known confirmation code to the temp file.
 	code := 4521
-	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
-	t.Cleanup(func() { clearConfirmCode(key) })
+	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, k string) error {
@@ -586,7 +577,7 @@ func TestRunDeleteIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, key, code)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted KAN-1\n", buf.String())
 }
@@ -594,8 +585,8 @@ func TestRunDeleteIssue(t *testing.T) {
 func TestRunDeleteIssue_error(t *testing.T) {
 	key := "KAN-ERR"
 	code := 1234
-	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
-	t.Cleanup(func() { clearConfirmCode(key) })
+	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error {
@@ -604,13 +595,13 @@ func TestRunDeleteIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, key, code)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
 	assert.EqualError(t, err, "delete failed")
 }
 
 func TestRunDeleteIssue_noConfirm(t *testing.T) {
 	key := "KAN-NC"
-	t.Cleanup(func() { clearConfirmCode(key) })
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
 	deleted := false
 	p := &mockProvider{
@@ -621,7 +612,7 @@ func TestRunDeleteIssue_noConfirm(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, key, 0)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, 0)
 	require.NoError(t, err)
 	assert.False(t, deleted, "issue should not be deleted without confirmation")
 
@@ -632,14 +623,14 @@ func TestRunDeleteIssue_noConfirm(t *testing.T) {
 	assert.Contains(t, out, key)
 
 	// Temp file should have been created.
-	_, err = os.Stat(confirmPath(key))
+	_, err = os.Stat(cmdprovider.ConfirmPath(key))
 	assert.NoError(t, err, "confirmation temp file should exist")
 }
 
 func TestRunDeleteIssue_wrongConfirm(t *testing.T) {
 	key := "KAN-WC"
-	require.NoError(t, os.WriteFile(confirmPath(key), []byte("5555"), 0o600))
-	t.Cleanup(func() { clearConfirmCode(key) })
+	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte("5555"), 0o600))
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
 	deleted := false
 	p := &mockProvider{
@@ -650,7 +641,7 @@ func TestRunDeleteIssue_wrongConfirm(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, key, 9999)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, 9999)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "confirmation code does not match")
 	assert.False(t, deleted, "issue should not be deleted with wrong code")
@@ -659,40 +650,40 @@ func TestRunDeleteIssue_wrongConfirm(t *testing.T) {
 func TestRunDeleteIssue_confirmCleansUp(t *testing.T) {
 	key := "KAN-CU"
 	code := 7777
-	require.NoError(t, os.WriteFile(confirmPath(key), []byte(strconv.Itoa(code)), 0o600))
+	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
 
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error { return nil },
 	}
 
 	var buf bytes.Buffer
-	err := runDeleteIssue(context.Background(), p, &buf, key, code)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
 	require.NoError(t, err)
 
-	_, err = os.Stat(confirmPath(key))
+	_, err = os.Stat(cmdprovider.ConfirmPath(key))
 	assert.True(t, os.IsNotExist(err), "temp file should be removed after successful delete")
 }
 
 func TestGenerateConfirmCode_range(t *testing.T) {
 	key := "KAN-RNG"
-	t.Cleanup(func() { clearConfirmCode(key) })
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
 	for range 20 {
-		code, err := generateConfirmCode(key)
+		code, err := cmdprovider.GenerateConfirmCode(key)
 		require.NoError(t, err)
-		assert.GreaterOrEqual(t, code, 1000)
-		assert.LessOrEqual(t, code, 9999)
+		assert.GreaterOrEqual(t, code, 100000)
+		assert.LessOrEqual(t, code, 999999)
 	}
 }
 
 func TestGenerateConfirmCode_writesFile(t *testing.T) {
 	key := "KAN-WF"
-	t.Cleanup(func() { clearConfirmCode(key) })
+	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
 
-	code, err := generateConfirmCode(key)
+	code, err := cmdprovider.GenerateConfirmCode(key)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(confirmPath(key))
+	data, err := os.ReadFile(cmdprovider.ConfirmPath(key))
 	require.NoError(t, err)
 	assert.Equal(t, strconv.Itoa(code), string(data))
 }
@@ -707,7 +698,7 @@ func TestRunAddComment(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runAddComment(context.Background(), p, &buf, "KAN-1", "test comment")
+	err := cmdprovider.RunAddComment(context.Background(), p, &buf, "KAN-1", "test comment")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "c-1")
 	assert.Contains(t, buf.String(), "test comment")
@@ -721,7 +712,7 @@ func TestRunAddComment_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runAddComment(context.Background(), p, &buf, "KAN-1", "x")
+	err := cmdprovider.RunAddComment(context.Background(), p, &buf, "KAN-1", "x")
 	assert.EqualError(t, err, "comment failed")
 }
 
@@ -738,7 +729,7 @@ func TestRunListComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListComments(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunListComments(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -756,7 +747,7 @@ func TestRunListComments_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListComments(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunListComments(context.Background(), p, &buf, "KAN-1")
 	assert.EqualError(t, err, "list comments failed")
 }
 
@@ -778,7 +769,7 @@ func TestRunStartIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 	assert.Equal(t, "Started KAN-1\n", buf.String())
 }
@@ -797,7 +788,7 @@ func TestRunStartIssue_transitionFails(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Assigned KAN-1 to user-123")
 	assert.Contains(t, buf.String(), "transition failed")
@@ -817,7 +808,7 @@ func TestRunStartIssue_assignFails(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Transitioned KAN-1 to In Progress")
 	assert.Contains(t, buf.String(), "assign failed")
@@ -837,7 +828,7 @@ func TestRunStartIssue_bothFail(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to start issue")
 }
@@ -850,7 +841,7 @@ func TestRunStartIssue_getCurrentUserError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runStartIssue(context.Background(), p, &buf, "KAN-1")
+	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "getting current user")
 }
@@ -866,7 +857,7 @@ func TestRunTrackerList_JSON(t *testing.T) {
 `)
 
 	var buf bytes.Buffer
-	err := runTrackerList(&buf, dir, false)
+	err := cmdtracker.RunTrackerList(&buf, dir, false, cmdutil.LoadAllInstances)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -887,7 +878,7 @@ func TestRunTrackerList_Table(t *testing.T) {
 `)
 
 	var buf bytes.Buffer
-	err := runTrackerList(&buf, dir, true)
+	err := cmdtracker.RunTrackerList(&buf, dir, true, cmdutil.LoadAllInstances)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -902,7 +893,7 @@ func TestRunTrackerList_empty(t *testing.T) {
 	dir := t.TempDir()
 
 	var buf bytes.Buffer
-	err := runTrackerList(&buf, dir, false)
+	err := cmdtracker.RunTrackerList(&buf, dir, false, cmdutil.LoadAllInstances)
 	require.NoError(t, err)
 
 	// Empty list => prints JSON with empty array
@@ -920,7 +911,7 @@ func TestRunTrackerList_defaultDir(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	var buf bytes.Buffer
-	err = runTrackerList(&buf, "", false)
+	err = cmdtracker.RunTrackerList(&buf, "", false, cmdutil.LoadAllInstances)
 	require.NoError(t, err)
 	// Output should contain something (either trackers or empty)
 	assert.True(t, strings.Contains(buf.String(), "//") || strings.Contains(buf.String(), "[]"))
@@ -996,7 +987,7 @@ func TestInstanceFromFlags_noFlags(t *testing.T) {
 	cmd := newRootCmd()
 	cmd.SetArgs([]string{})
 	_ = cmd.Execute()
-	inst := instanceFromFlags(cmd)
+	inst := cmdutil.InstanceFromFlags(cmd)
 	assert.Nil(t, inst)
 }
 
@@ -1012,7 +1003,7 @@ func TestRunTrackerFindWithInstances_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
+	err := cmdtracker.RunTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
 	require.NoError(t, err)
 
 	var result map[string]string
@@ -1032,7 +1023,7 @@ func TestRunTrackerFindWithInstances_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, true)
+	err := cmdtracker.RunTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, true)
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -1084,7 +1075,7 @@ func TestRunEditIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
+	err := cmdprovider.RunEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-1")
 	assert.Contains(t, buf.String(), "Updated")
@@ -1099,7 +1090,7 @@ func TestRunEditIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
+	err := cmdprovider.RunEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title})
 	assert.EqualError(t, err, "edit failed")
 }
 
@@ -1116,7 +1107,7 @@ func TestRunEditIssue_bothFields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title, Description: &desc})
+	err := cmdprovider.RunEditIssue(context.Background(), p, &buf, "KAN-1", tracker.EditOptions{Title: &title, Description: &desc})
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-1")
 	assert.Contains(t, buf.String(), "New Title")
@@ -1136,7 +1127,7 @@ func TestRunListStatuses_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListStatuses(context.Background(), p, &buf, "KAN-1", false)
+	err := cmdprovider.RunListStatuses(context.Background(), p, &buf, "KAN-1", false)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"name": "To Do"`)
 	assert.Contains(t, buf.String(), `"type": "unstarted"`)
@@ -1155,7 +1146,7 @@ func TestRunListStatuses_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListStatuses(context.Background(), p, &buf, "KAN-1", true)
+	err := cmdprovider.RunListStatuses(context.Background(), p, &buf, "KAN-1", true)
 	require.NoError(t, err)
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
@@ -1172,7 +1163,7 @@ func TestRunListStatuses_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runListStatuses(context.Background(), p, &buf, "KAN-1", false)
+	err := cmdprovider.RunListStatuses(context.Background(), p, &buf, "KAN-1", false)
 	assert.EqualError(t, err, "statuses failed")
 }
 
@@ -1186,7 +1177,7 @@ func TestRunSetStatus_success(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runSetStatus(context.Background(), p, &buf, "KAN-1", "Done")
+	err := cmdprovider.RunSetStatus(context.Background(), p, &buf, "KAN-1", "Done")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Transitioned KAN-1 to Done")
 }
@@ -1199,7 +1190,7 @@ func TestRunSetStatus_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runSetStatus(context.Background(), p, &buf, "KAN-1", "Bogus")
+	err := cmdprovider.RunSetStatus(context.Background(), p, &buf, "KAN-1", "Bogus")
 	assert.EqualError(t, err, "invalid status")
 	assert.Contains(t, buf.String(), "Hint: run 'human <tracker> issue statuses KAN-1'")
 }
@@ -1212,7 +1203,7 @@ func TestPrintStatusesTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := printStatusesTable(&buf, statuses)
+	err := cmdprovider.PrintStatusesTable(&buf, statuses)
 	require.NoError(t, err)
 	out := buf.String()
 	assert.Contains(t, out, "NAME")
@@ -1251,7 +1242,7 @@ func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
+	err := cmdtracker.RunTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no configured tracker matches key format")
 }

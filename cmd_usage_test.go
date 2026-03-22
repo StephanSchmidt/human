@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdusage"
 	"github.com/StephanSchmidt/human/internal/claude"
 )
 
@@ -80,7 +81,7 @@ func TestRunUsage(t *testing.T) {
 	cmd.SetOut(&buf)
 	cmd.SetContext(context.Background())
 
-	err := runUsage(cmd, finder, now)
+	err := cmdusage.RunUsage(cmd, finder, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestRunUsageEmpty(t *testing.T) {
 	cmd.SetOut(&buf)
 	cmd.SetContext(context.Background())
 
-	err := runUsage(cmd, finder, now)
+	err := cmdusage.RunUsage(cmd, finder, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestRunUsageEmpty(t *testing.T) {
 }
 
 func TestRunUsageFallback(t *testing.T) {
-	// When finder returns no instances, runUsage falls back to local filesystem.
+	// When finder returns no instances, RunUsage falls back to local filesystem.
 	// We can't test the actual filesystem, but we verify it doesn't panic.
 	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 
@@ -135,7 +136,7 @@ func TestRunUsageFallback(t *testing.T) {
 	cmd.SetContext(context.Background())
 
 	// This will attempt to read from ~/.claude/projects — may or may not have data.
-	err := runUsage(cmd, finder, now)
+	err := cmdusage.RunUsage(cmd, finder, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestRunUsageMultiInstance(t *testing.T) {
 	cmd.SetOut(&buf)
 	cmd.SetContext(context.Background())
 
-	err := runUsage(cmd, finder, now)
+	err := cmdusage.RunUsage(cmd, finder, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +197,7 @@ func TestRunUsageMultiInstance(t *testing.T) {
 }
 
 func TestBuildUsageCmd(t *testing.T) {
-	cmd := buildUsageCmd()
+	cmd := cmdusage.BuildUsageCmd()
 	if cmd.Use != "usage" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "usage")
 	}

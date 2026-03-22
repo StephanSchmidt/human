@@ -1,4 +1,4 @@
-package main
+package cmdbrowser
 
 import (
 	"github.com/spf13/cobra"
@@ -6,7 +6,8 @@ import (
 	"github.com/StephanSchmidt/human/internal/browser"
 )
 
-func buildBrowserCmd() *cobra.Command {
+// BuildBrowserCmd creates the "browser" command.
+func BuildBrowserCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "browser URL",
 		Short: "Open a URL in the default browser",

@@ -1,4 +1,4 @@
-package main
+package cmdtelegram
 
 import (
 	"context"
@@ -15,22 +15,22 @@ import (
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
-// TelegramMessageLister lists pending Telegram messages.
-type TelegramMessageLister interface {
+// telegramMessageLister lists pending Telegram messages.
+type telegramMessageLister interface {
 	GetUpdates(ctx context.Context, limit int) ([]telegram.Update, error)
 }
 
-// TelegramMessageGetter gets a specific Telegram message by update ID.
-type TelegramMessageGetter interface {
+// telegramMessageGetter gets a specific Telegram message by update ID.
+type telegramMessageGetter interface {
 	GetUpdate(ctx context.Context, updateID int) (*telegram.Update, error)
 }
 
-// TelegramAcker acknowledges updates up to a given update ID.
-type TelegramAcker interface {
+// telegramAcker acknowledges updates up to a given update ID.
+type telegramAcker interface {
 	AckUpdate(ctx context.Context, updateID int) error
 }
 
-func buildTelegramCommands() *cobra.Command {
+func BuildTelegramCommands() *cobra.Command {
 	telegramCmd := &cobra.Command{
 		Use:   "telegram",
 		Short: "Telegram bot message tools",
@@ -124,7 +124,7 @@ func resolveTelegramInstance(cmd *cobra.Command) (*telegram.Instance, error) {
 
 // --- Business logic functions ---
 
-func runTelegramList(ctx context.Context, client TelegramMessageLister, out io.Writer, limit int, table bool, allowedUsers []int64) error {
+func runTelegramList(ctx context.Context, client telegramMessageLister, out io.Writer, limit int, table bool, allowedUsers []int64) error {
 	updates, err := client.GetUpdates(ctx, limit)
 	if err != nil {
 		return err
@@ -141,10 +141,13 @@ func runTelegramList(ctx context.Context, client TelegramMessageLister, out io.W
 	return printTelegramListJSON(out, summaries)
 }
 
-func runTelegramGet(ctx context.Context, client TelegramMessageGetter, out io.Writer, updateID int, table bool, allowedUsers []int64) error {
+func runTelegramGet(ctx context.Context, client telegramMessageGetter, out io.Writer, updateID int, table bool, allowedUsers []int64) error {
 	update, err := client.GetUpdate(ctx, updateID)
 	if err != nil {
 		return err
+	}
+	if update == nil {
+		return errors.WithDetails("update not found", "updateID", updateID)
 	}
 	if !isAllowedUser(update, allowedUsers) {
 		return errors.WithDetails("update not from an allowed user", "updateID", updateID)
@@ -156,7 +159,7 @@ func runTelegramGet(ctx context.Context, client TelegramMessageGetter, out io.Wr
 	return printTelegramGetJSON(out, detail)
 }
 
-func runTelegramAck(ctx context.Context, client TelegramAcker, out io.Writer, updateID int) error {
+func runTelegramAck(ctx context.Context, client telegramAcker, out io.Writer, updateID int) error {
 	if err := client.AckUpdate(ctx, updateID); err != nil {
 		return err
 	}

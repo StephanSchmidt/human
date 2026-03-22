@@ -5,10 +5,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/StephanSchmidt/human/cmd/cmdinit"
 )
 
 func TestBuildInitCmd_Exists(t *testing.T) {
-	cmd := buildInitCmd()
+	cmd := cmdinit.BuildInitCmd()
 	require.NotNil(t, cmd)
 	assert.Equal(t, "init", cmd.Use)
 	assert.NotEmpty(t, cmd.Short)

@@ -1,28 +1,30 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdamplitude"
+	"github.com/StephanSchmidt/human/cmd/cmdauto"
+	"github.com/StephanSchmidt/human/cmd/cmdbrowser"
+	"github.com/StephanSchmidt/human/cmd/cmddaemon"
+	"github.com/StephanSchmidt/human/cmd/cmdfigma"
+	"github.com/StephanSchmidt/human/cmd/cmdinit"
+	"github.com/StephanSchmidt/human/cmd/cmdnotion"
+	"github.com/StephanSchmidt/human/cmd/cmdprovider"
+	"github.com/StephanSchmidt/human/cmd/cmdtelegram"
+	"github.com/StephanSchmidt/human/cmd/cmdtracker"
+	"github.com/StephanSchmidt/human/cmd/cmdusage"
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
-	"github.com/StephanSchmidt/human/internal/azuredevops"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/daemon"
-	"github.com/StephanSchmidt/human/internal/github"
-	"github.com/StephanSchmidt/human/internal/gitlab"
-	"github.com/StephanSchmidt/human/internal/jira"
-	"github.com/StephanSchmidt/human/internal/linear"
-	"github.com/StephanSchmidt/human/internal/shortcut"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -32,352 +34,31 @@ var (
 	date    = "unknown"
 )
 
-// --- tracker list ---
-
-// trackerEntry is the JSON output structure for a single tracker instance.
-type trackerEntry struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	URL         string `json:"url"`
-	User        string `json:"user"`
-	Description string `json:"description"`
-}
-
-func runTrackerList(out io.Writer, dir string, table bool) error {
-	if dir == "" {
-		dir = "."
-	}
-	instances, err := loadAllInstances(dir)
-	if err != nil {
-		return err
-	}
-
-	entries := make([]trackerEntry, len(instances))
-	for i, inst := range instances {
-		entries[i] = trackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Description: inst.Description}
-	}
-
-	if table {
-		return printTrackerTable(out, entries)
-	}
-	return printTrackerJSON(out, entries)
-}
-
-func printTrackerJSON(w io.Writer, entries []trackerEntry) error {
-	_, _ = fmt.Fprintln(w, "// Configured issue trackers. Use --tracker=<name> to select one.")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(entries)
-}
-
-func printTrackerTable(out io.Writer, entries []trackerEntry) error {
-	if len(entries) == 0 {
-		_, _ = fmt.Fprintln(out, "No trackers configured in .humanconfig")
-		return nil
-	}
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER\tDESCRIPTION")
-	for _, e := range entries {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User, e.Description)
-	}
-	return w.Flush()
-}
-
-// --- tracker find ---
-
-// findResultEntry is the JSON output structure for tracker find.
-type findResultEntry struct {
-	Provider string `json:"provider"`
-	Project  string `json:"project"`
-	Key      string `json:"key"`
-}
-
-func runTrackerFind(ctx context.Context, out io.Writer, dir, key string, table bool) error {
-	if dir == "" {
-		dir = "."
-	}
-	instances, err := loadAllInstances(dir)
-	if err != nil {
-		return err
-	}
-	return runTrackerFindWithInstances(ctx, out, key, instances, table)
-}
-
-func runTrackerFindWithInstances(ctx context.Context, out io.Writer, key string, instances []tracker.Instance, table bool) error {
-	result, err := tracker.FindTracker(ctx, key, instances)
-	if err != nil {
-		return err
-	}
-
-	entry := findResultEntry{
-		Provider: result.Provider,
-		Project:  result.Project,
-		Key:      result.Key,
-	}
-
-	if table {
-		return printFindTable(out, entry)
-	}
-	return printFindJSON(out, entry)
-}
-
-func printFindJSON(w io.Writer, entry findResultEntry) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(entry)
-}
-
-func printFindTable(out io.Writer, entry findResultEntry) error {
-	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "PROVIDER\tPROJECT\tKEY")
-	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", entry.Provider, entry.Project, entry.Key)
-	return w.Flush()
-}
-
-// --- help ---
-
 // helpInstanceLoader is the function used by the root help template to load
-// tracker instances.  It defaults to loadAllInstances(".") and can be
+// tracker instances.  It defaults to LoadAllInstances(".") and can be
 // overridden in tests.
 var helpInstanceLoader = func() ([]tracker.Instance, error) {
-	return loadAllInstances(".")
+	return cmdutil.LoadAllInstances(".")
 }
 
-// printConnectedTrackers appends a "Connected trackers:" section to the help
-// output.  Errors are silently ignored so that help always works.
-func printConnectedTrackers(w io.Writer) {
-	instances, err := helpInstanceLoader()
-	if err != nil {
-		return
-	}
-	if len(instances) == 0 {
-		_, _ = fmt.Fprintln(w, "Connected trackers: none")
-		_, _ = fmt.Fprintln(w, "  Configure trackers in .humanconfig.yaml")
-		return
-	}
-	_, _ = fmt.Fprintln(w, "Connected trackers:")
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, inst := range instances {
-		line := fmt.Sprintf("  %s\t%s\t%s", inst.Name, inst.Kind, inst.URL)
-		if inst.User != "" {
-			line += "\t" + inst.User
-		}
-		if inst.Description != "" {
-			line += "\t" + inst.Description
-		}
-		_, _ = fmt.Fprintln(tw, line)
-	}
-	_ = tw.Flush()
-}
-
-func printExamples(w io.Writer) {
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Quick commands (auto-detect tracker):")
-	_, _ = fmt.Fprintln(w, "  human get KAN-1")
-	_, _ = fmt.Fprintln(w, "  human list --project=KAN")
-	_, _ = fmt.Fprintln(w, "  human list --project=KAN --tracker=work")
-	_, _ = fmt.Fprintln(w, "  human statuses KAN-1")
-	_, _ = fmt.Fprintln(w, `  human status KAN-1 "Done"`)
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Command pattern:")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issues list --project=<PROJECT>   List issues (JSON)")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  get <KEY>                  Get issue (markdown)")
-	_, _ = fmt.Fprintln(w, `  human <tracker> issue  create --project=<P> "Title" --description "Details"`)
-	_, _ = fmt.Fprintln(w, `  human <tracker> issue  edit <KEY> --title "New" --description "Updated"`)
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY>               Show confirmation code")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  delete <KEY> --confirm=N   Delete/close issue")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  start <KEY>                Start working on issue")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  statuses <KEY>             List available statuses")
-	_, _ = fmt.Fprintln(w, `  human <tracker> issue  status <KEY> "<STATUS>"    Set issue status`)
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment add <KEY> <BODY>   Add comment")
-	_, _ = fmt.Fprintln(w, "  human <tracker> issue  comment list <KEY>         List comments")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Project key and issue key formats by tracker:")
-	_, _ = fmt.Fprintln(w, "  jira        --project=KAN                  issue key: KAN-1")
-	_, _ = fmt.Fprintln(w, "  github      --project=octocat/hello-world  issue key: octocat/hello-world#42")
-	_, _ = fmt.Fprintln(w, "  gitlab      --project=mygroup/myproject    issue key: mygroup/myproject#42")
-	_, _ = fmt.Fprintln(w, "  linear      --project=ENG                  issue key: ENG-123")
-	_, _ = fmt.Fprintln(w, "  azuredevops --project=MyProject             issue key: 42")
-	_, _ = fmt.Fprintln(w, "  shortcut    --project=MyProject             issue key: 123")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Examples:")
-	_, _ = fmt.Fprintln(w, "  human jira issues list --project=KAN")
-	_, _ = fmt.Fprintln(w, "  human jira issue get KAN-1")
-	_, _ = fmt.Fprintln(w, `  human jira issue create --project=KAN "Implement login page" --description "Add OAuth2 login flow with Google provider"`)
-	_, _ = fmt.Fprintln(w, "  human github issues list --project=octocat/hello-world")
-	_, _ = fmt.Fprintln(w, "  human github issue get octocat/hello-world#42")
-	_, _ = fmt.Fprintln(w, `  human jira issue edit KAN-1 --title "Updated title"`)
-	_, _ = fmt.Fprintln(w, "  human jira issue start KAN-1")
-	_, _ = fmt.Fprintln(w, "  human jira issue statuses KAN-1")
-	_, _ = fmt.Fprintln(w, `  human jira issue status KAN-1 "Done"`)
-	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1                    # shows confirmation code")
-	_, _ = fmt.Fprintln(w, "  human jira issue delete KAN-1 --confirm=4521     # deletes")
-	_, _ = fmt.Fprintln(w, "  human jira issue comment add KAN-1 'Looks good'")
-	_, _ = fmt.Fprintln(w, "  human notion search \"quarterly report\"")
-	_, _ = fmt.Fprintln(w, "  human notion page get <page-id>")
-	_, _ = fmt.Fprintln(w, "  human figma file get <file-key>")
-	_, _ = fmt.Fprintln(w, "  human figma file comments <file-key>")
-	_, _ = fmt.Fprintln(w, "  human amplitude events list")
-	_, _ = fmt.Fprintln(w, "  human amplitude cohorts list")
-	_, _ = fmt.Fprintln(w, "  human telegram list")
-	_, _ = fmt.Fprintln(w, "  human telegram get 123456789")
-	_, _ = fmt.Fprintln(w, "  human tracker list")
-	_, _ = fmt.Fprintln(w, "  human init")
-	_, _ = fmt.Fprintln(w, "  human install --agent claude")
-	_, _ = fmt.Fprintln(w, "  human browser https://example.com")
-	_, _ = fmt.Fprintln(w, "  human daemon start")
-	_, _ = fmt.Fprintln(w, "  human daemon stop")
-	_, _ = fmt.Fprintln(w, "  human daemon token")
-	_, _ = fmt.Fprintln(w, "  human daemon status")
-}
-
-// --- loadAllInstances / instanceFromFlags ---
-
-// loadAllInstances collects tracker instances from all provider configs.
-func loadAllInstances(dir string) ([]tracker.Instance, error) {
-	var all []tracker.Instance
-
-	ji, err := jira.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, ji...)
-
-	gi, err := github.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, gi...)
-
-	gli, err := gitlab.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, gli...)
-
-	li, err := linear.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, li...)
-
-	adi, err := azuredevops.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, adi...)
-
-	sci, err := shortcut.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	return append(all, sci...), nil
-}
-
-// instanceFromFlags builds a tracker instance from root persistent flags,
-// returning nil when insufficient flags are provided.
-func instanceFromFlags(cmd *cobra.Command) *tracker.Instance {
-	getFlag := func(name string) string {
-		v, _ := cmd.Root().PersistentFlags().GetString(name)
-		return v
-	}
-
-	jiraURL := getFlag("jira-url")
-	jiraUser := getFlag("jira-user")
-	jiraKey := getFlag("jira-key")
-	if jiraURL != "" && jiraUser != "" && jiraKey != "" {
-		return &tracker.Instance{
-			Kind:     "jira",
-			URL:      jiraURL,
-			User:     jiraUser,
-			Provider: jira.New(jiraURL, jiraUser, jiraKey),
-		}
-	}
-
-	githubToken := getFlag("github-token")
-	if githubToken != "" {
-		url := getFlag("github-url")
-		if url == "" {
-			url = "https://api.github.com"
-		}
-		return &tracker.Instance{
-			Kind:     "github",
-			URL:      url,
-			Provider: github.New(url, githubToken),
-		}
-	}
-
-	gitlabToken := getFlag("gitlab-token")
-	if gitlabToken != "" {
-		url := getFlag("gitlab-url")
-		if url == "" {
-			url = "https://gitlab.com"
-		}
-		return &tracker.Instance{
-			Kind:     "gitlab",
-			URL:      url,
-			Provider: gitlab.New(url, gitlabToken),
-		}
-	}
-
-	linearToken := getFlag("linear-token")
-	if linearToken != "" {
-		url := getFlag("linear-url")
-		if url == "" {
-			url = "https://api.linear.app"
-		}
-		return &tracker.Instance{
-			Kind:     "linear",
-			URL:      url,
-			Provider: linear.New(url, linearToken),
-		}
-	}
-
-	azureToken := getFlag("azure-token")
-	azureOrg := getFlag("azure-org")
-	if azureToken != "" && azureOrg != "" {
-		url := getFlag("azure-url")
-		if url == "" {
-			url = "https://dev.azure.com"
-		}
-		return &tracker.Instance{
-			Kind:     "azuredevops",
-			URL:      url,
-			Provider: azuredevops.New(url, azureOrg, azureToken),
-		}
-	}
-
-	shortcutToken := getFlag("shortcut-token")
-	if shortcutToken != "" {
-		url := getFlag("shortcut-url")
-		if url == "" {
-			url = "https://api.app.shortcut.com"
-		}
-		return &tracker.Instance{
-			Kind:     "shortcut",
-			URL:      url,
-			Provider: shortcut.New(url, shortcutToken),
-		}
-	}
-
-	return nil
-}
-
-// auditLogPath returns the path to the audit log file (~/.human/audit.log),
-// creating the directory if needed.
-func auditLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".human", "audit.log")
-	}
-	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
-	return filepath.Join(dir, "audit.log")
+// autoInstanceLoader is used by auto-detect commands to load tracker instances.
+// It defaults to LoadAllInstances(".") and can be overridden in tests.
+var autoInstanceLoader = func() ([]tracker.Instance, error) {
+	return cmdutil.LoadAllInstances(".")
 }
 
 // --- newRootCmd builds the Cobra command tree ---
 
 func newRootCmd() *cobra.Command {
+	deps := cmdutil.DefaultDeps()
+
+	// autoDeps uses the package-level autoInstanceLoader so tests can
+	// inject mock instances without touching the real config path.
+	autoDeps := deps
+	autoDeps.LoadInstances = func(_ string) ([]tracker.Instance, error) {
+		return autoInstanceLoader()
+	}
+
 	rootCmd := &cobra.Command{
 		Use:   "human",
 		Short: "Unified CLI for issue trackers and tools",
@@ -431,16 +112,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	}
 
 	// Override help to append examples and connected trackers.
-	defaultHelp := rootCmd.HelpFunc()
-	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		defaultHelp(cmd, args)
-		// Only append extras for root-level help.
-		if cmd != rootCmd {
-			return
-		}
-		w := cmd.OutOrStdout()
-		printExamples(w)
-		printConnectedTrackers(w)
+	// Wrap helpInstanceLoader in a closure so tests can override it after
+	// newRootCmd() returns.
+	cmdutil.SetupHelp(rootCmd, func() ([]tracker.Instance, error) {
+		return helpInstanceLoader()
 	})
 
 	// Global persistent flags.
@@ -482,19 +157,19 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	rootCmd.CompletionOptions.HiddenDefaultCmd = true
 
 	// --- Quick commands (auto-detect tracker) ---
-	autoGetCmd := buildAutoGetCmd()
+	autoGetCmd := cmdauto.BuildAutoGetCmd(autoDeps)
 	autoGetCmd.GroupID = "shortcuts"
 	rootCmd.AddCommand(autoGetCmd)
 
-	autoListCmd := buildAutoListCmd()
+	autoListCmd := cmdauto.BuildAutoListCmd(autoDeps)
 	autoListCmd.GroupID = "shortcuts"
 	rootCmd.AddCommand(autoListCmd)
 
-	autoStatusesCmd := buildAutoStatusesCmd()
+	autoStatusesCmd := cmdauto.BuildAutoStatusesCmd(autoDeps)
 	autoStatusesCmd.GroupID = "shortcuts"
 	rootCmd.AddCommand(autoStatusesCmd)
 
-	autoStatusCmd := buildAutoStatusCmd()
+	autoStatusCmd := cmdauto.BuildAutoStatusCmd(autoDeps)
 	autoStatusCmd.GroupID = "shortcuts"
 	rootCmd.AddCommand(autoStatusCmd)
 
@@ -506,34 +181,34 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 			Short:   kind + " issue tracker",
 			GroupID: "trackers",
 		}
-		for _, sub := range buildProviderCommands(kind) {
+		for _, sub := range cmdprovider.BuildProviderCommands(kind, deps) {
 			providerCmd.AddCommand(sub)
 		}
 		rootCmd.AddCommand(providerCmd)
 	}
 
 	// --- Notion (tools) ---
-	notionCmd := buildNotionCommands()
+	notionCmd := cmdnotion.BuildNotionCommands()
 	notionCmd.GroupID = "tools"
 	rootCmd.AddCommand(notionCmd)
 
 	// --- Figma (tools) ---
-	figmaCmd := buildFigmaCommands()
+	figmaCmd := cmdfigma.BuildFigmaCommands()
 	figmaCmd.GroupID = "tools"
 	rootCmd.AddCommand(figmaCmd)
 
 	// --- Amplitude (tools) ---
-	amplitudeCmd := buildAmplitudeCommands()
+	amplitudeCmd := cmdamplitude.BuildAmplitudeCommands()
 	amplitudeCmd.GroupID = "tools"
 	rootCmd.AddCommand(amplitudeCmd)
 
 	// --- Telegram (tools) ---
-	telegramCmd := buildTelegramCommands()
+	telegramCmd := cmdtelegram.BuildTelegramCommands()
 	telegramCmd.GroupID = "tools"
 	rootCmd.AddCommand(telegramCmd)
 
 	// --- Static commands ---
-	trackerCmd := buildTrackerCmd()
+	trackerCmd := cmdtracker.BuildTrackerCmd(cmdutil.LoadAllInstances)
 	trackerCmd.GroupID = "utility"
 	rootCmd.AddCommand(trackerCmd)
 
@@ -541,58 +216,27 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	installCmd.GroupID = "utility"
 	rootCmd.AddCommand(installCmd)
 
-	daemonCmd := buildDaemonCmd()
+	daemonCmd := cmddaemon.BuildDaemonCmd(newRootCmd, version)
 	daemonCmd.GroupID = "utility"
 	rootCmd.AddCommand(daemonCmd)
 
-	browserCmd := buildBrowserCmd()
+	browserCmd := cmdbrowser.BuildBrowserCmd()
 	browserCmd.GroupID = "utility"
 	rootCmd.AddCommand(browserCmd)
 
-	initCmd := buildInitCmd()
+	initCmd := cmdinit.BuildInitCmd()
 	initCmd.GroupID = "utility"
 	rootCmd.AddCommand(initCmd)
 
-	chromeBridgeCmd := buildChromeBridgeCmd()
+	chromeBridgeCmd := cmddaemon.BuildChromeBridgeCmd(version)
 	chromeBridgeCmd.GroupID = "utility"
 	rootCmd.AddCommand(chromeBridgeCmd)
 
-	usageCmd := buildUsageCmd()
+	usageCmd := cmdusage.BuildUsageCmd()
 	usageCmd.GroupID = "utility"
 	rootCmd.AddCommand(usageCmd)
 
 	return rootCmd
-}
-
-func buildTrackerCmd() *cobra.Command {
-	trackerCmd := &cobra.Command{
-		Use:   "tracker",
-		Short: "Manage tracker connections",
-	}
-
-	var table bool
-	listCmd := &cobra.Command{
-		Use:   "list",
-		Short: "List configured tracker instances (JSON)",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTrackerList(cmd.OutOrStdout(), ".", table)
-		},
-	}
-	listCmd.Flags().BoolVar(&table, "table", false, "Output as human-readable table instead of JSON")
-
-	var findTable bool
-	findCmd := &cobra.Command{
-		Use:   "find KEY",
-		Short: "Find which tracker owns a key",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTrackerFind(cmd.Context(), cmd.OutOrStdout(), ".", args[0], findTable)
-		},
-	}
-	findCmd.Flags().BoolVar(&findTable, "table", false, "Output as human-readable table instead of JSON")
-
-	trackerCmd.AddCommand(listCmd, findCmd)
-	return trackerCmd
 }
 
 func buildInstallCmd() *cobra.Command {

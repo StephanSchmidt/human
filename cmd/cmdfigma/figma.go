@@ -1,59 +1,59 @@
-package main
+package cmdfigma
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/figma"
 )
 
 // --- Interfaces ---
 
-// FigmaFileGetter retrieves file metadata.
-type FigmaFileGetter interface {
+// figmaFileGetter retrieves file metadata.
+type figmaFileGetter interface {
 	GetFile(ctx context.Context, fileKey string) (*figma.FileSummary, error)
 }
 
-// FigmaNodeGetter retrieves specific nodes.
-type FigmaNodeGetter interface {
+// figmaNodeGetter retrieves specific nodes.
+type figmaNodeGetter interface {
 	GetNodes(ctx context.Context, fileKey string, nodeIDs []string) ([]figma.NodeSummary, error)
 }
 
-// FigmaComponentLister lists published components.
-type FigmaComponentLister interface {
+// figmaComponentLister lists published components.
+type figmaComponentLister interface {
 	GetFileComponents(ctx context.Context, fileKey string) ([]figma.Component, error)
 }
 
-// FigmaCommentLister lists file comments.
-type FigmaCommentLister interface {
+// figmaCommentLister lists file comments.
+type figmaCommentLister interface {
 	GetFileComments(ctx context.Context, fileKey string) ([]figma.FileComment, error)
 }
 
-// FigmaImageExporter exports nodes as images.
-type FigmaImageExporter interface {
+// figmaImageExporter exports nodes as images.
+type figmaImageExporter interface {
 	ExportImages(ctx context.Context, fileKey string, nodeIDs []string, format string) ([]figma.ImageExport, error)
 }
 
-// FigmaProjectLister lists team projects.
-type FigmaProjectLister interface {
+// figmaProjectLister lists team projects.
+type figmaProjectLister interface {
 	ListProjects(ctx context.Context, teamID string) ([]figma.Project, error)
 }
 
-// FigmaProjectFileLister lists files in a project.
-type FigmaProjectFileLister interface {
+// figmaProjectFileLister lists files in a project.
+type figmaProjectFileLister interface {
 	ListProjectFiles(ctx context.Context, projectID string) ([]figma.ProjectFile, error)
 }
 
 // --- Command builders ---
 
-func buildFigmaCommands() *cobra.Command {
+// BuildFigmaCommands returns the top-level "figma" command tree.
+func BuildFigmaCommands() *cobra.Command {
 	figmaCmd := &cobra.Command{
 		Use:   "figma",
 		Short: "Figma design tools",
@@ -61,29 +61,31 @@ func buildFigmaCommands() *cobra.Command {
 
 	figmaCmd.PersistentFlags().String("figma", "", "Named Figma instance from .humanconfig")
 
-	figmaCmd.AddCommand(buildFigmaFileCommands())
-	figmaCmd.AddCommand(buildFigmaProjectsCmd())
-	figmaCmd.AddCommand(buildFigmaProjectCmd())
+	figmaCmd.AddCommand(BuildFigmaFileCommands())
+	figmaCmd.AddCommand(BuildFigmaProjectsCmd())
+	figmaCmd.AddCommand(BuildFigmaProjectCmd())
 
 	return figmaCmd
 }
 
-func buildFigmaFileCommands() *cobra.Command {
+// BuildFigmaFileCommands returns the "file" subcommand group.
+func BuildFigmaFileCommands() *cobra.Command {
 	fileCmd := &cobra.Command{
 		Use:   "file",
 		Short: "File operations",
 	}
 
-	fileCmd.AddCommand(buildFigmaFileGetCmd())
-	fileCmd.AddCommand(buildFigmaFileNodesCmd())
-	fileCmd.AddCommand(buildFigmaFileComponentsCmd())
-	fileCmd.AddCommand(buildFigmaFileCommentsCmd())
-	fileCmd.AddCommand(buildFigmaFileImageCmd())
+	fileCmd.AddCommand(BuildFigmaFileGetCmd())
+	fileCmd.AddCommand(BuildFigmaFileNodesCmd())
+	fileCmd.AddCommand(BuildFigmaFileComponentsCmd())
+	fileCmd.AddCommand(BuildFigmaFileCommentsCmd())
+	fileCmd.AddCommand(BuildFigmaFileImageCmd())
 
 	return fileCmd
 }
 
-func buildFigmaFileGetCmd() *cobra.Command {
+// BuildFigmaFileGetCmd returns the "file get" command.
+func BuildFigmaFileGetCmd() *cobra.Command {
 	var table bool
 	cmd := &cobra.Command{
 		Use:   "get FILE_KEY",
@@ -101,7 +103,8 @@ func buildFigmaFileGetCmd() *cobra.Command {
 	return cmd
 }
 
-func buildFigmaFileNodesCmd() *cobra.Command {
+// BuildFigmaFileNodesCmd returns the "file nodes" command.
+func BuildFigmaFileNodesCmd() *cobra.Command {
 	var table bool
 	var ids string
 	cmd := &cobra.Command{
@@ -113,7 +116,7 @@ func buildFigmaFileNodesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodeIDs := splitIDs(ids)
+			nodeIDs := cmdutil.SplitIDs(ids)
 			return runFigmaFileNodes(cmd.Context(), client, cmd.OutOrStdout(), args[0], nodeIDs, table)
 		},
 	}
@@ -123,7 +126,8 @@ func buildFigmaFileNodesCmd() *cobra.Command {
 	return cmd
 }
 
-func buildFigmaFileComponentsCmd() *cobra.Command {
+// BuildFigmaFileComponentsCmd returns the "file components" command.
+func BuildFigmaFileComponentsCmd() *cobra.Command {
 	var table bool
 	cmd := &cobra.Command{
 		Use:   "components FILE_KEY",
@@ -141,7 +145,8 @@ func buildFigmaFileComponentsCmd() *cobra.Command {
 	return cmd
 }
 
-func buildFigmaFileCommentsCmd() *cobra.Command {
+// BuildFigmaFileCommentsCmd returns the "file comments" command.
+func BuildFigmaFileCommentsCmd() *cobra.Command {
 	var table bool
 	cmd := &cobra.Command{
 		Use:   "comments FILE_KEY",
@@ -159,7 +164,8 @@ func buildFigmaFileCommentsCmd() *cobra.Command {
 	return cmd
 }
 
-func buildFigmaFileImageCmd() *cobra.Command {
+// BuildFigmaFileImageCmd returns the "file image" command.
+func BuildFigmaFileImageCmd() *cobra.Command {
 	var ids string
 	var format string
 	cmd := &cobra.Command{
@@ -171,7 +177,7 @@ func buildFigmaFileImageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			nodeIDs := splitIDs(ids)
+			nodeIDs := cmdutil.SplitIDs(ids)
 			return runFigmaFileImage(cmd.Context(), client, cmd.OutOrStdout(), args[0], nodeIDs, format)
 		},
 	}
@@ -181,7 +187,8 @@ func buildFigmaFileImageCmd() *cobra.Command {
 	return cmd
 }
 
-func buildFigmaProjectsCmd() *cobra.Command {
+// BuildFigmaProjectsCmd returns the "projects" subcommand group.
+func BuildFigmaProjectsCmd() *cobra.Command {
 	projectsCmd := &cobra.Command{
 		Use:   "projects",
 		Short: "Team project operations",
@@ -208,7 +215,8 @@ func buildFigmaProjectsCmd() *cobra.Command {
 	return projectsCmd
 }
 
-func buildFigmaProjectCmd() *cobra.Command {
+// BuildFigmaProjectCmd returns the "project" subcommand group.
+func BuildFigmaProjectCmd() *cobra.Command {
 	projectCmd := &cobra.Command{
 		Use:   "project",
 		Short: "Project operations",
@@ -260,7 +268,7 @@ func resolveFigmaClient(cmd *cobra.Command) (*figma.Client, error) {
 
 // --- Business logic functions ---
 
-func runFigmaFileGet(ctx context.Context, client FigmaFileGetter, out io.Writer, fileKey string, table bool) error {
+func runFigmaFileGet(ctx context.Context, client figmaFileGetter, out io.Writer, fileKey string, table bool) error {
 	summary, err := client.GetFile(ctx, fileKey)
 	if err != nil {
 		return err
@@ -268,10 +276,10 @@ func runFigmaFileGet(ctx context.Context, client FigmaFileGetter, out io.Writer,
 	if table {
 		return printFigmaFileSummaryTable(out, summary)
 	}
-	return printJSON(out, summary)
+	return cmdutil.PrintJSON(out, summary)
 }
 
-func runFigmaFileNodes(ctx context.Context, client FigmaNodeGetter, out io.Writer, fileKey string, nodeIDs []string, table bool) error {
+func runFigmaFileNodes(ctx context.Context, client figmaNodeGetter, out io.Writer, fileKey string, nodeIDs []string, table bool) error {
 	nodes, err := client.GetNodes(ctx, fileKey, nodeIDs)
 	if err != nil {
 		return err
@@ -279,10 +287,10 @@ func runFigmaFileNodes(ctx context.Context, client FigmaNodeGetter, out io.Write
 	if table {
 		return printFigmaNodesTable(out, nodes)
 	}
-	return printJSON(out, nodes)
+	return cmdutil.PrintJSON(out, nodes)
 }
 
-func runFigmaFileComponents(ctx context.Context, client FigmaComponentLister, out io.Writer, fileKey string, table bool) error {
+func runFigmaFileComponents(ctx context.Context, client figmaComponentLister, out io.Writer, fileKey string, table bool) error {
 	components, err := client.GetFileComponents(ctx, fileKey)
 	if err != nil {
 		return err
@@ -290,10 +298,10 @@ func runFigmaFileComponents(ctx context.Context, client FigmaComponentLister, ou
 	if table {
 		return printFigmaComponentsTable(out, components)
 	}
-	return printJSON(out, components)
+	return cmdutil.PrintJSON(out, components)
 }
 
-func runFigmaFileComments(ctx context.Context, client FigmaCommentLister, out io.Writer, fileKey string, table bool) error {
+func runFigmaFileComments(ctx context.Context, client figmaCommentLister, out io.Writer, fileKey string, table bool) error {
 	comments, err := client.GetFileComments(ctx, fileKey)
 	if err != nil {
 		return err
@@ -301,18 +309,18 @@ func runFigmaFileComments(ctx context.Context, client FigmaCommentLister, out io
 	if table {
 		return printFigmaCommentsTable(out, comments)
 	}
-	return printJSON(out, comments)
+	return cmdutil.PrintJSON(out, comments)
 }
 
-func runFigmaFileImage(ctx context.Context, client FigmaImageExporter, out io.Writer, fileKey string, nodeIDs []string, format string) error {
+func runFigmaFileImage(ctx context.Context, client figmaImageExporter, out io.Writer, fileKey string, nodeIDs []string, format string) error {
 	exports, err := client.ExportImages(ctx, fileKey, nodeIDs, format)
 	if err != nil {
 		return err
 	}
-	return printJSON(out, exports)
+	return cmdutil.PrintJSON(out, exports)
 }
 
-func runFigmaProjectsList(ctx context.Context, client FigmaProjectLister, out io.Writer, teamID string, table bool) error {
+func runFigmaProjectsList(ctx context.Context, client figmaProjectLister, out io.Writer, teamID string, table bool) error {
 	projects, err := client.ListProjects(ctx, teamID)
 	if err != nil {
 		return err
@@ -320,10 +328,10 @@ func runFigmaProjectsList(ctx context.Context, client FigmaProjectLister, out io
 	if table {
 		return printFigmaProjectsTable(out, projects)
 	}
-	return printJSON(out, projects)
+	return cmdutil.PrintJSON(out, projects)
 }
 
-func runFigmaProjectFiles(ctx context.Context, client FigmaProjectFileLister, out io.Writer, projectID string, table bool) error {
+func runFigmaProjectFiles(ctx context.Context, client figmaProjectFileLister, out io.Writer, projectID string, table bool) error {
 	files, err := client.ListProjectFiles(ctx, projectID)
 	if err != nil {
 		return err
@@ -331,16 +339,10 @@ func runFigmaProjectFiles(ctx context.Context, client FigmaProjectFileLister, ou
 	if table {
 		return printFigmaProjectFilesTable(out, files)
 	}
-	return printJSON(out, files)
+	return cmdutil.PrintJSON(out, files)
 }
 
 // --- Output formatters ---
-
-func printJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
 
 func printFigmaFileSummaryTable(out io.Writer, s *figma.FileSummary) error {
 	_, _ = fmt.Fprintf(out, "Name:        %s\n", s.Name)
@@ -440,21 +442,4 @@ func printFigmaProjectFilesTable(out io.Writer, files []figma.ProjectFile) error
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", f.Key, f.Name, f.LastModified)
 	}
 	return w.Flush()
-}
-
-// --- Helpers ---
-
-func splitIDs(ids string) []string {
-	if ids == "" {
-		return nil
-	}
-	parts := strings.Split(ids, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
 }
