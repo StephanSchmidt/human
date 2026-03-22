@@ -141,39 +141,6 @@ func TestResolve_autoDetectNone(t *testing.T) {
 	assert.Contains(t, err.Error(), "no tracker configured")
 }
 
-// --- ValidateURL tests ---
-
-func TestValidateURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		rawURL  string
-		wantErr string
-	}{
-		{name: "valid https", rawURL: "https://example.com", wantErr: ""},
-		{name: "valid http", rawURL: "http://example.com", wantErr: ""},
-		{name: "https with path", rawURL: "https://example.com/api/v3", wantErr: ""},
-		{name: "https with port", rawURL: "https://example.com:8443", wantErr: ""},
-		{name: "file scheme rejected", rawURL: "file:///etc/passwd", wantErr: "scheme must be http or https"},
-		{name: "ftp scheme rejected", rawURL: "ftp://example.com", wantErr: "scheme must be http or https"},
-		{name: "gopher scheme rejected", rawURL: "gopher://example.com", wantErr: "scheme must be http or https"},
-		{name: "no scheme rejected", rawURL: "example.com", wantErr: "scheme must be http or https"},
-		{name: "empty host rejected", rawURL: "http://", wantErr: "must have a host"},
-		{name: "empty string rejected", rawURL: "", wantErr: "scheme must be http or https"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateURL(tt.rawURL)
-			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-			} else {
-				assert.NoError(t, err)
-			}
-		})
-	}
-}
-
 // --- DetectKind tests ---
 
 func TestDetectKind_githubIssue(t *testing.T) {

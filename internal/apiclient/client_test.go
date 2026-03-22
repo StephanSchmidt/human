@@ -1,0 +1,290 @@
+package apiclient
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type errDoer struct{ err error }
+
+func (d *errDoer) Do(*http.Request) (*http.Response, error) { return nil, d.err }
+
+type nilDoer struct{}
+
+func (*nilDoer) Do(*http.Request) (*http.Response, error) { return nil, nil }
+
+func TestDo_networkError(t *testing.T) {
+	c := New("https://example.com",
+		WithProviderName("test"),
+		WithHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")}),
+	)
+	_, err := c.Do(context.Background(), "GET", "/api/v1/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requesting test")
+}
+
+func TestDo_nilResponse(t *testing.T) {
+	c := New("https://example.com",
+		WithProviderName("test"),
+		WithHTTPDoer(&nilDoer{}),
+	)
+	_, err := c.Do(context.Background(), "GET", "/api/v1/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nil response")
+}
+
+func TestDo_invalidBaseURL(t *testing.T) {
+	c := New("ftp://example.com", WithProviderName("test"))
+	_, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scheme must be http or https")
+}
+
+func TestDo_success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("test"))
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestDo_errorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not found"))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("myapi"))
+	_, err := c.Do(context.Background(), "GET", "/missing", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "myapi")
+	assert.Contains(t, err.Error(), "404")
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestDo_customErrorFormatter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("forbidden"))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithProviderName("custom"),
+		WithErrorFormatter(func(provider, method, path string, code int, body []byte) error {
+			return fmt.Errorf("CUSTOM: %s %d", provider, code)
+		}),
+	)
+	_, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.Error(t, err)
+	assert.Equal(t, "CUSTOM: custom 403", err.Error())
+}
+
+func TestDo_basicAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		assert.True(t, ok)
+		assert.Equal(t, "myuser", user)
+		assert.Equal(t, "mypass", pass)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithAuth(BasicAuth("myuser", "mypass")),
+		WithProviderName("test"),
+	)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_bearerToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer tok123", r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithAuth(BearerToken("tok123")),
+		WithProviderName("test"),
+	)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_headerAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "secret", r.Header.Get("PRIVATE-TOKEN"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithAuth(HeaderAuth("PRIVATE-TOKEN", "secret")),
+		WithProviderName("test"),
+	)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_extraHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json", r.Header.Get("Accept"))
+		assert.Equal(t, "2022-06-28", r.Header.Get("Notion-Version"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithHeader("Accept", "application/json"),
+		WithHeader("Notion-Version", "2022-06-28"),
+		WithProviderName("test"),
+	)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_contentType_conditional(t *testing.T) {
+	// No Content-Type when no body.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ct := r.Header.Get("Content-Type")
+		if r.Method == "GET" {
+			assert.Empty(t, ct, "GET with no body should not set Content-Type")
+		} else {
+			assert.Equal(t, "application/json", ct)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("test"))
+
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	resp, err = c.Do(context.Background(), "POST", "/test", "", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_contentType_always(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL,
+		WithContentType("application/json"),
+		WithProviderName("test"),
+	)
+
+	// Even GET with no body should set Content-Type.
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDoWithContentType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json-patch+json", r.Header.Get("Content-Type"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("test"))
+	resp, err := c.DoWithContentType(context.Background(), "PATCH", "/test", "", strings.NewReader(`[]`), "application/json-patch+json")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_queryParams(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/search", r.URL.Path)
+		assert.Equal(t, "q=hello&limit=10", r.URL.RawQuery)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithProviderName("test"))
+	resp, err := c.Do(context.Background(), "GET", "/api/search", "q=hello&limit=10", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestSetHTTPDoer(t *testing.T) {
+	c := New("https://example.com", WithProviderName("test"))
+	c.SetHTTPDoer(&errDoer{err: fmt.Errorf("injected")})
+
+	_, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "requesting test")
+}
+
+func TestDo_noAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, WithAuth(NoAuth()), WithProviderName("test"))
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+}
+
+func TestDo_displayNameFallback(t *testing.T) {
+	c := New("https://example.com",
+		WithHTTPDoer(&errDoer{err: fmt.Errorf("fail")}),
+	)
+	_, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "api")
+}
+
+func TestValidateURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr string
+	}{
+		{"valid https", "https://example.com", ""},
+		{"valid http", "http://example.com", ""},
+		{"ftp scheme", "ftp://example.com", "scheme must be http or https"},
+		{"no host", "https://", "must have a host"},
+		{"empty string", "", "scheme must be http or https"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateURL(tt.url)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			}
+		})
+	}
+}

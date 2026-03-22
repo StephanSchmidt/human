@@ -2,8 +2,6 @@ package tracker
 
 import (
 	"context"
-	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -149,27 +147,6 @@ func probeInstances(ctx context.Context, key string, instances []Instance) (*Fin
 	return nil, errors.WithDetails("no configured tracker recognized the key", "key", key)
 }
 
-// ValidateURL checks that rawURL is a valid HTTP(S) URL.
-// This guards against SSRF by rejecting non-HTTP schemes.
-func ValidateURL(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return errors.WrapWithDetails(err, "invalid URL", "url", rawURL)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.WithDetails("URL scheme must be http or https", "url", rawURL, "scheme", u.Scheme)
-	}
-	if u.Host == "" {
-		return errors.WithDetails("URL must have a host", "url", rawURL)
-	}
-	return nil
-}
-
-// HTTPDoer abstracts HTTP request execution for testability and to decouple
-// from the concrete *http.Client type.
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
 
 // DetectKind returns the tracker kind that can be unambiguously inferred from
 // the key format. Currently only "github" is detectable (owner/repo#N or
