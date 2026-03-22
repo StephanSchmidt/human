@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -20,20 +21,25 @@ var _ tracker.Provider = (*Client)(nil)
 
 // Client is an Azure DevOps REST API client that implements tracker.Provider.
 type Client struct {
-	baseURL string
-	org     string
-	token   string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
+	org string
 }
 
 // New creates an Azure DevOps client with the given base URL, organization, and PAT.
 func New(baseURL, org, token string) *Client {
-	return &Client{baseURL: baseURL, org: org, token: token, http: http.DefaultClient}
+	return &Client{
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.BasicAuth("", token)),
+			apiclient.WithHeader("Accept", "application/json"),
+			apiclient.WithProviderName("azuredevops"),
+		),
+		org: org,
+	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListIssues implements tracker.Lister using WIQL to query work items.
@@ -431,43 +437,10 @@ func toTrackerComment(ac adoComment) (*tracker.Comment, error) {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader, contentType string) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
+	if contentType != "" {
+		return c.api.DoWithContentType(ctx, method, path, rawQuery, body, contentType)
 	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
-	}
-	u.Path = path
-	u.RawQuery = rawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request", "method", method, "path", path)
-	}
-	req.SetBasicAuth("", c.token)
-	req.Header.Set("Accept", "application/json")
-	if body != nil && contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Azure DevOps",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Azure DevOps: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("azuredevops %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, rawQuery, body)
 }
 
 // parseIssueKey parses a "Project/ID" key into project name and numeric ID.

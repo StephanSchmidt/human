@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/jira/adf"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -20,20 +21,23 @@ var _ tracker.Provider = (*Client)(nil)
 
 // Client is a Jira REST API client that implements tracker.Lister and tracker.Getter.
 type Client struct {
-	baseURL string
-	user    string
-	key     string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates a Jira client with the given base URL, user email, and API key.
 func New(baseURL, user, key string) *Client {
-	return &Client{baseURL: baseURL, user: user, key: key, http: http.DefaultClient}
+	return &Client{
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.BasicAuth(user, key)),
+			apiclient.WithHeader("Accept", "application/json"),
+			apiclient.WithProviderName("jira"),
+		),
+	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListIssues implements tracker.Lister.
@@ -364,45 +368,7 @@ func (c *Client) DeleteIssue(ctx context.Context, key string) error {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL",
-			"baseURL", c.baseURL)
-	}
-	u.Path = path
-	u.RawQuery = rawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
-	}
-	req.SetBasicAuth(c.user, c.key)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Jira",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Jira: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("jira %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, rawQuery, body)
 }
 
 func hasDescription(raw json.RawMessage) bool {

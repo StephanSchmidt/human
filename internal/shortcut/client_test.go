@@ -15,50 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// errDoer is a mock HTTPDoer that returns a fixed error.
-type errDoer struct {
-	err error
-}
-
-func (d *errDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, d.err
-}
-
-// nilDoer is a mock HTTPDoer that returns a nil response.
-type nilDoer struct{}
-
-func (*nilDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
-func TestDoRequest_networkError(t *testing.T) {
-	client := New("https://api.app.shortcut.com", "tok-test")
-	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
-
-	_, err := client.GetIssue(context.Background(), "1")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requesting Shortcut")
-}
-
-func TestDoRequest_nilResponse(t *testing.T) {
-	client := New("https://api.app.shortcut.com", "tok-test")
-	client.SetHTTPDoer(&nilDoer{})
-
-	_, err := client.GetIssue(context.Background(), "1")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil response")
-}
-
-func TestDoRequest_invalidBaseURL(t *testing.T) {
-	client := New("ftp://api.app.shortcut.com", "tok-test")
-
-	_, err := client.GetIssue(context.Background(), "1")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scheme must be http or https")
-}
 
 func TestListIssues_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

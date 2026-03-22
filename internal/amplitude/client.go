@@ -4,35 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 
 	"github.com/StephanSchmidt/human/errors"
-	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
 // Client is an Amplitude API client.
 type Client struct {
-	baseURL   string
-	apiKey    string
-	secretKey string
-	http      tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates an Amplitude client with the given base URL, API key, and secret key.
 func New(baseURL, apiKey, secretKey string) *Client {
 	return &Client{
-		baseURL:   baseURL,
-		apiKey:    apiKey,
-		secretKey: secretKey,
-		http:      http.DefaultClient,
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.BasicAuth(apiKey, secretKey)),
+			apiclient.WithHeader("Accept", "application/json"),
+			apiclient.WithProviderName("amplitude"),
+		),
 	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListEvents fetches all event types with WAU counts.
@@ -277,42 +274,7 @@ func (c *Client) ListCohorts(ctx context.Context) ([]Cohort, error) {
 
 // doRequest performs an authenticated HTTP request to the Amplitude API.
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL",
-			"baseURL", c.baseURL)
-	}
-	u.Path = path
-	u.RawQuery = rawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
-	}
-	req.SetBasicAuth(c.apiKey, c.secretKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Amplitude",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Amplitude: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("amplitude %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, rawQuery, nil)
 }
 
 // buildEventJSON returns a JSON-encoded event type object for query parameters.

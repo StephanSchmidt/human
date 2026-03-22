@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -22,9 +22,7 @@ var _ tracker.Provider = (*Client)(nil)
 
 // Client is a Shortcut REST API client that implements tracker.Provider.
 type Client struct {
-	baseURL string
-	token   string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 
 	statesMu       sync.Mutex
 	states         map[int64]string // workflow_state_id → state name
@@ -41,16 +39,18 @@ type Client struct {
 // New creates a Shortcut client with the given base URL and API token.
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL: baseURL,
-		token:   token,
-		http:    http.DefaultClient,
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.HeaderAuth("Shortcut-Token", token)),
+			apiclient.WithHeader("Accept", "application/json"),
+			apiclient.WithProviderName("shortcut"),
+		),
 		members: make(map[string]string),
 	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListIssues implements tracker.Lister using GET /api/v3/groups/{id}/stories.
@@ -410,43 +410,10 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader, contentType string) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
+	if contentType != "" {
+		return c.api.DoWithContentType(ctx, method, path, rawQuery, body, contentType)
 	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
-	}
-	u.Path = path
-	u.RawQuery = rawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request", "method", method, "path", path)
-	}
-	req.Header.Set("Shortcut-Token", c.token)
-	req.Header.Set("Accept", "application/json")
-	if body != nil && contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Shortcut",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Shortcut: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("shortcut %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, rawQuery, body)
 }
 
 // resolveStateName maps a workflow_state_id to its name, fetching and caching

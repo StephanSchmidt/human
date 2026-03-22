@@ -4,34 +4,45 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
-	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
 // Client is a Telegram Bot API client.
 type Client struct {
-	baseURL string
-	token   string
-	http    tracker.HTTPDoer
+	api   *apiclient.Client
+	token string
 }
 
 // New creates a Telegram client with the given bot token.
 func New(token string) *Client {
+	return newWithBaseURL("https://api.telegram.org", token)
+}
+
+// newWithBaseURL creates a Telegram client with a custom base URL (for testing).
+func newWithBaseURL(baseURL, token string) *Client {
 	return &Client{
-		baseURL: "https://api.telegram.org",
-		token:   token,
-		http:    http.DefaultClient,
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.NoAuth()),
+			apiclient.WithURLBuilder(apiclient.ParsePathURL()),
+			apiclient.WithProviderName("telegram"),
+			apiclient.WithErrorFormatter(func(_, method, path string, statusCode int, body []byte) error {
+				sanitizedPath := sanitizeTokenInPath(path, token)
+				return errors.WithDetails(
+					fmt.Sprintf("telegram %s %s returned %d: %s", method, sanitizedPath, statusCode, string(body)),
+					"statusCode", statusCode, "method", method)
+			}),
+		),
+		token: token,
 	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // GetUpdates fetches pending updates from the Telegram Bot API.
@@ -95,46 +106,7 @@ func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
-	}
-
-	parsedPath, err := url.Parse(path)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing path")
-	}
-	u.Path = parsedPath.Path
-	u.RawQuery = parsedPath.RawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Telegram",
-			"method", method)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Telegram: nil response",
-			"method", method)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		// Sanitize token from path in error messages.
-		sanitizedPath := sanitizeTokenInPath(path, c.token)
-		return nil, errors.WithDetails(
-			fmt.Sprintf("telegram %s %s returned %d: %s", method, sanitizedPath, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, "", nil)
 }
 
 // sanitizeTokenInPath replaces the bot token in a path with "bot<REDACTED>".

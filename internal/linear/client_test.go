@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,7 @@ func (h *graphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	require.NoError(h.t, err)
 
-	var req graphQLRequest
+	var req apiclient.GraphQLRequest
 	require.NoError(h.t, json.Unmarshal(body, &req))
 
 	for keyword, handler := range h.handlers {
@@ -58,48 +59,6 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-// errDoer is a mock HTTPDoer that returns a fixed error.
-type errDoer struct {
-	err error
-}
-
-func (d *errDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, d.err
-}
-
-// nilDoer is a mock HTTPDoer that returns a nil response.
-type nilDoer struct{}
-
-func (*nilDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
-func TestDoGraphQL_networkError(t *testing.T) {
-	client := New("https://api.linear.app", "lin_test")
-	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
-
-	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
-		Project:    "ENG",
-		MaxResults: 10,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requesting linear")
-}
-
-func TestDoGraphQL_nilResponse(t *testing.T) {
-	client := New("https://api.linear.app", "lin_test")
-	client.SetHTTPDoer(&nilDoer{})
-
-	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
-		Project:    "ENG",
-		MaxResults: 10,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil response")
 }
 
 func TestDoGraphQL_invalidBaseURL(t *testing.T) {

@@ -7,35 +7,34 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/StephanSchmidt/human/errors"
-	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
 const notionVersion = "2022-06-28"
 
 // Client is a Notion API client.
 type Client struct {
-	baseURL string
-	token   string
-	version string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates a Notion client with the given base URL and integration token.
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL: baseURL,
-		token:   token,
-		version: notionVersion,
-		http:    http.DefaultClient,
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.BearerToken(token)),
+			apiclient.WithURLBuilder(apiclient.ParsePathURL()),
+			apiclient.WithHeader("Notion-Version", notionVersion),
+			apiclient.WithContentType("application/json"),
+			apiclient.WithProviderName("notion"),
+		),
 	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // Search searches the Notion workspace for pages and databases matching the query.
@@ -230,48 +229,7 @@ func (c *Client) getBlockChildren(ctx context.Context, blockID string, depth int
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
-	}
-
-	// Handle path that may include query parameters.
-	parsedPath, err := url.Parse(path)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing path", "path", path)
-	}
-	u.Path = parsedPath.Path
-	u.RawQuery = parsedPath.RawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Notion-Version", c.version)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Notion",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Notion: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("notion %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, "", body)
 }
 
 // extractTitle extracts a title string from page properties or database title.

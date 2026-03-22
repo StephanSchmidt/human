@@ -1,24 +1,5 @@
 package linear
 
-import "encoding/json"
-
-// graphQLRequest is the generic GraphQL request envelope.
-type graphQLRequest struct {
-	Query     string         `json:"query"`
-	Variables map[string]any `json:"variables,omitempty"`
-}
-
-// graphQLResponse is the generic GraphQL response envelope.
-type graphQLResponse struct {
-	Data   json.RawMessage `json:"data"`
-	Errors []graphQLError  `json:"errors,omitempty"`
-}
-
-// graphQLError represents a single error from the GraphQL API.
-type graphQLError struct {
-	Message string `json:"message"`
-}
-
 // linearIssue is the Linear API representation of an issue.
 type linearIssue struct {
 	Identifier    string          `json:"identifier"`

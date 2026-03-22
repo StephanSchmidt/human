@@ -11,20 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type errDoer struct {
-	err error
-}
-
-func (d *errDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, d.err
-}
-
-type nilDoer struct{}
-
-func (*nilDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
 func TestDoRequest_setsHeaders(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer ntn_secret", r.Header.Get("Authorization"))
@@ -38,32 +24,6 @@ func TestDoRequest_setsHeaders(t *testing.T) {
 	resp, err := client.doRequest(context.Background(), http.MethodPost, "/v1/search", nil)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-}
-
-func TestDoRequest_networkError(t *testing.T) {
-	client := New("https://api.notion.com", "ntn_test")
-	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
-
-	_, err := client.doRequest(context.Background(), http.MethodPost, "/v1/search", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requesting Notion")
-}
-
-func TestDoRequest_nilResponse(t *testing.T) {
-	client := New("https://api.notion.com", "ntn_test")
-	client.SetHTTPDoer(&nilDoer{})
-
-	_, err := client.doRequest(context.Background(), http.MethodPost, "/v1/search", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil response")
-}
-
-func TestDoRequest_invalidBaseURL(t *testing.T) {
-	client := New("ftp://api.notion.com", "ntn_test")
-
-	_, err := client.doRequest(context.Background(), http.MethodPost, "/v1/search", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scheme must be http or https")
 }
 
 func TestDoRequest_httpError(t *testing.T) {

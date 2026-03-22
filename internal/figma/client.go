@@ -3,35 +3,35 @@ package figma
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
-	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
 // Client is a Figma API client.
 type Client struct {
-	baseURL string
-	token   string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates a Figma client with the given base URL and personal access token.
 func New(baseURL, token string) *Client {
 	return &Client{
-		baseURL: baseURL,
-		token:   token,
-		http:    http.DefaultClient,
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.HeaderAuth("X-Figma-Token", token)),
+			apiclient.WithURLBuilder(apiclient.ParsePathURL()),
+			apiclient.WithContentType("application/json"),
+			apiclient.WithProviderName("figma"),
+		),
 	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // GetFile fetches file metadata and page listing.
@@ -221,46 +221,7 @@ func (c *Client) ListProjectFiles(ctx context.Context, projectID string) ([]Proj
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL", "baseURL", c.baseURL)
-	}
-
-	parsedPath, err := url.Parse(path)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing path", "path", path)
-	}
-	u.Path = parsedPath.Path
-	u.RawQuery = parsedPath.RawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
-	}
-	req.Header.Set("X-Figma-Token", c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting Figma",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting Figma: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		return nil, errors.WithDetails(
-			fmt.Sprintf("figma %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, "", body)
 }
 
 // encodeNodeIDs joins and URL-encodes node IDs for query parameters.

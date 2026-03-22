@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -20,19 +21,29 @@ var _ tracker.Provider = (*Client)(nil)
 
 // Client is a GitLab REST API (v4) client that implements tracker.Provider.
 type Client struct {
-	baseURL string
-	token   string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates a GitLab client with the given base URL and private token.
 func New(baseURL, token string) *Client {
-	return &Client{baseURL: baseURL, token: token, http: http.DefaultClient}
+	return &Client{
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.HeaderAuth("PRIVATE-TOKEN", token)),
+			apiclient.WithURLBuilder(apiclient.RawPathURL()),
+			apiclient.WithProviderName("gitlab"),
+			apiclient.WithErrorFormatter(func(_, method, path string, statusCode int, body []byte) error {
+				safePath := strings.ReplaceAll(path, "%", "%%")
+				return errors.WithDetails(
+					"gitlab "+method+" "+safePath+" returned "+strconv.Itoa(statusCode)+": "+string(body),
+					"statusCode", statusCode, "method", method, "path", path)
+			}),
+		),
+	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListIssues implements tracker.Lister.
@@ -390,47 +401,7 @@ func (c *Client) DeleteIssue(ctx context.Context, key string) error {
 }
 
 func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, body io.Reader) (*http.Response, error) {
-	if err := tracker.ValidateURL(c.baseURL); err != nil {
-		return nil, err
-	}
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "parsing base URL",
-			"baseURL", c.baseURL)
-	}
-	decodedPath, _ := url.PathUnescape(path)
-	u.Path = decodedPath
-	u.RawPath = path
-	u.RawQuery = rawQuery
-
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
-	}
-	req.Header.Set("PRIVATE-TOKEN", c.token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting GitLab",
-			"method", method, "path", path)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting GitLab: nil response",
-			"method", method, "path", path)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-		safePath := strings.ReplaceAll(path, "%", "%%")
-		return nil, errors.WithDetails(
-			"gitlab "+method+" "+safePath+" returned "+strconv.Itoa(resp.StatusCode)+": "+string(respBody),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
-	}
-	return resp, nil
+	return c.api.Do(ctx, method, path, rawQuery, body)
 }
 
 // splitProject URL-encodes a project path for use in GitLab API URLs.

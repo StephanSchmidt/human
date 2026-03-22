@@ -11,45 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type errDoer struct {
-	err error
-}
-
-func (d *errDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, d.err
-}
-
-type nilDoer struct{}
-
-func (*nilDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
-func TestDoRequest_invalidBaseURL(t *testing.T) {
-	client := New("test-token")
-	client.baseURL = "ftp://api.telegram.org"
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/bot/getUpdates")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scheme must be http or https")
-}
-
-func TestDoRequest_networkError(t *testing.T) {
-	client := New("test-token")
-	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/bot/getUpdates")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requesting Telegram")
-}
-
-func TestDoRequest_nilResponse(t *testing.T) {
-	client := New("test-token")
-	client.SetHTTPDoer(&nilDoer{})
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/bot/getUpdates")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil response")
+// newTestClient creates a Telegram client pointing at a test server.
+func newTestClient(baseURL, token string) *Client {
+	return newWithBaseURL(baseURL, token)
 }
 
 func TestDoRequest_httpError(t *testing.T) {
@@ -59,8 +23,7 @@ func TestDoRequest_httpError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("bad-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "bad-token")
 	_, err := client.doRequest(context.Background(), http.MethodGet, "/botbad-token/getUpdates")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned 401")
@@ -99,8 +62,7 @@ func TestGetUpdates_happy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	updates, err := client.GetUpdates(context.Background(), 100)
 	require.NoError(t, err)
 	require.Len(t, updates, 2)
@@ -121,8 +83,7 @@ func TestGetUpdates_empty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	updates, err := client.GetUpdates(context.Background(), 100)
 	require.NoError(t, err)
 	assert.Empty(t, updates)
@@ -134,8 +95,7 @@ func TestGetUpdates_apiError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	_, err := client.GetUpdates(context.Background(), 100)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bot token is invalid")
@@ -159,8 +119,7 @@ func TestGetUpdate_happy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	update, err := client.GetUpdate(context.Background(), 101)
 	require.NoError(t, err)
 	assert.Equal(t, 101, update.UpdateID)
@@ -181,8 +140,7 @@ func TestGetUpdate_notFound(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	_, err := client.GetUpdate(context.Background(), 999)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "update 999 not found")
@@ -197,8 +155,7 @@ func TestAckUpdate_happy(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	err := client.AckUpdate(context.Background(), 101)
 	require.NoError(t, err)
 }
@@ -209,8 +166,7 @@ func TestAckUpdate_apiError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := New("test-token")
-	client.baseURL = srv.URL
+	client := newTestClient(srv.URL, "test-token")
 	err := client.AckUpdate(context.Background(), 101)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Unauthorized")

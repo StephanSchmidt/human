@@ -11,20 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type errDoer struct {
-	err error
-}
-
-func (d *errDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, d.err
-}
-
-type nilDoer struct{}
-
-func (*nilDoer) Do(*http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
 func TestDoRequest_setsBasicAuth(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
@@ -40,32 +26,6 @@ func TestDoRequest_setsBasicAuth(t *testing.T) {
 	resp, err := client.doRequest(context.Background(), http.MethodGet, "/api/2/events/list", "")
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-}
-
-func TestDoRequest_networkError(t *testing.T) {
-	client := New("https://amplitude.com", "key", "secret")
-	client.SetHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")})
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/api/2/events/list", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requesting Amplitude")
-}
-
-func TestDoRequest_nilResponse(t *testing.T) {
-	client := New("https://amplitude.com", "key", "secret")
-	client.SetHTTPDoer(&nilDoer{})
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/api/2/events/list", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "nil response")
-}
-
-func TestDoRequest_invalidBaseURL(t *testing.T) {
-	client := New("ftp://amplitude.com", "key", "secret")
-
-	_, err := client.doRequest(context.Background(), http.MethodGet, "/api/2/events/list", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "scheme must be http or https")
 }
 
 func TestDoRequest_httpError(t *testing.T) {

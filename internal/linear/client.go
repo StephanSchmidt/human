@@ -1,16 +1,13 @@
 package linear
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -83,19 +80,23 @@ const createIssueMutation = `mutation($teamId: String!, $title: String!, $descri
 
 // Client is a Linear GraphQL API client that implements tracker.Provider.
 type Client struct {
-	baseURL string
-	token   string
-	http    tracker.HTTPDoer
+	api *apiclient.Client
 }
 
 // New creates a Linear client with the given base URL and API key.
 func New(baseURL, token string) *Client {
-	return &Client{baseURL: baseURL, token: token, http: http.DefaultClient}
+	return &Client{
+		api: apiclient.New(baseURL,
+			apiclient.WithAuth(apiclient.HeaderAuth("Authorization", token)),
+			apiclient.WithContentType("application/json"),
+			apiclient.WithProviderName("linear"),
+		),
+	}
 }
 
 // SetHTTPDoer replaces the HTTP client used for API requests.
-func (c *Client) SetHTTPDoer(doer tracker.HTTPDoer) {
-	c.http = doer
+func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
+	c.api.SetHTTPDoer(doer)
 }
 
 // ListIssues implements tracker.Lister.
@@ -506,63 +507,7 @@ func (c *Client) resolveTeamID(ctx context.Context, teamKey string) (string, err
 
 // doGraphQL posts a GraphQL query to the Linear API and returns the data field.
 func (c *Client) doGraphQL(ctx context.Context, query string, variables map[string]any) (json.RawMessage, error) {
-	reqBody, err := json.Marshal(graphQLRequest{Query: query, Variables: variables})
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "marshalling graphql request")
-	}
-
-	endpoint := c.baseURL + "/graphql"
-	if err := tracker.ValidateURL(endpoint); err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "creating request",
-			"endpoint", endpoint)
-	}
-	req.Header.Set("Authorization", c.token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "requesting linear",
-			"endpoint", endpoint)
-	}
-	if resp == nil {
-		return nil, errors.WithDetails("requesting linear: nil response",
-			"endpoint", endpoint)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, errors.WithDetails(
-			fmt.Sprintf("linear POST %s returned %d", endpoint, resp.StatusCode),
-			"statusCode", resp.StatusCode, "endpoint", endpoint)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "reading response body",
-			"endpoint", endpoint)
-	}
-
-	var gqlResp graphQLResponse
-	if err := json.Unmarshal(body, &gqlResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding graphql response",
-			"endpoint", endpoint)
-	}
-
-	if len(gqlResp.Errors) > 0 {
-		msgs := make([]string, len(gqlResp.Errors))
-		for i, e := range gqlResp.Errors {
-			msgs[i] = e.Message
-		}
-		return nil, errors.WithDetails(
-			fmt.Sprintf("linear graphql error: %s", strings.Join(msgs, "; ")),
-			"endpoint", endpoint)
-	}
-
-	return gqlResp.Data, nil
+	return c.api.DoGraphQL(ctx, "/graphql", query, variables)
 }
 
 // toTrackerIssue converts a Linear API issue to a tracker.Issue.
