@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,20 +99,8 @@ func deliverCallback(callbackURL string) error {
 
 // readLine reads a single newline-terminated line from a net.Conn.
 func readLine(conn net.Conn) ([]byte, error) {
-	var buf []byte
-	tmp := make([]byte, 1)
-	for {
-		n, err := conn.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[0])
-			if tmp[0] == '\n' {
-				return buf, nil
-			}
-		}
-		if err != nil {
-			return buf, err
-		}
-	}
+	reader := bufio.NewReader(conn)
+	return reader.ReadBytes('\n')
 }
 
 // selectedEnv returns a small set of display-related env vars to forward.

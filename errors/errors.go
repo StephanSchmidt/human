@@ -41,8 +41,8 @@ func extractArgs(message string, details []interface{}) []interface{} {
 	}
 
 	placeholderCount := 0
-	for i := 0; i < len(message)-1; i++ {
-		if message[i] == '%' {
+	for i := 0; i < len(message); i++ {
+		if message[i] == '%' && i+1 < len(message) {
 			if message[i+1] == '%' {
 				i++ // skip escaped %%
 			} else if isFormatVerb(message[i+1]) {

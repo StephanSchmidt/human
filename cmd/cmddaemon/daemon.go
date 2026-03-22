@@ -441,7 +441,10 @@ func resolveHostIP() string {
 	}
 	defer func() { _ = conn.Close() }()
 
-	addr := conn.LocalAddr().(*net.UDPAddr)
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return "localhost"
+	}
 	return addr.IP.String()
 }
 
