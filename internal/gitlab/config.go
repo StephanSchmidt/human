@@ -1,9 +1,6 @@
 package gitlab
 
 import (
-	"os"
-	"strings"
-
 	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -28,62 +25,35 @@ func LoadConfigs(dir string) ([]Config, error) {
 	return configs, nil
 }
 
-// LoadInstances reads config, applies env overrides, creates clients,
-// and returns ready-to-use tracker instances.
-func LoadInstances(dir string) ([]tracker.Instance, error) {
-	configs, err := LoadConfigs(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	instances := make([]tracker.Instance, 0, len(configs))
-	for _, cfg := range configs {
-		if cfg.URL == "" {
-			cfg.URL = "https://gitlab.com"
-		}
-
-		applyEnvOverrides(&cfg)
-		applyGlobalEnvOverrides(&cfg)
-
+// instanceSpec defines how GitLab configs are loaded and built.
+var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
+	Section:    "gitlabs",
+	EnvPrefix:  "GITLAB_",
+	DefaultURL: "https://gitlab.com",
+	EnvFields: []config.EnvField[Config]{
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+	},
+	GetName: func(c Config) string { return c.Name },
+	SetURL:  func(c *Config, v string) { c.URL = v },
+	GetURL:  func(c Config) string { return c.URL },
+	Build: func(cfg Config) (tracker.Instance, bool) {
 		if cfg.Token == "" {
-			continue
+			return tracker.Instance{}, false
 		}
-
-		instances = append(instances, tracker.Instance{
+		return tracker.Instance{
 			Name:        cfg.Name,
 			Kind:        "gitlab",
 			URL:         cfg.URL,
 			Description: cfg.Description,
 			Safe:        cfg.Safe,
 			Provider:    New(cfg.URL, cfg.Token),
-		})
-	}
-	return instances, nil
+		}, true
+	},
 }
 
-// applyGlobalEnvOverrides applies global GITLAB_URL, GITLAB_TOKEN
-// environment variables over any config values.
-func applyGlobalEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv("GITLAB_URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv("GITLAB_TOKEN"); ok {
-		cfg.Token = v
-	}
-}
-
-// applyEnvOverrides checks for per-instance environment variables
-// (GITLAB_<UPPER(name)>_URL, _TOKEN) and overwrites the corresponding
-// struct fields when set.
-func applyEnvOverrides(cfg *Config) {
-	if cfg.Name == "" {
-		return
-	}
-	prefix := "GITLAB_" + strings.ToUpper(cfg.Name) + "_"
-	if v, ok := os.LookupEnv(prefix + "URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv(prefix + "TOKEN"); ok {
-		cfg.Token = v
-	}
+// LoadInstances reads config, applies env overrides, creates clients,
+// and returns ready-to-use tracker instances.
+func LoadInstances(dir string) ([]tracker.Instance, error) {
+	return config.LoadInstances(dir, instanceSpec)
 }

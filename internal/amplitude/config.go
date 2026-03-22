@@ -1,9 +1,6 @@
 package amplitude
 
 import (
-	"os"
-	"strings"
-
 	"github.com/StephanSchmidt/human/internal/config"
 )
 
@@ -35,66 +32,34 @@ func LoadConfigs(dir string) ([]Config, error) {
 	return configs, nil
 }
 
-// LoadInstances reads config, applies env overrides, creates clients,
-// and returns ready-to-use Amplitude instances.
-func LoadInstances(dir string) ([]Instance, error) {
-	configs, err := LoadConfigs(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	instances := make([]Instance, 0, len(configs))
-	for _, cfg := range configs {
-		if cfg.URL == "" {
-			cfg.URL = "https://amplitude.com"
-		}
-
-		applyEnvOverrides(&cfg)
-		applyGlobalEnvOverrides(&cfg)
-
+// instanceSpec defines how Amplitude configs are loaded and built.
+var instanceSpec = config.InstanceSpec[Config, Instance]{
+	Section:    "amplitudes",
+	EnvPrefix:  "AMPLITUDE_",
+	DefaultURL: "https://amplitude.com",
+	EnvFields: []config.EnvField[Config]{
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
+		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }},
+		{Suffix: "SECRET", Set: func(c *Config, v string) { c.Secret = v }},
+	},
+	GetName: func(c Config) string { return c.Name },
+	SetURL:  func(c *Config, v string) { c.URL = v },
+	GetURL:  func(c Config) string { return c.URL },
+	Build: func(cfg Config) (Instance, bool) {
 		if cfg.Key == "" || cfg.Secret == "" {
-			continue
+			return Instance{}, false
 		}
-
-		instances = append(instances, Instance{
+		return Instance{
 			Name:        cfg.Name,
 			URL:         cfg.URL,
 			Description: cfg.Description,
 			Client:      New(cfg.URL, cfg.Key, cfg.Secret),
-		})
-	}
-	return instances, nil
+		}, true
+	},
 }
 
-// applyGlobalEnvOverrides applies global AMPLITUDE_URL, AMPLITUDE_KEY,
-// AMPLITUDE_SECRET environment variables over any config values.
-func applyGlobalEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv("AMPLITUDE_URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv("AMPLITUDE_KEY"); ok {
-		cfg.Key = v
-	}
-	if v, ok := os.LookupEnv("AMPLITUDE_SECRET"); ok {
-		cfg.Secret = v
-	}
-}
-
-// applyEnvOverrides checks for per-instance environment variables
-// (AMPLITUDE_<UPPER(name)>_URL, _KEY, _SECRET) and overwrites the corresponding
-// struct fields when set.
-func applyEnvOverrides(cfg *Config) {
-	if cfg.Name == "" {
-		return
-	}
-	prefix := "AMPLITUDE_" + strings.ToUpper(cfg.Name) + "_"
-	if v, ok := os.LookupEnv(prefix + "URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv(prefix + "KEY"); ok {
-		cfg.Key = v
-	}
-	if v, ok := os.LookupEnv(prefix + "SECRET"); ok {
-		cfg.Secret = v
-	}
+// LoadInstances reads config, applies env overrides, creates clients,
+// and returns ready-to-use Amplitude instances.
+func LoadInstances(dir string) ([]Instance, error) {
+	return config.LoadInstances(dir, instanceSpec)
 }

@@ -3,7 +3,6 @@ package azuredevops
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,125 +75,6 @@ func TestLoadConfigs_missingFile(t *testing.T) {
 	got, err := LoadConfigs(dir)
 	require.NoError(t, err)
 	assert.Nil(t, got)
-}
-
-func TestApplyEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "work", URL: "old-url", Org: "old-org", Token: "old-token"},
-			envs: map[string]string{
-				"AZURE_WORK_URL":   "new-url",
-				"AZURE_WORK_ORG":   "new-org",
-				"AZURE_WORK_TOKEN": "new-token",
-			},
-			want: Config{Name: "work", URL: "new-url", Org: "new-org", Token: "new-token"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "work", URL: "orig-url", Org: "orig-org", Token: "orig-token"},
-			envs: map[string]string{},
-			want: Config{Name: "work", URL: "orig-url", Org: "orig-org", Token: "orig-token"},
-		},
-		{
-			name: "uppercased name",
-			cfg:  Config{Name: "my-org", URL: "old-url", Org: "old-org", Token: "old-token"},
-			envs: map[string]string{
-				"AZURE_MY-ORG_TOKEN": "env-token",
-			},
-			want: Config{Name: "my-org", URL: "old-url", Org: "old-org", Token: "env-token"},
-		},
-		{
-			name: "empty name is a no-op",
-			cfg:  Config{URL: "url", Org: "org", Token: "token"},
-			envs: map[string]string{},
-			want: Config{URL: "url", Org: "org", Token: "token"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "work", URL: "old-url", Org: "old-org", Token: "old-token"},
-			envs: map[string]string{
-				"AZURE_WORK_TOKEN": "env-token",
-			},
-			want: Config{Name: "work", URL: "old-url", Org: "old-org", Token: "env-token"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "AZURE_URL")
-			unsetEnv(t, "AZURE_ORG")
-			unsetEnv(t, "AZURE_TOKEN")
-			for _, suffix := range []string{"URL", "ORG", "TOKEN"} {
-				if tt.cfg.Name != "" {
-					unsetEnv(t, "AZURE_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
-				}
-			}
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyEnvOverrides(&cfg)
-
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
-}
-
-func TestApplyGlobalEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "work", URL: "old-url", Org: "old-org", Token: "old-token"},
-			envs: map[string]string{
-				"AZURE_URL":   "global-url",
-				"AZURE_ORG":   "global-org",
-				"AZURE_TOKEN": "global-token",
-			},
-			want: Config{Name: "work", URL: "global-url", Org: "global-org", Token: "global-token"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "work", URL: "orig-url", Org: "orig-org", Token: "orig-token"},
-			envs: map[string]string{},
-			want: Config{Name: "work", URL: "orig-url", Org: "orig-org", Token: "orig-token"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "work", URL: "old-url", Org: "old-org", Token: "old-token"},
-			envs: map[string]string{
-				"AZURE_TOKEN": "global-token",
-			},
-			want: Config{Name: "work", URL: "old-url", Org: "old-org", Token: "global-token"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "AZURE_URL")
-			unsetEnv(t, "AZURE_ORG")
-			unsetEnv(t, "AZURE_TOKEN")
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyGlobalEnvOverrides(&cfg)
-
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
 }
 
 func TestLoadInstances_happyPath(t *testing.T) {

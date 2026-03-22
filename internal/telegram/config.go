@@ -1,9 +1,6 @@
 package telegram
 
 import (
-	"os"
-	"strings"
-
 	"github.com/StephanSchmidt/human/internal/config"
 )
 
@@ -34,50 +31,29 @@ func LoadConfigs(dir string) ([]Config, error) {
 	return configs, nil
 }
 
-// LoadInstances reads config, applies env overrides, creates clients,
-// and returns ready-to-use Telegram instances.
-func LoadInstances(dir string) ([]Instance, error) {
-	configs, err := LoadConfigs(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	instances := make([]Instance, 0, len(configs))
-	for _, cfg := range configs {
-		applyEnvOverrides(&cfg)
-		applyGlobalEnvOverrides(&cfg)
-
+// instanceSpec defines how Telegram configs are loaded and built.
+var instanceSpec = config.InstanceSpec[Config, Instance]{
+	Section:   "telegrams",
+	EnvPrefix: "TELEGRAM_",
+	EnvFields: []config.EnvField[Config]{
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+	},
+	GetName: func(c Config) string { return c.Name },
+	Build: func(cfg Config) (Instance, bool) {
 		if cfg.Token == "" {
-			continue
+			return Instance{}, false
 		}
-
-		instances = append(instances, Instance{
+		return Instance{
 			Name:         cfg.Name,
 			Description:  cfg.Description,
 			Client:       New(cfg.Token),
 			AllowedUsers: cfg.AllowedUsers,
-		})
-	}
-	return instances, nil
+		}, true
+	},
 }
 
-// applyGlobalEnvOverrides applies global TELEGRAM_TOKEN
-// environment variable over any config value.
-func applyGlobalEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv("TELEGRAM_TOKEN"); ok {
-		cfg.Token = v
-	}
-}
-
-// applyEnvOverrides checks for per-instance environment variables
-// (TELEGRAM_<UPPER(name)>_TOKEN) and overwrites the corresponding
-// struct field when set.
-func applyEnvOverrides(cfg *Config) {
-	if cfg.Name == "" {
-		return
-	}
-	prefix := "TELEGRAM_" + strings.ToUpper(cfg.Name) + "_"
-	if v, ok := os.LookupEnv(prefix + "TOKEN"); ok {
-		cfg.Token = v
-	}
+// LoadInstances reads config, applies env overrides, creates clients,
+// and returns ready-to-use Telegram instances.
+func LoadInstances(dir string) ([]Instance, error) {
+	return config.LoadInstances(dir, instanceSpec)
 }

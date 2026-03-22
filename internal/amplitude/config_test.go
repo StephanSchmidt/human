@@ -3,7 +3,6 @@ package amplitude
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,123 +65,6 @@ func TestLoadConfigs_missingFile(t *testing.T) {
 	got, err := LoadConfigs(dir)
 	require.NoError(t, err)
 	assert.Nil(t, got)
-}
-
-func TestApplyEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "old-secret"},
-			envs: map[string]string{
-				"AMPLITUDE_PRODUCT_URL":    "new-url",
-				"AMPLITUDE_PRODUCT_KEY":    "new-key",
-				"AMPLITUDE_PRODUCT_SECRET": "new-secret",
-			},
-			want: Config{Name: "product", URL: "new-url", Key: "new-key", Secret: "new-secret"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "product", URL: "orig-url", Key: "orig-key", Secret: "orig-secret"},
-			envs: map[string]string{},
-			want: Config{Name: "product", URL: "orig-url", Key: "orig-key", Secret: "orig-secret"},
-		},
-		{
-			name: "uppercased name",
-			cfg:  Config{Name: "my-org", URL: "old-url", Key: "old-key", Secret: "old-secret"},
-			envs: map[string]string{
-				"AMPLITUDE_MY-ORG_KEY": "env-key",
-			},
-			want: Config{Name: "my-org", URL: "old-url", Key: "env-key", Secret: "old-secret"},
-		},
-		{
-			name: "empty name is a no-op",
-			cfg:  Config{URL: "url", Key: "key", Secret: "secret"},
-			envs: map[string]string{},
-			want: Config{URL: "url", Key: "key", Secret: "secret"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "old-secret"},
-			envs: map[string]string{
-				"AMPLITUDE_PRODUCT_SECRET": "env-secret",
-			},
-			want: Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "env-secret"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "AMPLITUDE_URL")
-			unsetEnv(t, "AMPLITUDE_KEY")
-			unsetEnv(t, "AMPLITUDE_SECRET")
-			for _, suffix := range []string{"URL", "KEY", "SECRET"} {
-				if tt.cfg.Name != "" {
-					unsetEnv(t, "AMPLITUDE_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
-				}
-			}
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyEnvOverrides(&cfg)
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
-}
-
-func TestApplyGlobalEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "old-secret"},
-			envs: map[string]string{
-				"AMPLITUDE_URL":    "global-url",
-				"AMPLITUDE_KEY":    "global-key",
-				"AMPLITUDE_SECRET": "global-secret",
-			},
-			want: Config{Name: "product", URL: "global-url", Key: "global-key", Secret: "global-secret"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "product", URL: "orig-url", Key: "orig-key", Secret: "orig-secret"},
-			envs: map[string]string{},
-			want: Config{Name: "product", URL: "orig-url", Key: "orig-key", Secret: "orig-secret"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "old-secret"},
-			envs: map[string]string{
-				"AMPLITUDE_SECRET": "global-secret",
-			},
-			want: Config{Name: "product", URL: "old-url", Key: "old-key", Secret: "global-secret"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "AMPLITUDE_URL")
-			unsetEnv(t, "AMPLITUDE_KEY")
-			unsetEnv(t, "AMPLITUDE_SECRET")
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyGlobalEnvOverrides(&cfg)
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
 }
 
 func TestLoadInstances_happyPath(t *testing.T) {

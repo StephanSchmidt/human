@@ -1,9 +1,6 @@
 package figma
 
 import (
-	"os"
-	"strings"
-
 	"github.com/StephanSchmidt/human/internal/config"
 )
 
@@ -34,60 +31,33 @@ func LoadConfigs(dir string) ([]Config, error) {
 	return configs, nil
 }
 
-// LoadInstances reads config, applies env overrides, creates clients,
-// and returns ready-to-use Figma instances.
-func LoadInstances(dir string) ([]Instance, error) {
-	configs, err := LoadConfigs(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	instances := make([]Instance, 0, len(configs))
-	for _, cfg := range configs {
-		if cfg.URL == "" {
-			cfg.URL = "https://api.figma.com"
-		}
-
-		applyEnvOverrides(&cfg)
-		applyGlobalEnvOverrides(&cfg)
-
+// instanceSpec defines how Figma configs are loaded and built.
+var instanceSpec = config.InstanceSpec[Config, Instance]{
+	Section:    "figmas",
+	EnvPrefix:  "FIGMA_",
+	DefaultURL: "https://api.figma.com",
+	EnvFields: []config.EnvField[Config]{
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+	},
+	GetName: func(c Config) string { return c.Name },
+	SetURL:  func(c *Config, v string) { c.URL = v },
+	GetURL:  func(c Config) string { return c.URL },
+	Build: func(cfg Config) (Instance, bool) {
 		if cfg.Token == "" {
-			continue
+			return Instance{}, false
 		}
-
-		instances = append(instances, Instance{
+		return Instance{
 			Name:        cfg.Name,
 			URL:         cfg.URL,
 			Description: cfg.Description,
 			Client:      New(cfg.URL, cfg.Token),
-		})
-	}
-	return instances, nil
+		}, true
+	},
 }
 
-// applyGlobalEnvOverrides applies global FIGMA_URL, FIGMA_TOKEN
-// environment variables over any config values.
-func applyGlobalEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv("FIGMA_URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv("FIGMA_TOKEN"); ok {
-		cfg.Token = v
-	}
-}
-
-// applyEnvOverrides checks for per-instance environment variables
-// (FIGMA_<UPPER(name)>_URL, _TOKEN) and overwrites the corresponding
-// struct fields when set.
-func applyEnvOverrides(cfg *Config) {
-	if cfg.Name == "" {
-		return
-	}
-	prefix := "FIGMA_" + strings.ToUpper(cfg.Name) + "_"
-	if v, ok := os.LookupEnv(prefix + "URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv(prefix + "TOKEN"); ok {
-		cfg.Token = v
-	}
+// LoadInstances reads config, applies env overrides, creates clients,
+// and returns ready-to-use Figma instances.
+func LoadInstances(dir string) ([]Instance, error) {
+	return config.LoadInstances(dir, instanceSpec)
 }

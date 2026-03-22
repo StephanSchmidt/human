@@ -1,9 +1,6 @@
 package jira
 
 import (
-	"os"
-	"strings"
-
 	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -29,24 +26,23 @@ func LoadConfigs(dir string) ([]Config, error) {
 	return configs, nil
 }
 
-// LoadInstances reads config, applies env overrides, creates clients,
-// and returns ready-to-use tracker instances.
-func LoadInstances(dir string) ([]tracker.Instance, error) {
-	configs, err := LoadConfigs(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	instances := make([]tracker.Instance, 0, len(configs))
-	for _, cfg := range configs {
-		applyEnvOverrides(&cfg)
-		applyGlobalEnvOverrides(&cfg)
-
+// instanceSpec defines how Jira configs are loaded and built.
+var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
+	Section:   "jiras",
+	EnvPrefix: "JIRA_",
+	EnvFields: []config.EnvField[Config]{
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
+		{Suffix: "USER", Set: func(c *Config, v string) { c.User = v }},
+		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }},
+	},
+	GetName: func(c Config) string { return c.Name },
+	SetURL:  func(c *Config, v string) { c.URL = v },
+	GetURL:  func(c Config) string { return c.URL },
+	Build: func(cfg Config) (tracker.Instance, bool) {
 		if cfg.URL == "" || cfg.User == "" || cfg.Key == "" {
-			continue
+			return tracker.Instance{}, false
 		}
-
-		instances = append(instances, tracker.Instance{
+		return tracker.Instance{
 			Name:        cfg.Name,
 			Kind:        "jira",
 			URL:         cfg.URL,
@@ -54,40 +50,12 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 			Description: cfg.Description,
 			Safe:        cfg.Safe,
 			Provider:    New(cfg.URL, cfg.User, cfg.Key),
-		})
-	}
-	return instances, nil
+		}, true
+	},
 }
 
-// applyGlobalEnvOverrides applies global JIRA_URL, JIRA_USER, JIRA_KEY
-// environment variables over any config values.
-func applyGlobalEnvOverrides(cfg *Config) {
-	if v, ok := os.LookupEnv("JIRA_URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv("JIRA_USER"); ok {
-		cfg.User = v
-	}
-	if v, ok := os.LookupEnv("JIRA_KEY"); ok {
-		cfg.Key = v
-	}
-}
-
-// applyEnvOverrides checks for per-instance environment variables
-// (JIRA_<UPPER(name)>_URL, _USER, _KEY) and overwrites the corresponding
-// struct fields when set.
-func applyEnvOverrides(cfg *Config) {
-	if cfg.Name == "" {
-		return
-	}
-	prefix := "JIRA_" + strings.ToUpper(cfg.Name) + "_"
-	if v, ok := os.LookupEnv(prefix + "URL"); ok {
-		cfg.URL = v
-	}
-	if v, ok := os.LookupEnv(prefix + "USER"); ok {
-		cfg.User = v
-	}
-	if v, ok := os.LookupEnv(prefix + "KEY"); ok {
-		cfg.Key = v
-	}
+// LoadInstances reads config, applies env overrides, creates clients,
+// and returns ready-to-use tracker instances.
+func LoadInstances(dir string) ([]tracker.Instance, error) {
+	return config.LoadInstances(dir, instanceSpec)
 }

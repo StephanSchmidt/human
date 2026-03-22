@@ -3,7 +3,6 @@ package jira
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,126 +91,6 @@ func TestLoadConfigs_extensionlessFallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 	assert.Equal(t, "work", got[0].Name)
-}
-
-func TestApplyEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
-			envs: map[string]string{
-				"JIRA_WORK_URL":  "new-url",
-				"JIRA_WORK_USER": "new-user",
-				"JIRA_WORK_KEY":  "new-key",
-			},
-			want: Config{Name: "work", URL: "new-url", User: "new-user", Key: "new-key"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
-			envs: map[string]string{},
-			want: Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
-		},
-		{
-			name: "uppercased name",
-			cfg:  Config{Name: "my-org", URL: "old-url", User: "old-user", Key: "old-key"},
-			envs: map[string]string{
-				"JIRA_MY-ORG_KEY": "env-key",
-			},
-			want: Config{Name: "my-org", URL: "old-url", User: "old-user", Key: "env-key"},
-		},
-		{
-			name: "empty name is a no-op",
-			cfg:  Config{URL: "url", User: "user", Key: "key"},
-			envs: map[string]string{},
-			want: Config{URL: "url", User: "user", Key: "key"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
-			envs: map[string]string{
-				"JIRA_WORK_KEY": "env-key",
-			},
-			want: Config{Name: "work", URL: "old-url", User: "old-user", Key: "env-key"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Unset all possible env vars to isolate tests.
-			unsetEnv(t, "JIRA_URL")
-			unsetEnv(t, "JIRA_USER")
-			unsetEnv(t, "JIRA_KEY")
-			for _, suffix := range []string{"URL", "USER", "KEY"} {
-				if tt.cfg.Name != "" {
-					unsetEnv(t, "JIRA_"+strings.ToUpper(tt.cfg.Name)+"_"+suffix)
-				}
-			}
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyEnvOverrides(&cfg)
-
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
-}
-
-func TestApplyGlobalEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
-			envs: map[string]string{
-				"JIRA_URL":  "global-url",
-				"JIRA_USER": "global-user",
-				"JIRA_KEY":  "global-key",
-			},
-			want: Config{Name: "work", URL: "global-url", User: "global-user", Key: "global-key"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
-			envs: map[string]string{},
-			want: Config{Name: "work", URL: "orig-url", User: "orig-user", Key: "orig-key"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "work", URL: "old-url", User: "old-user", Key: "old-key"},
-			envs: map[string]string{
-				"JIRA_KEY": "global-key",
-			},
-			want: Config{Name: "work", URL: "old-url", User: "old-user", Key: "global-key"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "JIRA_URL")
-			unsetEnv(t, "JIRA_USER")
-			unsetEnv(t, "JIRA_KEY")
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyGlobalEnvOverrides(&cfg)
-
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
 }
 
 func TestLoadInstances_happyPath(t *testing.T) {

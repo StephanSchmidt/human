@@ -3,7 +3,6 @@ package telegram
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,105 +65,6 @@ func TestLoadConfigs_missingFile(t *testing.T) {
 	got, err := LoadConfigs(dir)
 	require.NoError(t, err)
 	assert.Nil(t, got)
-}
-
-func TestApplyEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides all fields",
-			cfg:  Config{Name: "mybot", Token: "old-token"},
-			envs: map[string]string{
-				"TELEGRAM_MYBOT_TOKEN": "new-token",
-			},
-			want: Config{Name: "mybot", Token: "new-token"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "mybot", Token: "orig-token"},
-			envs: map[string]string{},
-			want: Config{Name: "mybot", Token: "orig-token"},
-		},
-		{
-			name: "uppercased name",
-			cfg:  Config{Name: "my-bot", Token: "old-token"},
-			envs: map[string]string{
-				"TELEGRAM_MY-BOT_TOKEN": "env-token",
-			},
-			want: Config{Name: "my-bot", Token: "env-token"},
-		},
-		{
-			name: "empty name is a no-op",
-			cfg:  Config{Token: "token"},
-			envs: map[string]string{},
-			want: Config{Token: "token"},
-		},
-		{
-			name: "partial override",
-			cfg:  Config{Name: "mybot", Token: "old-token"},
-			envs: map[string]string{
-				"TELEGRAM_MYBOT_TOKEN": "env-token",
-			},
-			want: Config{Name: "mybot", Token: "env-token"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "TELEGRAM_TOKEN")
-			if tt.cfg.Name != "" {
-				unsetEnv(t, "TELEGRAM_"+strings.ToUpper(tt.cfg.Name)+"_TOKEN")
-			}
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyEnvOverrides(&cfg)
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
-}
-
-func TestApplyGlobalEnvOverrides(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		envs map[string]string
-		want Config
-	}{
-		{
-			name: "overrides token",
-			cfg:  Config{Name: "mybot", Token: "old-token"},
-			envs: map[string]string{
-				"TELEGRAM_TOKEN": "global-token",
-			},
-			want: Config{Name: "mybot", Token: "global-token"},
-		},
-		{
-			name: "unset env leaves config alone",
-			cfg:  Config{Name: "mybot", Token: "orig-token"},
-			envs: map[string]string{},
-			want: Config{Name: "mybot", Token: "orig-token"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			unsetEnv(t, "TELEGRAM_TOKEN")
-			for k, v := range tt.envs {
-				t.Setenv(k, v)
-			}
-
-			cfg := tt.cfg
-			applyGlobalEnvOverrides(&cfg)
-			assert.Equal(t, tt.want, cfg)
-		})
-	}
 }
 
 func TestLoadInstances_happyPath(t *testing.T) {
