@@ -92,7 +92,9 @@ func (t *McpTranslator) Serve(ctx context.Context, conn net.Conn) error {
 	<-errCh
 	cancel()
 	// Close conn so the other goroutine unblocks if stuck on I/O.
-	_ = conn.Close()
+	if conn != nil {
+		_ = conn.Close()
+	}
 	// Drain the second goroutine's error so it doesn't leak.
 	<-errCh
 
