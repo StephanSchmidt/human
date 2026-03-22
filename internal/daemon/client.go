@@ -83,9 +83,15 @@ func deliverCallback(callbackURL string) error {
 	if err != nil {
 		return err
 	}
-	if httpResp != nil && httpResp.Body != nil {
+	if httpResp == nil {
+		return fmt.Errorf("OAuth callback delivery returned nil response")
+	}
+	if httpResp.Body != nil {
 		defer func() { _ = httpResp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, httpResp.Body)
+	}
+	if httpResp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("OAuth callback delivery failed with status %d", httpResp.StatusCode)
 	}
 	return nil
 }

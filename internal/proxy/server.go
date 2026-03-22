@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"sync"
 
 	"github.com/rs/zerolog"
 
@@ -27,13 +28,15 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return errors.WrapWithDetails(err, "https proxy listen failed",
 			"addr", s.Addr)
 	}
-	defer func() { _ = ln.Close() }()
+	closeOnce := sync.Once{}
+	closeLn := func() { closeOnce.Do(func() { _ = ln.Close() }) }
+	defer closeLn()
 
 	s.Logger.Info().Str("addr", ln.Addr().String()).Msg("https proxy listening")
 
 	go func() {
 		<-ctx.Done()
-		_ = ln.Close()
+		closeLn()
 	}()
 
 	for {

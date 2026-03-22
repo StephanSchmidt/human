@@ -116,6 +116,7 @@ func (s *Server) awaitCallback(ln net.Listener, info *oauth.RedirectInfo) (strin
 			s.Logger.Warn().Err(serveErr).Msg("OAuth callback server error")
 		}
 	}()
+	defer func() { _ = srv.Close() }()
 
 	select {
 	case u := <-callbackURL:

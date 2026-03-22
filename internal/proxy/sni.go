@@ -120,6 +120,10 @@ func parseSNIExtension(data []byte) (string, error) {
 	if len(data) < listLen || listLen == 0 {
 		return "", fmt.Errorf("SNI list length mismatch")
 	}
+	// Clamp listLen to actual data length to prevent out-of-bounds reads.
+	if listLen > len(data) {
+		listLen = len(data)
+	}
 
 	// Parse entries.
 	pos := 0
@@ -128,7 +132,7 @@ func parseSNIExtension(data []byte) (string, error) {
 		nameLen := int(data[pos+1])<<8 | int(data[pos+2])
 		pos += 3
 
-		if pos+nameLen > listLen {
+		if pos+nameLen > listLen || pos+nameLen > len(data) {
 			return "", fmt.Errorf("SNI name length exceeds list")
 		}
 

@@ -18,7 +18,7 @@ func ReadMessage(r io.Reader) ([]byte, error) {
 	}
 
 	if length > MaxMessageSize {
-		return nil, errors.WithDetails("message too large: %d bytes", "size", length)
+		return nil, errors.WithDetails("message too large: %d bytes", "size", int(length))
 	}
 
 	buf := make([]byte, length)
