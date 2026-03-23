@@ -38,6 +38,10 @@ const getTeamIDQuery = `query($key: String!) {
 	teams(filter: { key: { eq: $key } }) { nodes { id } }
 }`
 
+const getProjectIDQuery = `query($name: String!) {
+	projects(filter: { name: { eq: $name } }) { nodes { id name } }
+}`
+
 const getIssueIDQuery = `query($id: String!) {
 	issue(id: $id) { id }
 }`
@@ -71,8 +75,8 @@ const deleteIssueMutation = `mutation($id: String!) {
 	issueDelete(id: $id) { success }
 }`
 
-const createIssueMutation = `mutation($teamId: String!, $title: String!, $description: String) {
-	issueCreate(input: { teamId: $teamId, title: $title, description: $description }) {
+const createIssueMutation = `mutation($teamId: String!, $title: String!, $description: String, $projectId: String) {
+	issueCreate(input: { teamId: $teamId, title: $title, description: $description, projectId: $projectId }) {
 		success
 		issue { identifier title description }
 	}
@@ -155,12 +159,20 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		return nil, err
 	}
 
+	projectID, err := c.resolveProjectID(ctx, issue.Project)
+	if err != nil {
+		return nil, err
+	}
+
 	vars := map[string]any{
 		"teamId": teamID,
 		"title":  issue.Title,
 	}
 	if issue.Description != "" {
 		vars["description"] = issue.Description
+	}
+	if projectID != "" {
+		vars["projectId"] = projectID
 	}
 
 	data, err := c.doGraphQL(ctx, createIssueMutation, vars)
@@ -503,6 +515,29 @@ func (c *Client) resolveTeamID(ctx context.Context, teamKey string) (string, err
 	}
 
 	return result.Teams.Nodes[0].ID, nil
+}
+
+// resolveProjectID looks up the internal Linear project ID for a project name.
+// Returns ("", nil) when no matching project is found (best-effort).
+func (c *Client) resolveProjectID(ctx context.Context, name string) (string, error) {
+	vars := map[string]any{"name": name}
+
+	data, err := c.doGraphQL(ctx, getProjectIDQuery, vars)
+	if err != nil {
+		return "", err
+	}
+
+	var result projectsData
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", errors.WrapWithDetails(err, "decoding projects response",
+			"projectName", name)
+	}
+
+	if len(result.Projects.Nodes) == 0 {
+		return "", nil
+	}
+
+	return result.Projects.Nodes[0].ID, nil
 }
 
 // doGraphQL posts a GraphQL query to the Linear API and returns the data field.

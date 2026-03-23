@@ -118,3 +118,16 @@ type viewerData struct {
 		ID string `json:"id"`
 	} `json:"viewer"`
 }
+
+type projectsData struct {
+	Projects projectConnection `json:"projects"`
+}
+
+type projectConnection struct {
+	Nodes []projectNode `json:"nodes"`
+}
+
+type projectNode struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}

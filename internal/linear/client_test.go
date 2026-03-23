@@ -274,9 +274,15 @@ func TestCreateIssue_happy(t *testing.T) {
 				assert.Equal(t, "ENG", vars["key"])
 				return `{"data":{"teams":{"nodes":[{"id":"team-uuid-123"}]}}}`
 			},
+			"projects(": func(vars map[string]any) string {
+				callCount++
+				assert.Equal(t, "ENG", vars["name"])
+				return `{"data":{"projects":{"nodes":[{"id":"project-uuid-456","name":"ENG"}]}}}`
+			},
 			"issueCreate(": func(vars map[string]any) string {
 				callCount++
 				assert.Equal(t, "team-uuid-123", vars["teamId"])
+				assert.Equal(t, "project-uuid-456", vars["projectId"])
 				assert.Equal(t, "New issue", vars["title"])
 				assert.Equal(t, "Some description", vars["description"])
 				return `{"data":{"issueCreate":{"success":true,"issue":{
@@ -297,7 +303,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, callCount)
+	assert.Equal(t, 3, callCount)
 	assert.Equal(t, "ENG-99", issue.Key)
 	assert.Equal(t, "ENG", issue.Project)
 	assert.Equal(t, "New issue", issue.Title)
@@ -311,9 +317,14 @@ func TestCreateIssue_withoutDescription(t *testing.T) {
 			"teams(": func(_ map[string]any) string {
 				return `{"data":{"teams":{"nodes":[{"id":"team-uuid-123"}]}}}`
 			},
+			"projects(": func(_ map[string]any) string {
+				return `{"data":{"projects":{"nodes":[]}}}`
+			},
 			"issueCreate(": func(vars map[string]any) string {
 				_, hasDesc := vars["description"]
 				assert.False(t, hasDesc, "description should be omitted when empty")
+				_, hasProject := vars["projectId"]
+				assert.False(t, hasProject, "projectId should be omitted when no project found")
 				return `{"data":{"issueCreate":{"success":true,"issue":{
 					"identifier":"ENG-100","title":"No desc","description":"",
 					"state":{"name":""},"priorityLabel":"","assignee":null,"creator":null,
@@ -342,6 +353,9 @@ func TestCreateIssue_serverReturnsFailure(t *testing.T) {
 			"teams(": func(_ map[string]any) string {
 				return `{"data":{"teams":{"nodes":[{"id":"team-uuid-123"}]}}}`
 			},
+			"projects(": func(_ map[string]any) string {
+				return `{"data":{"projects":{"nodes":[]}}}`
+			},
 			"issueCreate(": func(_ map[string]any) string {
 				return `{"data":{"issueCreate":{"success":false,"issue":null}}}`
 			},
@@ -366,6 +380,11 @@ func TestCreateIssue_httpError(t *testing.T) {
 		if callCount == 1 {
 			// Team lookup succeeds.
 			_, _ = fmt.Fprint(w, `{"data":{"teams":{"nodes":[{"id":"tid"}]}}}`)
+			return
+		}
+		if callCount == 2 {
+			// Project lookup succeeds (no match).
+			_, _ = fmt.Fprint(w, `{"data":{"projects":{"nodes":[]}}}`)
 			return
 		}
 		// Create mutation returns HTTP error.
@@ -910,4 +929,112 @@ func TestListStatuses_invalidIssueKey(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot determine team from issue key")
+}
+
+func TestCreateIssue_projectNotFound_stillCreates(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"teams(": func(_ map[string]any) string {
+				return `{"data":{"teams":{"nodes":[{"id":"team-uuid-123"}]}}}`
+			},
+			"projects(": func(_ map[string]any) string {
+				return `{"data":{"projects":{"nodes":[]}}}`
+			},
+			"issueCreate(": func(vars map[string]any) string {
+				_, hasProject := vars["projectId"]
+				assert.False(t, hasProject, "projectId should be omitted when no project found")
+				assert.Equal(t, "team-uuid-123", vars["teamId"])
+				return `{"data":{"issueCreate":{"success":true,"issue":{
+					"identifier":"ENG-50","title":"No project","description":"",
+					"state":{"name":""},"priorityLabel":"","assignee":null,"creator":null,
+					"labels":{"nodes":[]}
+				}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	issue, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "ENG",
+		Title:   "No project",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ENG-50", issue.Key)
+}
+
+func TestCreateIssue_projectLookupError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// Team lookup succeeds.
+			_, _ = fmt.Fprint(w, `{"data":{"teams":{"nodes":[{"id":"tid"}]}}}`)
+			return
+		}
+		// Project lookup returns HTTP error.
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "ENG",
+		Title:   "Will fail",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestResolveProjectID_happy(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"projects(": func(vars map[string]any) string {
+				assert.Equal(t, "HUM", vars["name"])
+				return `{"data":{"projects":{"nodes":[{"id":"proj-uuid","name":"HUM"}]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	id, err := client.resolveProjectID(context.Background(), "HUM")
+
+	require.NoError(t, err)
+	assert.Equal(t, "proj-uuid", id)
+}
+
+func TestResolveProjectID_notFound(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"projects(": func(_ map[string]any) string {
+				return `{"data":{"projects":{"nodes":[]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	id, err := client.resolveProjectID(context.Background(), "NOPE")
+
+	require.NoError(t, err)
+	assert.Equal(t, "", id)
+}
+
+func TestResolveProjectID_graphQLError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":null,"errors":[{"message":"Unauthorized"}]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.resolveProjectID(context.Background(), "HUM")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "graphql error")
 }
