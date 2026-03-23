@@ -3,10 +3,13 @@ package cmdutil
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -25,6 +28,14 @@ func DefaultDeps() Deps {
 		InstanceFromFlags: InstanceFromFlags,
 		AuditLogPath:      AuditLogPath,
 	}
+}
+
+// AutoResult holds the resolved provider and extracted key from ResolveAutoProvider.
+type AutoResult struct {
+	Provider tracker.Provider
+	Kind     string
+	Key      string // resolved key (= input if key, = extracted key if URL)
+	Cleanup  func()
 }
 
 // ResolveProvider loads instances, applies CLI flag overrides, and resolves
@@ -65,10 +76,60 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 // the provider without requiring a fixed kind. It uses tracker.Resolve for
 // auto-detection and falls back to FindTracker + ResolveByKind for ambiguous
 // get commands.
-func ResolveAutoProvider(ctx context.Context, cmd *cobra.Command, keyHint string, allowFindFallback bool, deps Deps) (tracker.Provider, string, func(), error) {
+//
+// When input is a URL, it parses the URL to extract kind, base URL, and key,
+// then tries to match an existing config instance or build one from env vars.
+func ResolveAutoProvider(ctx context.Context, cmd *cobra.Command, input string, allowFindFallback bool, deps Deps) (*AutoResult, error) {
+	if tracker.IsURL(input) {
+		return resolveFromURL(ctx, cmd, input, deps)
+	}
+	return resolveFromKey(ctx, cmd, input, allowFindFallback, deps)
+}
+
+// resolveFromURL handles URL-based resolution.
+func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps Deps) (*AutoResult, error) {
+	parsed, ok := tracker.ParseURL(rawURL)
+	if !ok {
+		return nil, errors.WithDetails("unrecognized tracker URL format", "url", rawURL)
+	}
+
+	// 1. Check existing config for a matching instance.
 	instances, err := deps.LoadInstances(".")
 	if err != nil {
-		return nil, "", nil, err
+		return nil, err
+	}
+
+	if inst := deps.InstanceFromFlags(cmd); inst != nil {
+		instances = append(instances, *inst)
+	}
+
+	if instance := matchInstanceByKindAndURL(instances, parsed.Kind, parsed.BaseURL); instance != nil {
+		return wrapInstance(cmd, instance, parsed.Key, deps)
+	}
+
+	// 2. Try building from env vars.
+	inst, ok := InstanceFromURL(parsed)
+	if ok {
+		// Auto-save config for future use (best-effort).
+		if saveErr := AutoSaveTrackerConfig(parsed, "."); saveErr != nil {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not save config: %v\n", saveErr)
+		} else {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Saved tracker configuration to .humanconfig.yaml")
+		}
+		return wrapInstance(cmd, inst, parsed.Key, deps)
+	}
+
+	// 3. No creds — return actionable error.
+	spec, _ := tracker.CredSpecForKind(parsed.Kind)
+	result := tracker.CheckCreds(spec)
+	return nil, fmt.Errorf("%s", tracker.FormatMissingCreds(result, parsed))
+}
+
+// resolveFromKey is the original key-based resolution logic.
+func resolveFromKey(ctx context.Context, cmd *cobra.Command, keyHint string, allowFindFallback bool, deps Deps) (*AutoResult, error) {
+	instances, err := deps.LoadInstances(".")
+	if err != nil {
+		return nil, err
 	}
 
 	if inst := deps.InstanceFromFlags(cmd); inst != nil {
@@ -84,27 +145,59 @@ func ResolveAutoProvider(ctx context.Context, cmd *cobra.Command, keyHint string
 		result, findErr := tracker.FindTracker(ctx, keyHint, instances)
 		if findErr != nil {
 			// Return the original Resolve error — it's more informative.
-			return nil, "", nil, err
+			return nil, err
 		}
 		instance, err = tracker.ResolveByKind(result.Provider, instances, "")
 		if err != nil {
-			return nil, "", nil, err
+			return nil, err
 		}
 	} else if err != nil {
-		return nil, "", nil, err
+		return nil, err
 	}
 
+	return wrapInstance(cmd, instance, keyHint, deps)
+}
+
+// wrapInstance applies safe/audit wrappers and returns an AutoResult.
+func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, deps Deps) (*AutoResult, error) {
 	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
 	p := instance.Provider
 	if safeFlag || instance.Safe {
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 
+	var errW io.Writer = os.Stderr
+	if cmd != nil {
+		errW = cmd.ErrOrStderr()
+	}
+
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
 	if auditErr != nil {
-		fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
-		return p, instance.Kind, func() {}, nil
+		_, _ = fmt.Fprintln(errW, "warning: audit logging disabled:", auditErr)
+		return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() {}}, nil
 	}
-	return ap, instance.Kind, func() { _ = ap.Close() }, nil
+	return &AutoResult{Provider: ap, Kind: instance.Kind, Key: key, Cleanup: func() { _ = ap.Close() }}, nil
+}
+
+// matchInstanceByKindAndURL finds a configured instance matching the tracker kind
+// whose URL is compatible with the given base URL.
+func matchInstanceByKindAndURL(instances []tracker.Instance, kind, baseURL string) *tracker.Instance {
+	for i := range instances {
+		if instances[i].Kind != kind {
+			continue
+		}
+		if urlsCompatible(instances[i].URL, baseURL) {
+			return &instances[i]
+		}
+	}
+	return nil
+}
+
+// urlsCompatible returns true if two tracker URLs refer to the same instance.
+// It normalizes trailing slashes and compares case-insensitively.
+func urlsCompatible(a, b string) bool {
+	a = strings.TrimRight(strings.ToLower(a), "/")
+	b = strings.TrimRight(strings.ToLower(b), "/")
+	return a == b
 }

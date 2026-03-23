@@ -14,23 +14,22 @@ import (
 // BuildAutoGetCmd creates the top-level "get" command that auto-detects the tracker.
 func BuildAutoGetCmd(deps cmdutil.Deps) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get KEY",
+		Use:   "get KEY_OR_URL",
 		Short: "Get an issue (auto-detect tracker)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := args[0]
-			p, kind, cleanup, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, key, true, deps)
+			result, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, args[0], true, deps)
 			if err != nil {
 				return err
 			}
-			defer cleanup()
+			defer result.Cleanup()
 
-			if err := cmdprovider.RunGetIssue(cmd.Context(), p, cmd.OutOrStdout(), key); err != nil {
+			if err := cmdprovider.RunGetIssue(cmd.Context(), result.Provider, cmd.OutOrStdout(), result.Key); err != nil {
 				return err
 			}
 
-			project := tracker.ExtractProject(key)
-			PrintAutoHints(cmd.ErrOrStderr(), kind, key, project, "get")
+			project := tracker.ExtractProject(result.Key)
+			PrintAutoHints(cmd.ErrOrStderr(), result.Kind, result.Key, project, "get")
 			return nil
 		},
 	}
@@ -45,17 +44,17 @@ func BuildAutoListCmd(deps cmdutil.Deps) *cobra.Command {
 		Use:   "list",
 		Short: "List issues (auto-detect tracker)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, kind, cleanup, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, project, false, deps)
+			result, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, project, false, deps)
 			if err != nil {
 				return err
 			}
-			defer cleanup()
+			defer result.Cleanup()
 
-			if err := cmdprovider.RunListIssues(cmd.Context(), p, cmd.OutOrStdout(), project, all, table); err != nil {
+			if err := cmdprovider.RunListIssues(cmd.Context(), result.Provider, cmd.OutOrStdout(), project, all, table); err != nil {
 				return err
 			}
 
-			PrintAutoHints(cmd.ErrOrStderr(), kind, "", project, "list")
+			PrintAutoHints(cmd.ErrOrStderr(), result.Kind, "", project, "list")
 			return nil
 		},
 	}
@@ -71,23 +70,22 @@ func BuildAutoStatusesCmd(deps cmdutil.Deps) *cobra.Command {
 	var table bool
 
 	cmd := &cobra.Command{
-		Use:   "statuses KEY",
+		Use:   "statuses KEY_OR_URL",
 		Short: "List available statuses for an issue (auto-detect tracker)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := args[0]
-			p, kind, cleanup, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, key, true, deps)
+			result, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, args[0], true, deps)
 			if err != nil {
 				return err
 			}
-			defer cleanup()
+			defer result.Cleanup()
 
-			if err := cmdprovider.RunListStatuses(cmd.Context(), p, cmd.OutOrStdout(), key, table); err != nil {
+			if err := cmdprovider.RunListStatuses(cmd.Context(), result.Provider, cmd.OutOrStdout(), result.Key, table); err != nil {
 				return err
 			}
 
-			project := tracker.ExtractProject(key)
-			PrintAutoHints(cmd.ErrOrStderr(), kind, key, project, "statuses")
+			project := tracker.ExtractProject(result.Key)
+			PrintAutoHints(cmd.ErrOrStderr(), result.Kind, result.Key, project, "statuses")
 			return nil
 		},
 	}
@@ -98,23 +96,22 @@ func BuildAutoStatusesCmd(deps cmdutil.Deps) *cobra.Command {
 // BuildAutoStatusCmd creates the top-level "status" command that auto-detects the tracker.
 func BuildAutoStatusCmd(deps cmdutil.Deps) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status KEY STATUS",
+		Use:   "status KEY_OR_URL STATUS",
 		Short: "Set the status of an issue (auto-detect tracker)",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := args[0]
-			p, kind, cleanup, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, key, true, deps)
+			result, err := cmdutil.ResolveAutoProvider(cmd.Context(), cmd, args[0], true, deps)
 			if err != nil {
 				return err
 			}
-			defer cleanup()
+			defer result.Cleanup()
 
-			if err := cmdprovider.RunSetStatus(cmd.Context(), p, cmd.OutOrStdout(), key, args[1]); err != nil {
+			if err := cmdprovider.RunSetStatus(cmd.Context(), result.Provider, cmd.OutOrStdout(), result.Key, args[1]); err != nil {
 				return err
 			}
 
-			project := tracker.ExtractProject(key)
-			PrintAutoHints(cmd.ErrOrStderr(), kind, key, project, "status")
+			project := tracker.ExtractProject(result.Key)
+			PrintAutoHints(cmd.ErrOrStderr(), result.Kind, result.Key, project, "status")
 			return nil
 		},
 	}
