@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -196,6 +197,21 @@ func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 		tmuxClient := &claude.OSTmuxClient{Runner: runner}
 		procLister := &claude.OSProcessLister{Runner: runner}
 		panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
+
+		// Resolve busy/ready state for each pane.
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			stateReader := claude.OSStateReader{}
+			for i := range panes {
+				if panes[i].Cwd == "" {
+					continue
+				}
+				projectDir := claude.CwdToProjectDir(panes[i].Cwd)
+				root := filepath.Join(home, ".claude", "projects", projectDir)
+				state, _ := stateReader.ReadState(root)
+				panes[i].State = state
+			}
+		}
 		data.Panes = panes
 
 		return usageMsg{data: data}

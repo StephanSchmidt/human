@@ -33,7 +33,7 @@ func (m *mockProcessLister) ListProcesses(_ context.Context) ([]ProcessInfo, err
 // --- parseTmuxOutput tests ---
 
 func TestParseTmuxOutput_WellFormed(t *testing.T) {
-	input := "42\tdev\t0\t0\n99\tops\t1\t2\n"
+	input := "42\tdev\t0\t0\t/home/user/project\n99\tops\t1\t2\t/tmp\n"
 	panes := parseTmuxOutput([]byte(input))
 	if len(panes) != 2 {
 		t.Fatalf("expected 2 panes, got %d", len(panes))
@@ -41,13 +41,28 @@ func TestParseTmuxOutput_WellFormed(t *testing.T) {
 	if panes[0].PID != 42 || panes[0].SessionName != "dev" || panes[0].WindowIndex != 0 || panes[0].PaneIndex != 0 {
 		t.Errorf("pane[0] = %+v", panes[0])
 	}
+	if panes[0].Cwd != "/home/user/project" {
+		t.Errorf("pane[0].Cwd = %q, want /home/user/project", panes[0].Cwd)
+	}
 	if panes[1].PID != 99 || panes[1].SessionName != "ops" || panes[1].WindowIndex != 1 || panes[1].PaneIndex != 2 {
 		t.Errorf("pane[1] = %+v", panes[1])
 	}
 }
 
+func TestParseTmuxOutput_BackwardCompatible(t *testing.T) {
+	// Old 4-field format still works (no cwd).
+	input := "42\tdev\t0\t0\n"
+	panes := parseTmuxOutput([]byte(input))
+	if len(panes) != 1 {
+		t.Fatalf("expected 1 pane, got %d", len(panes))
+	}
+	if panes[0].Cwd != "" {
+		t.Errorf("expected empty cwd for 4-field input, got %q", panes[0].Cwd)
+	}
+}
+
 func TestParseTmuxOutput_MalformedLines(t *testing.T) {
-	input := "bad line\n42\tdev\t0\t0\n\nnot\tenough\tfields\n"
+	input := "bad line\n42\tdev\t0\t0\t/home\n\nnot\tenough\tfields\n"
 	panes := parseTmuxOutput([]byte(input))
 	if len(panes) != 1 {
 		t.Fatalf("expected 1 pane (skipping malformed), got %d", len(panes))
@@ -75,7 +90,7 @@ func TestOSTmuxClient_NoTmux(t *testing.T) {
 }
 
 func TestOSTmuxClient_ParsesOutput(t *testing.T) {
-	runner := &mockRunner{output: []byte("100\twork\t0\t0\n200\thome\t1\t0\n")}
+	runner := &mockRunner{output: []byte("100\twork\t0\t0\t/home/user\n200\thome\t1\t0\t/tmp\n")}
 	client := &OSTmuxClient{Runner: runner}
 	panes, err := client.ListPanes(context.Background())
 	if err != nil {
@@ -449,8 +464,8 @@ func TestMatchesDockerExec_EmptyIDs(t *testing.T) {
 
 func TestFormatTmuxPanes(t *testing.T) {
 	panes := []TmuxPane{
-		{SessionName: "dev", WindowIndex: 0, PaneIndex: 0},
-		{SessionName: "ops", WindowIndex: 1, PaneIndex: 2, Devcontainer: true},
+		{SessionName: "dev", WindowIndex: 0, PaneIndex: 0, State: StateReady},
+		{SessionName: "ops", WindowIndex: 1, PaneIndex: 2, Devcontainer: true, State: StateBusy},
 	}
 	var buf bytes.Buffer
 	err := FormatTmuxPanes(&buf, panes)
@@ -461,11 +476,14 @@ func TestFormatTmuxPanes(t *testing.T) {
 	if !strings.Contains(got, "Tmux panes running claude:") {
 		t.Errorf("output should contain Tmux header, got: %s", got)
 	}
+	if !strings.Contains(got, "🟢") {
+		t.Errorf("output should contain ready emoji for dev pane, got: %s", got)
+	}
 	if !strings.Contains(got, `"dev" (0:0)`) {
 		t.Errorf("output should contain dev pane, got: %s", got)
 	}
-	if strings.Contains(got, `"dev" (0:0) (devcontainer)`) {
-		t.Error("dev pane should not have devcontainer suffix")
+	if !strings.Contains(got, "🔴") {
+		t.Errorf("output should contain busy emoji for ops pane, got: %s", got)
 	}
 	if !strings.Contains(got, `"ops" (1:2) (devcontainer)`) {
 		t.Errorf("output should contain ops pane with devcontainer suffix, got: %s", got)

@@ -16,7 +16,9 @@ type TmuxPane struct {
 	SessionName  string
 	WindowIndex  int
 	PaneIndex    int
-	Devcontainer bool // true when claude runs inside a devcontainer in this pane
+	Cwd          string        // pane working directory
+	Devcontainer bool          // true when claude runs inside a devcontainer in this pane
+	State        InstanceState // busy/ready/unknown
 }
 
 // TmuxClient abstracts listing tmux panes for testability.
@@ -32,7 +34,7 @@ type OSTmuxClient struct {
 // ListPanes runs tmux list-panes and parses the output.
 func (c *OSTmuxClient) ListPanes(ctx context.Context) ([]TmuxPane, error) {
 	out, err := c.Runner.Run(ctx, "tmux", "list-panes", "-a",
-		"-F", "#{pane_pid}\t#{session_name}\t#{window_index}\t#{pane_index}")
+		"-F", "#{pane_pid}\t#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_path}")
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +47,7 @@ func parseTmuxOutput(data []byte) []TmuxPane {
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.Split(line, "\t")
-		if len(parts) != 4 {
+		if len(parts) < 4 {
 			continue
 		}
 		pid, err := strconv.Atoi(strings.TrimSpace(parts[0]))
@@ -60,11 +62,16 @@ func parseTmuxOutput(data []byte) []TmuxPane {
 		if err != nil {
 			continue
 		}
+		cwd := ""
+		if len(parts) >= 5 {
+			cwd = strings.TrimSpace(parts[4])
+		}
 		panes = append(panes, TmuxPane{
 			PID:         pid,
 			SessionName: strings.TrimSpace(parts[1]),
 			WindowIndex: winIdx,
 			PaneIndex:   paneIdx,
+			Cwd:         cwd,
 		})
 	}
 	return panes
@@ -244,7 +251,7 @@ func FormatTmuxPanes(w io.Writer, panes []TmuxPane) error {
 		if p.Devcontainer {
 			suffix = " (devcontainer)"
 		}
-		if _, err := fmt.Fprintf(w, "  %q (%d:%d)%s\n", p.SessionName, p.WindowIndex, p.PaneIndex, suffix); err != nil {
+		if _, err := fmt.Fprintf(w, "  %s %q (%d:%d)%s\n", p.State, p.SessionName, p.WindowIndex, p.PaneIndex, suffix); err != nil {
 			return err
 		}
 	}
