@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -62,10 +63,42 @@ type ContainerInfo struct {
 	Name string
 }
 
+// CwdResolver resolves the current working directory for a process.
+type CwdResolver interface {
+	ResolveCwd(pid int) (string, error)
+}
+
+// ProcCwdResolver reads /proc/<pid>/cwd (Linux).
+type ProcCwdResolver struct{}
+
+func (ProcCwdResolver) ResolveCwd(pid int) (string, error) {
+	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+}
+
+// CwdToProjectDir converts an absolute cwd to the Claude project subdir name.
+// e.g. "/home/user/project" -> "-home-user-project"
+func CwdToProjectDir(cwd string) string {
+	return strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+}
+
+// ShortProjectName returns the last two path components for a readable label.
+// e.g. "/home/user/dev/myproject" -> "dev/myproject"
+func ShortProjectName(cwd string) string {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(cwd)), "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return cwd
+}
+
 // HostFinder discovers Claude Code instances on the local host via pgrep.
 type HostFinder struct {
-	Runner  CommandRunner
-	HomeDir string // override for testing; empty uses os.UserHomeDir result passed externally
+	Runner      CommandRunner
+	HomeDir     string      // override for testing; empty uses os.UserHomeDir result passed externally
+	CwdResolver CwdResolver // nil defaults to ProcCwdResolver
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
@@ -75,7 +108,11 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		return nil, nil
 	}
 
-	seen := make(map[string]bool)
+	resolver := h.CwdResolver
+	if resolver == nil {
+		resolver = ProcCwdResolver{}
+	}
+
 	var instances []Instance
 
 	scanner := bufio.NewScanner(bytes.NewReader(out))
@@ -98,19 +135,24 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
-		// Validate PID is numeric.
-		if _, err := strconv.Atoi(pid); err != nil {
+		pidNum, err := strconv.Atoi(pid)
+		if err != nil {
 			continue
 		}
 
-		root := filepath.Join(h.HomeDir, ".claude", "projects")
-		if seen[root] {
+		// Resolve the working directory for this PID.
+		cwd, err := resolver.ResolveCwd(pidNum)
+		if err != nil {
+			log.Debug().Err(err).Int("pid", pidNum).Msg("cannot resolve cwd, skipping")
 			continue
 		}
-		seen[root] = true
+
+		projectDir := CwdToProjectDir(cwd)
+		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
+		label := fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
 
 		instances = append(instances, Instance{
-			Label:       fmt.Sprintf("Host (PID %s)", pid),
+			Label:       label,
 			Source:      "host",
 			Walker:      OSDirWalker{},
 			StateReader: OSStateReader{},

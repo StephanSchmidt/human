@@ -75,7 +75,7 @@ func printLocalUsage(w io.Writer, now time.Time) error {
 }
 
 func printInstanceUsage(w io.Writer, instances []claude.Instance, now time.Time) error {
-	results := collectResults(instances, now)
+	results := claude.CollectInstanceUsage(instances, now)
 
 	switch {
 	case len(results) == 0:
@@ -85,24 +85,6 @@ func printInstanceUsage(w io.Writer, instances []claude.Instance, now time.Time)
 	default:
 		return claude.FormatMultiUsage(w, results, now)
 	}
-}
-
-func collectResults(instances []claude.Instance, now time.Time) []claude.InstanceUsage {
-	var results []claude.InstanceUsage
-	for _, inst := range instances {
-		summary, err := claude.CalculateUsage(inst.Walker, inst.Root, now)
-		if err != nil {
-			continue
-		}
-		state := claude.StateUnknown
-		if inst.StateReader != nil {
-			if s, sErr := inst.StateReader.ReadState(inst.Root); sErr == nil {
-				state = s
-			}
-		}
-		results = append(results, claude.InstanceUsage{Instance: inst, Summary: summary, State: state})
-	}
-	return results
 }
 
 func buildFinder() claude.InstanceFinder {

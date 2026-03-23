@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -69,6 +70,20 @@ func (m *mockDockerClient) ContainerStats(_ context.Context, containerID string)
 
 func (m *mockDockerClient) Close() error { return nil }
 
+// --- mock CwdResolver ---
+
+type mockCwdResolver struct {
+	cwds map[int]string
+}
+
+func (m *mockCwdResolver) ResolveCwd(pid int) (string, error) {
+	cwd, ok := m.cwds[pid]
+	if !ok {
+		return "", fmt.Errorf("no cwd for PID %d", pid)
+	}
+	return cwd, nil
+}
+
 // --- HostFinder tests ---
 
 func TestHostFinder_NoProcesses(t *testing.T) {
@@ -88,24 +103,35 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 	runner := &mockRunner{
 		output: []byte("12345 /usr/bin/claude --some-flag\n67890 /usr/bin/claude\n"),
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser"}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{
+			12345: "/home/testuser/projects/alpha",
+			67890: "/home/testuser/projects/beta",
+		},
+	}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Should deduplicate to 1 instance (same home dir).
-	if len(instances) != 1 {
-		t.Fatalf("expected 1 instance, got %d", len(instances))
+	if len(instances) != 2 {
+		t.Fatalf("expected 2 instances, got %d", len(instances))
 	}
 	if instances[0].Source != "host" {
 		t.Errorf("source = %q, want host", instances[0].Source)
 	}
-	if !strings.Contains(instances[0].Label, "PID 12345") {
-		t.Errorf("label = %q, want PID 12345", instances[0].Label)
+	if !strings.Contains(instances[0].Label, "projects/alpha") {
+		t.Errorf("label = %q, want to contain projects/alpha", instances[0].Label)
 	}
-	if !strings.HasSuffix(instances[0].Root, ".claude/projects") {
-		t.Errorf("root = %q, want suffix .claude/projects", instances[0].Root)
+	if !strings.Contains(instances[0].Label, "PID 12345") {
+		t.Errorf("label = %q, want to contain PID 12345", instances[0].Label)
+	}
+	if !strings.HasSuffix(instances[0].Root, "-home-testuser-projects-alpha") {
+		t.Errorf("root = %q, want suffix -home-testuser-projects-alpha", instances[0].Root)
+	}
+	if !strings.Contains(instances[1].Label, "projects/beta") {
+		t.Errorf("label = %q, want to contain projects/beta", instances[1].Label)
 	}
 }
 
@@ -121,6 +147,58 @@ func TestHostFinder_IgnoresNonClaude(t *testing.T) {
 	}
 	if len(instances) != 0 {
 		t.Errorf("expected 0 instances, got %d", len(instances))
+	}
+}
+
+func TestHostFinder_CwdResolutionFails(t *testing.T) {
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{
+			12345: "/home/testuser/projects/alpha",
+			// 67890 not present — resolution will fail
+		},
+	}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance (skip unresolvable), got %d", len(instances))
+	}
+	if !strings.Contains(instances[0].Label, "PID 12345") {
+		t.Errorf("label = %q, want PID 12345", instances[0].Label)
+	}
+}
+
+func TestHostFinder_SameProject(t *testing.T) {
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{
+			12345: "/home/testuser/projects/alpha",
+			67890: "/home/testuser/projects/alpha",
+		},
+	}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both should appear even though they share the same project dir.
+	if len(instances) != 2 {
+		t.Fatalf("expected 2 instances, got %d", len(instances))
+	}
+	if instances[0].Root != instances[1].Root {
+		t.Errorf("roots should match: %q vs %q", instances[0].Root, instances[1].Root)
+	}
+	if instances[0].Label == instances[1].Label {
+		t.Errorf("labels should differ (different PIDs): %q", instances[0].Label)
 	}
 }
 
@@ -229,12 +307,14 @@ func TestDockerFinder_ListError(t *testing.T) {
 
 func TestCombinedFinder_AggregatesResults(t *testing.T) {
 	f1 := &HostFinder{
-		Runner:  &mockRunner{output: []byte("100 /usr/bin/claude\n")},
-		HomeDir: "/home/user1",
+		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
+		HomeDir:     "/home/user1",
+		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
 	}
 	f2 := &HostFinder{
-		Runner:  &mockRunner{output: []byte("200 /usr/bin/claude\n")},
-		HomeDir: "/home/user2",
+		Runner:      &mockRunner{output: []byte("200 /usr/bin/claude\n")},
+		HomeDir:     "/home/user2",
+		CwdResolver: &mockCwdResolver{cwds: map[int]string{200: "/home/user2/project-b"}},
 	}
 
 	combined := &CombinedFinder{Finders: []InstanceFinder{f1, f2}}
@@ -249,8 +329,9 @@ func TestCombinedFinder_AggregatesResults(t *testing.T) {
 
 func TestCombinedFinder_SkipsFailingFinder(t *testing.T) {
 	good := &HostFinder{
-		Runner:  &mockRunner{output: []byte("100 /usr/bin/claude\n")},
-		HomeDir: "/home/user1",
+		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
+		HomeDir:     "/home/user1",
+		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
 	}
 	bad := &DockerFinder{
 		Client: &mockDockerClient{listErr: errors.New("docker down")},
@@ -327,5 +408,41 @@ func TestByteWalker_Empty(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("expected 0 lines, got %d", count)
+	}
+}
+
+// --- helper function tests ---
+
+func TestCwdToProjectDir(t *testing.T) {
+	tests := []struct {
+		cwd  string
+		want string
+	}{
+		{"/home/user/project", "-home-user-project"},
+		{"/home/user/dev/myapp", "-home-user-dev-myapp"},
+		{"/", "-"},
+	}
+	for _, tt := range tests {
+		got := CwdToProjectDir(tt.cwd)
+		if got != tt.want {
+			t.Errorf("CwdToProjectDir(%q) = %q, want %q", tt.cwd, got, tt.want)
+		}
+	}
+}
+
+func TestShortProjectName(t *testing.T) {
+	tests := []struct {
+		cwd  string
+		want string
+	}{
+		{"/home/user/dev/myproject", "dev/myproject"},
+		{"/home/user", "home/user"},
+		{"/single", "/single"},
+	}
+	for _, tt := range tests {
+		got := ShortProjectName(tt.cwd)
+		if got != tt.want {
+			t.Errorf("ShortProjectName(%q) = %q, want %q", tt.cwd, got, tt.want)
+		}
 	}
 }

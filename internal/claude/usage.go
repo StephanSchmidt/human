@@ -259,6 +259,25 @@ type InstanceUsage struct {
 	State    InstanceState
 }
 
+// CollectInstanceUsage calculates usage for each instance and returns results.
+func CollectInstanceUsage(instances []Instance, now time.Time) []InstanceUsage {
+	var results []InstanceUsage
+	for _, inst := range instances {
+		summary, err := CalculateUsage(inst.Walker, inst.Root, now)
+		if err != nil {
+			continue
+		}
+		state := StateUnknown
+		if inst.StateReader != nil {
+			if s, sErr := inst.StateReader.ReadState(inst.Root); sErr == nil {
+				state = s
+			}
+		}
+		results = append(results, InstanceUsage{Instance: inst, Summary: summary, State: state})
+	}
+	return results
+}
+
 // MergeUsage adds all model usage from src into dst.
 func MergeUsage(dst, src *UsageSummary) {
 	for model, srcMU := range src.Models {
