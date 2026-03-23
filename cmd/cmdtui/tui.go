@@ -198,23 +198,53 @@ func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 		procLister := &claude.OSProcessLister{Runner: runner}
 		panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
 
-		// Resolve busy/ready state for each pane.
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			stateReader := claude.OSStateReader{}
-			for i := range panes {
-				if panes[i].Cwd == "" {
-					continue
-				}
-				projectDir := claude.CwdToProjectDir(panes[i].Cwd)
-				root := filepath.Join(home, ".claude", "projects", projectDir)
-				state, _ := stateReader.ReadState(root)
-				panes[i].State = state
+		// Build container ID → state map from discovered instances.
+		containerState := make(map[string]claude.InstanceState)
+		for _, iu := range data.Instances {
+			if iu.Instance.Source == "container" && iu.Instance.ContainerID != "" {
+				containerState[iu.Instance.ContainerID] = iu.State
 			}
 		}
+
+		resolvePaneStates(panes, containerState)
 		data.Panes = panes
 
 		return usageMsg{data: data}
+	}
+}
+
+// resolvePaneStates resolves busy/ready state for each tmux pane.
+func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude.InstanceState) {
+	home, _ := os.UserHomeDir()
+	sessResolver := claude.FileSessionResolver{HomeDir: home}
+	for i := range panes {
+		if panes[i].Devcontainer && panes[i].ContainerID != "" {
+			if st, ok := containerState[panes[i].ContainerID]; ok {
+				panes[i].State = st
+				continue
+			}
+		}
+		if home == "" || panes[i].Cwd == "" {
+			continue
+		}
+		projectDir := claude.CwdToProjectDir(panes[i].Cwd)
+		root := filepath.Join(home, ".claude", "projects", projectDir)
+
+		var stateReader claude.StateReader = claude.OSStateReader{}
+		if panes[i].ClaudePID > 0 {
+			if sessionID, sErr := sessResolver.ResolveSessionID(panes[i].ClaudePID); sErr == nil {
+				sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
+				if _, fErr := os.Stat(sessionPath); fErr == nil {
+					stateReader = claude.FileStateReader{Path: sessionPath}
+				} else {
+					// Session file exists but JSONL not yet created — idle at prompt.
+					stateReader = claude.ReadyStateReader{}
+				}
+			}
+		}
+
+		state, _ := stateReader.ReadState(root)
+		panes[i].State = state
 	}
 }
 

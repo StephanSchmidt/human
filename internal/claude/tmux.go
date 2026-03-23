@@ -18,6 +18,8 @@ type TmuxPane struct {
 	PaneIndex    int
 	Cwd          string        // pane working directory
 	Devcontainer bool          // true when claude runs inside a devcontainer in this pane
+	ContainerID  string        // matched container ID (only set when Devcontainer is true)
+	ClaudePID    int           // PID of the actual claude process (0 if unknown)
 	State        InstanceState // busy/ready/unknown
 }
 
@@ -183,9 +185,11 @@ func FindClaudePanes(ctx context.Context, client TmuxClient, lister ProcessListe
 
 	var matched []TmuxPane
 	for _, pane := range panes {
-		found, devcontainer := findClaude(pane.PID, children, info, containerSet)
+		found, devcontainer, containerID, claudePID := findClaude(pane.PID, children, info, containerSet)
 		if found {
 			pane.Devcontainer = devcontainer
+			pane.ContainerID = containerID
+			pane.ClaudePID = claudePID
 			matched = append(matched, pane)
 		}
 	}
@@ -193,29 +197,38 @@ func FindClaudePanes(ctx context.Context, client TmuxClient, lister ProcessListe
 }
 
 // findClaude does a BFS over the process tree rooted at pid, returning whether
-// a Claude process was found and whether it runs inside a devcontainer.
-func findClaude(pid int, children map[int][]int, info map[int]ProcessInfo, containerIDs map[string]bool) (found, devcontainer bool) {
+// a Claude process was found, whether it runs inside a devcontainer, the
+// matched container ID (empty when running on the host), and the claude PID.
+func findClaude(pid int, children map[int][]int, info map[int]ProcessInfo, containerIDs map[string]bool) (found, devcontainer bool, containerID string, claudePID int) {
 	queue := children[pid]
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
 		p := info[cur]
 		if p.Comm == "claude" {
-			return true, false
+			return true, false, "", cur
 		}
-		if p.Comm == "docker" && matchesDockerExec(p.Args, containerIDs) {
-			return true, true
+		if p.Comm == "docker" {
+			if cid := matchedDockerExecContainer(p.Args, containerIDs); cid != "" {
+				return true, true, cid, 0
+			}
 		}
 		queue = append(queue, children[cur]...)
 	}
-	return false, false
+	return false, false, "", 0
 }
 
 // matchesDockerExec checks if args look like "docker exec ... <containerID>"
 // where containerID is in the known set.
 func matchesDockerExec(args string, containerIDs map[string]bool) bool {
+	return matchedDockerExecContainer(args, containerIDs) != ""
+}
+
+// matchedDockerExecContainer returns the full container ID if args match
+// "docker exec ... <containerID>" for a known container, or empty string.
+func matchedDockerExecContainer(args string, containerIDs map[string]bool) string {
 	if len(containerIDs) == 0 {
-		return false
+		return ""
 	}
 	fields := strings.Fields(args)
 	// Look for "exec" as the docker subcommand, then check if any field
@@ -231,11 +244,11 @@ func matchesDockerExec(args string, containerIDs map[string]bool) bool {
 		}
 		for id := range containerIDs {
 			if strings.HasPrefix(id, f) || strings.HasPrefix(f, id) {
-				return true
+				return id
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // FormatTmuxPanes writes the tmux pane listing to w.

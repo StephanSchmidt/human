@@ -187,6 +187,28 @@ func splitLines(data []byte) [][]byte {
 	return lines
 }
 
+// FileStateReader reads state from a specific JSONL file path,
+// rather than searching for the newest file in a directory.
+type FileStateReader struct {
+	Path string
+}
+
+func (f FileStateReader) ReadState(_ string) (InstanceState, error) {
+	lines, err := readTailLines(f.Path, 64*1024)
+	if err != nil {
+		return StateUnknown, err
+	}
+	return DetermineState(lines), nil
+}
+
+// ReadyStateReader always returns StateReady. Used when a session file exists
+// but the JSONL has not been created yet (idle session, no conversation started).
+type ReadyStateReader struct{}
+
+func (ReadyStateReader) ReadState(_ string) (InstanceState, error) {
+	return StateReady, nil
+}
+
 // ByteStateReader reads state from in-memory data (e.g. container output).
 type ByteStateReader struct {
 	Data []byte

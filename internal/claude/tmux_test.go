@@ -158,6 +158,9 @@ func TestFindClaudePanes_DirectChild(t *testing.T) {
 	if panes[0].SessionName != "dev" {
 		t.Errorf("session = %q, want dev", panes[0].SessionName)
 	}
+	if panes[0].ClaudePID != 200 {
+		t.Errorf("ClaudePID = %d, want 200", panes[0].ClaudePID)
+	}
 }
 
 func TestFindClaudePanes_DeepDescendant(t *testing.T) {
@@ -366,12 +369,18 @@ func TestFindClaudePanes_ProcessListError(t *testing.T) {
 func TestFindClaude_DirectClaude(t *testing.T) {
 	children := map[int][]int{100: {200}}
 	info := map[int]ProcessInfo{200: {PID: 200, Comm: "claude"}}
-	found, dc := findClaude(100, children, info, nil)
+	found, dc, cid, claudePID := findClaude(100, children, info, nil)
 	if !found {
 		t.Error("expected found for direct claude child")
 	}
 	if dc {
 		t.Error("expected devcontainer=false for direct claude")
+	}
+	if cid != "" {
+		t.Errorf("expected empty containerID for direct claude, got %q", cid)
+	}
+	if claudePID != 200 {
+		t.Errorf("expected claudePID=200, got %d", claudePID)
 	}
 }
 
@@ -381,12 +390,15 @@ func TestFindClaude_DeepClaude(t *testing.T) {
 		200: {PID: 200, Comm: "bash"},
 		300: {PID: 300, Comm: "claude"},
 	}
-	found, dc := findClaude(100, children, info, nil)
+	found, dc, _, claudePID := findClaude(100, children, info, nil)
 	if !found {
 		t.Error("expected found for deep claude descendant")
 	}
 	if dc {
 		t.Error("expected devcontainer=false for deep claude")
+	}
+	if claudePID != 300 {
+		t.Errorf("expected claudePID=300, got %d", claudePID)
 	}
 }
 
@@ -396,19 +408,25 @@ func TestFindClaude_DockerExecMatch(t *testing.T) {
 		200: {PID: 200, Comm: "docker", Args: "docker exec -i abc123full bash"},
 	}
 	ids := map[string]bool{"abc123full": true}
-	found, dc := findClaude(100, children, info, ids)
+	found, dc, cid, claudePID := findClaude(100, children, info, ids)
 	if !found {
 		t.Error("expected found for docker exec into known container")
 	}
 	if !dc {
 		t.Error("expected devcontainer=true for docker exec match")
 	}
+	if cid != "abc123full" {
+		t.Errorf("expected containerID abc123full, got %q", cid)
+	}
+	if claudePID != 0 {
+		t.Errorf("expected claudePID=0 for docker exec, got %d", claudePID)
+	}
 }
 
 func TestFindClaude_None(t *testing.T) {
 	children := map[int][]int{100: {200}}
 	info := map[int]ProcessInfo{200: {PID: 200, Comm: "vim"}}
-	found, _ := findClaude(100, children, info, nil)
+	found, _, _, _ := findClaude(100, children, info, nil)
 	if found {
 		t.Error("expected not found when no claude descendant")
 	}
@@ -417,7 +435,7 @@ func TestFindClaude_None(t *testing.T) {
 func TestFindClaude_NoChildren(t *testing.T) {
 	children := map[int][]int{}
 	info := map[int]ProcessInfo{}
-	found, _ := findClaude(100, children, info, nil)
+	found, _, _, _ := findClaude(100, children, info, nil)
 	if found {
 		t.Error("expected not found for PID with no children")
 	}

@@ -191,3 +191,61 @@ func TestByteStateReader_Empty(t *testing.T) {
 		t.Errorf("empty: got %v, want Unknown", state)
 	}
 }
+
+func TestFileStateReader_Ready(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	entry := makeStateEntry(t, "assistant", strPtr("end_turn"))
+	if err := os.WriteFile(path, append(entry, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := FileStateReader{Path: path}
+	state, err := reader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("FileStateReader ready: got %v, want Ready", state)
+	}
+}
+
+func TestFileStateReader_Busy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	entry := makeStateEntry(t, "user", nil)
+	if err := os.WriteFile(path, append(entry, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := FileStateReader{Path: path}
+	state, err := reader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateBusy {
+		t.Errorf("FileStateReader busy: got %v, want Busy", state)
+	}
+}
+
+func TestReadyStateReader(t *testing.T) {
+	reader := ReadyStateReader{}
+	state, err := reader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("ReadyStateReader: got %v, want Ready", state)
+	}
+}
+
+func TestFileStateReader_MissingFile(t *testing.T) {
+	reader := FileStateReader{Path: "/nonexistent/path/session.jsonl"}
+	state, err := reader.ReadState("")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if state != StateUnknown {
+		t.Errorf("FileStateReader missing: got %v, want Unknown", state)
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +72,16 @@ func (m *mockDockerClient) ContainerStats(_ context.Context, containerID string)
 
 func (m *mockDockerClient) Close() error { return nil }
 
+// --- mock ContainerChecker ---
+
+type mockContainerChecker struct {
+	containerized map[int]bool
+}
+
+func (m *mockContainerChecker) IsContainerized(pid int) bool {
+	return m.containerized[pid]
+}
+
 // --- mock CwdResolver ---
 
 type mockCwdResolver struct {
@@ -82,6 +94,20 @@ func (m *mockCwdResolver) ResolveCwd(pid int) (string, error) {
 		return "", fmt.Errorf("no cwd for PID %d", pid)
 	}
 	return cwd, nil
+}
+
+// --- mock SessionResolver ---
+
+type mockSessionResolver struct {
+	sessions map[int]string
+}
+
+func (m *mockSessionResolver) ResolveSessionID(pid int) (string, error) {
+	sid, ok := m.sessions[pid]
+	if !ok {
+		return "", fmt.Errorf("no session for PID %d", pid)
+	}
+	return sid, nil
 }
 
 // --- HostFinder tests ---
@@ -202,6 +228,180 @@ func TestHostFinder_SameProject(t *testing.T) {
 	}
 }
 
+func TestHostFinder_SkipsContainerizedProcesses(t *testing.T) {
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{
+			12345: "/home/testuser/projects/alpha",
+			67890: "/workspaces/cli",
+		},
+	}
+	checker := &mockContainerChecker{
+		containerized: map[int]bool{
+			67890: true, // this PID is inside a container
+		},
+	}
+	finder := &HostFinder{
+		Runner:           runner,
+		HomeDir:          "/home/testuser",
+		CwdResolver:      resolver,
+		ContainerChecker: checker,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance (skip containerized), got %d", len(instances))
+	}
+	if !strings.Contains(instances[0].Label, "PID 12345") {
+		t.Errorf("label = %q, want PID 12345 (non-containerized)", instances[0].Label)
+	}
+}
+
+func TestHostFinder_UsesSessionResolver(t *testing.T) {
+	// Create a temp dir to act as HomeDir with a session JSONL file.
+	homeDir := t.TempDir()
+	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
+	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := "abc-session-123"
+	sessionFile := filepath.Join(root, sessionID+".jsonl")
+	entry := makeStateEntry(t, "assistant", strPtr("end_turn"))
+	if err := os.WriteFile(sessionFile, append(entry, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
+	}
+	sessResolver := &mockSessionResolver{
+		sessions: map[int]string{12345: sessionID},
+	}
+	finder := &HostFinder{
+		Runner:          runner,
+		HomeDir:         homeDir,
+		CwdResolver:     resolver,
+		SessionResolver: sessResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+
+	// Should be FileStateReader, not OSStateReader.
+	if _, ok := instances[0].StateReader.(FileStateReader); !ok {
+		t.Errorf("StateReader type = %T, want FileStateReader", instances[0].StateReader)
+	}
+
+	// Verify it reads the correct state.
+	state, err := instances[0].StateReader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("state = %v, want Ready", state)
+	}
+}
+
+func TestHostFinder_SessionResolverFallback(t *testing.T) {
+	// When session resolution fails, OSStateReader should be used.
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
+	}
+	// Empty sessions map — resolution will fail.
+	sessResolver := &mockSessionResolver{sessions: map[int]string{}}
+	finder := &HostFinder{
+		Runner:          runner,
+		HomeDir:         "/home/testuser",
+		CwdResolver:     resolver,
+		SessionResolver: sessResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+
+	if _, ok := instances[0].StateReader.(OSStateReader); !ok {
+		t.Errorf("StateReader type = %T, want OSStateReader (fallback)", instances[0].StateReader)
+	}
+}
+
+func TestHostFinder_SessionResolvesButNoJSONL(t *testing.T) {
+	// When session resolves but the JSONL file doesn't exist yet (new session),
+	// ReadyStateReader should be used — NOT OSStateReader which would read
+	// a different session's JSONL and show the wrong state.
+	homeDir := t.TempDir()
+	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
+	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a JSONL for a DIFFERENT session (simulates another active session).
+	otherEntry := makeStateEntry(t, "user", nil) // busy
+	if err := os.WriteFile(filepath.Join(root, "other-session.jsonl"), append(otherEntry, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &mockRunner{
+		output: []byte("12345 /usr/bin/claude\n"),
+	}
+	resolver := &mockCwdResolver{
+		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
+	}
+	// Session resolves to an ID whose JSONL doesn't exist.
+	sessResolver := &mockSessionResolver{
+		sessions: map[int]string{12345: "new-session-no-jsonl"},
+	}
+	finder := &HostFinder{
+		Runner:          runner,
+		HomeDir:         homeDir,
+		CwdResolver:     resolver,
+		SessionResolver: sessResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+
+	if _, ok := instances[0].StateReader.(ReadyStateReader); !ok {
+		t.Errorf("StateReader type = %T, want ReadyStateReader (session exists, JSONL missing)", instances[0].StateReader)
+	}
+
+	state, err := instances[0].StateReader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("state = %v, want Ready (idle new session)", state)
+	}
+}
+
 // --- DockerFinder tests ---
 
 func makeJSONLLine(t *testing.T, model string, ts time.Time, input, output int) []byte {
@@ -236,7 +436,8 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 		},
 		execResults: map[string]mockExecResult{
 			"abc123def456|pgrep": {exitCode: 0, data: []byte("1\n")},
-			"abc123def456|sh":    {exitCode: 0, data: jsonlData},
+			"abc123def456|sh":    {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"abc123def456|cat":   {exitCode: 0, data: jsonlData},
 		},
 		statsResults: map[string]mockStatsResult{
 			"abc123def456": {mem: &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024}},
@@ -268,6 +469,84 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 	}
 	if instances[0].Memory.Limit != 2*1024*1024*1024 {
 		t.Errorf("memory limit = %d, want %d", instances[0].Memory.Limit, 2*1024*1024*1024)
+	}
+}
+
+func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
+	// Simulate two JSONL sessions: an older completed one (end_turn) and
+	// a newer active one (user message as last entry). The file listing
+	// returns them in arbitrary filesystem order (newer file listed first).
+	// After sorting by mtime, the newer (active) file should be last,
+	// so DetermineState should return Busy, not Ready.
+
+	endTurn := "end_turn"
+	oldSession, _ := json.Marshal(map[string]interface{}{
+		"type": "assistant",
+		"message": map[string]interface{}{
+			"stop_reason": &endTurn,
+		},
+	})
+	newSession, _ := json.Marshal(map[string]interface{}{
+		"type": "user",
+	})
+
+	// File listing: newer file (mtime 2000) and older file (mtime 1000)
+	// returned in wrong order by filesystem.
+	fileList := "2000 /root/.claude/projects/new-session.jsonl\n1000 /root/.claude/projects/old-session.jsonl\n"
+
+	// Cat will be called with files sorted oldest-first: old then new.
+	// So concatenated data = oldSession + "\n" + newSession + "\n"
+	catData := append(oldSession, '\n')
+	catData = append(catData, newSession...)
+	catData = append(catData, '\n')
+
+	dc := &mockDockerClient{
+		containers: []ContainerInfo{
+			{ID: "statetest12345", Name: "state-test"},
+		},
+		execResults: map[string]mockExecResult{
+			"statetest12345|pgrep": {exitCode: 0, data: []byte("1\n")},
+			"statetest12345|sh":    {exitCode: 0, data: []byte(fileList)},
+			"statetest12345|cat":   {exitCode: 0, data: catData},
+		},
+	}
+
+	finder := &DockerFinder{Client: dc}
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+
+	state, err := instances[0].StateReader.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateBusy {
+		t.Errorf("state = %v, want Busy (newest session is active)", state)
+	}
+}
+
+func TestSortFilesByMtime(t *testing.T) {
+	input := []byte("1711000300 /path/c.jsonl\n1711000100 /path/a.jsonl\n1711000200 /path/b.jsonl\n")
+	got := sortFilesByMtime(input)
+	want := []string{"/path/a.jsonl", "/path/b.jsonl", "/path/c.jsonl"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSortFilesByMtime_Empty(t *testing.T) {
+	got := sortFilesByMtime(nil)
+	if len(got) != 0 {
+		t.Errorf("expected empty, got %v", got)
 	}
 }
 

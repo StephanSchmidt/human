@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -63,6 +65,24 @@ type ContainerInfo struct {
 	Name string
 }
 
+// ContainerChecker determines whether a process is running inside a container.
+type ContainerChecker interface {
+	IsContainerized(pid int) bool
+}
+
+// ProcContainerChecker reads /proc/<pid>/cgroup to detect containerized processes.
+type ProcContainerChecker struct{}
+
+func (ProcContainerChecker) IsContainerized(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+	if err != nil {
+		return false
+	}
+	s := string(data)
+	return strings.Contains(s, "docker") || strings.Contains(s, "containerd") ||
+		strings.Contains(s, "/lxc/") || strings.Contains(s, "/kubepods")
+}
+
 // CwdResolver resolves the current working directory for a process.
 type CwdResolver interface {
 	ResolveCwd(pid int) (string, error)
@@ -73,6 +93,34 @@ type ProcCwdResolver struct{}
 
 func (ProcCwdResolver) ResolveCwd(pid int) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+}
+
+// SessionResolver resolves the session ID for a Claude process.
+type SessionResolver interface {
+	ResolveSessionID(pid int) (string, error)
+}
+
+// FileSessionResolver reads session info from ~/.claude/sessions/<PID>.json.
+type FileSessionResolver struct {
+	HomeDir string
+}
+
+func (r FileSessionResolver) ResolveSessionID(pid int) (string, error) {
+	path := filepath.Join(r.HomeDir, ".claude", "sessions", fmt.Sprintf("%d.json", pid))
+	data, err := os.ReadFile(path) // #nosec G304 — path constructed from trusted home dir + PID
+	if err != nil {
+		return "", err
+	}
+	var session struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(data, &session); err != nil {
+		return "", err
+	}
+	if session.SessionID == "" {
+		return "", fmt.Errorf("empty sessionId in %s", path)
+	}
+	return session.SessionID, nil
 }
 
 // CwdToProjectDir converts an absolute cwd to the Claude project subdir name.
@@ -96,9 +144,11 @@ func ShortProjectName(cwd string) string {
 
 // HostFinder discovers Claude Code instances on the local host via pgrep.
 type HostFinder struct {
-	Runner      CommandRunner
-	HomeDir     string      // override for testing; empty uses os.UserHomeDir result passed externally
-	CwdResolver CwdResolver // nil defaults to ProcCwdResolver
+	Runner           CommandRunner
+	HomeDir          string           // override for testing; empty uses os.UserHomeDir result passed externally
+	CwdResolver      CwdResolver      // nil defaults to ProcCwdResolver
+	ContainerChecker ContainerChecker // nil defaults to ProcContainerChecker
+	SessionResolver  SessionResolver  // nil defaults to FileSessionResolver{HomeDir: h.HomeDir}
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
@@ -111,6 +161,16 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 	resolver := h.CwdResolver
 	if resolver == nil {
 		resolver = ProcCwdResolver{}
+	}
+
+	ctrChecker := h.ContainerChecker
+	if ctrChecker == nil {
+		ctrChecker = ProcContainerChecker{}
+	}
+
+	sessResolver := h.SessionResolver
+	if sessResolver == nil {
+		sessResolver = FileSessionResolver{HomeDir: h.HomeDir}
 	}
 
 	var instances []Instance
@@ -140,6 +200,12 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
+		// Skip processes running inside containers — DockerFinder handles those.
+		if ctrChecker.IsContainerized(pidNum) {
+			log.Debug().Int("pid", pidNum).Msg("skipping containerized process")
+			continue
+		}
+
 		// Resolve the working directory for this PID.
 		cwd, err := resolver.ResolveCwd(pidNum)
 		if err != nil {
@@ -151,11 +217,22 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
 		label := fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
 
+		var stateReader StateReader = OSStateReader{}
+		if sessionID, sErr := sessResolver.ResolveSessionID(pidNum); sErr == nil {
+			sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
+			if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 — sessionID comes from trusted local file
+				stateReader = FileStateReader{Path: sessionPath}
+			} else {
+				// Session file exists but JSONL not yet created — idle at prompt.
+				stateReader = ReadyStateReader{}
+			}
+		}
+
 		instances = append(instances, Instance{
 			Label:       label,
 			Source:      "host",
 			Walker:      OSDirWalker{},
-			StateReader: OSStateReader{},
+			StateReader: stateReader,
 			Root:        root,
 		})
 	}
@@ -181,16 +258,34 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
-		// Fetch all JSONL content from the container.
-		_, reader, err := d.Client.Exec(ctx, ctr.ID, []string{
+		// List JSONL files with modification times from the container.
+		_, listReader, err := d.Client.Exec(ctx, ctr.ID, []string{
 			"sh", "-c",
-			"find /root/.claude/projects /home -maxdepth 6 -name '*.jsonl' -exec cat {} + 2>/dev/null",
+			"find /root/.claude/projects /home -maxdepth 6 -name '*.jsonl' -exec stat -c '%Y %n' {} + 2>/dev/null",
 		})
 		if err != nil {
 			continue
 		}
 
-		data, err := io.ReadAll(reader)
+		listData, err := io.ReadAll(listReader)
+		if err != nil {
+			continue
+		}
+
+		// Parse and sort files by modification time (oldest first, newest last).
+		sortedFiles := sortFilesByMtime(listData)
+		if len(sortedFiles) == 0 {
+			continue
+		}
+
+		// Cat the files in sorted order so newest session data is last.
+		catArgs := append([]string{"cat"}, sortedFiles...)
+		_, catReader, err := d.Client.Exec(ctx, ctr.ID, catArgs)
+		if err != nil {
+			continue
+		}
+
+		data, err := io.ReadAll(catReader)
 		if err != nil {
 			continue
 		}
@@ -217,6 +312,42 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		})
 	}
 	return instances, nil
+}
+
+// sortFilesByMtime parses `stat -c '%Y %n'` output and returns file paths
+// sorted by modification time (oldest first, newest last).
+func sortFilesByMtime(data []byte) []string {
+	type timedFile struct {
+		mtime int64
+		path  string
+	}
+
+	var files []timedFile
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(line, []byte(" "), 2)
+		if len(parts) != 2 {
+			continue
+		}
+		mtime, err := strconv.ParseInt(string(parts[0]), 10, 64)
+		if err != nil {
+			continue
+		}
+		files = append(files, timedFile{mtime: mtime, path: string(parts[1])})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].mtime < files[j].mtime
+	})
+
+	result := make([]string, len(files))
+	for i, f := range files {
+		result[i] = f.path
+	}
+	return result
 }
 
 // CombinedFinder aggregates multiple InstanceFinders, logging and skipping failures.
