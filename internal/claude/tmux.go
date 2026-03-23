@@ -264,7 +264,11 @@ func FormatTmuxPanes(w io.Writer, panes []TmuxPane) error {
 		if p.Devcontainer {
 			suffix = " (devcontainer)"
 		}
-		if _, err := fmt.Fprintf(w, "  %s %q (%d:%d)%s\n", p.State, p.SessionName, p.WindowIndex, p.PaneIndex, suffix); err != nil {
+		pidInfo := ""
+		if p.ClaudePID > 0 {
+			pidInfo = fmt.Sprintf(" PID %d", p.ClaudePID)
+		}
+		if _, err := fmt.Fprintf(w, "  %s %q (%d:%d)%s%s\n", p.State, p.SessionName, p.WindowIndex, p.PaneIndex, pidInfo, suffix); err != nil {
 			return err
 		}
 	}

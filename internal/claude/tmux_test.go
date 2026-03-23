@@ -508,6 +508,24 @@ func TestFormatTmuxPanes(t *testing.T) {
 	}
 }
 
+func TestFormatTmuxPanes_WithPID(t *testing.T) {
+	panes := []TmuxPane{
+		{SessionName: "dev", WindowIndex: 0, PaneIndex: 1, ClaudePID: 12345, State: StateBusy},
+	}
+	var buf bytes.Buffer
+	err := FormatTmuxPanes(&buf, panes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "PID 12345") {
+		t.Errorf("output should contain PID, got: %s", got)
+	}
+	if !strings.Contains(got, `"dev" (0:1) PID 12345`) {
+		t.Errorf("expected pane with PID, got: %s", got)
+	}
+}
+
 func TestFormatTmuxPanes_Empty(t *testing.T) {
 	var buf bytes.Buffer
 	err := FormatTmuxPanes(&buf, nil)
