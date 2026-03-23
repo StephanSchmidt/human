@@ -1,0 +1,263 @@
+package index
+
+import (
+	"context"
+	"testing"
+)
+
+func newTestStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	s, err := NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(:memory:): %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestUpsertEntry_insertsNew(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	entry := Entry{Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN", Title: "First issue", Status: "Open"}
+	if err := s.UpsertEntry(ctx, entry, "detailed description here"); err != nil {
+		t.Fatalf("UpsertEntry: %v", err)
+	}
+
+	keys, err := s.AllKeys(ctx, "work")
+	if err != nil {
+		t.Fatalf("AllKeys: %v", err)
+	}
+	if len(keys) != 1 || keys[0] != "KAN-1" {
+		t.Errorf("expected [KAN-1], got %v", keys)
+	}
+}
+
+func TestUpsertEntry_updatesExisting(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	entry := Entry{Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN", Title: "Old title", Status: "Open"}
+	if err := s.UpsertEntry(ctx, entry, "old description"); err != nil {
+		t.Fatalf("first UpsertEntry: %v", err)
+	}
+
+	entry.Title = "New title"
+	entry.Status = "Done"
+	if err := s.UpsertEntry(ctx, entry, "new description"); err != nil {
+		t.Fatalf("second UpsertEntry: %v", err)
+	}
+
+	// Should still be one entry.
+	keys, _ := s.AllKeys(ctx, "work")
+	if len(keys) != 1 {
+		t.Errorf("expected 1 key after update, got %d", len(keys))
+	}
+
+	// Search should find by new title.
+	results, err := s.Search(ctx, "New title", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Title != "New title" {
+		t.Errorf("expected updated title, got %v", results)
+	}
+}
+
+func TestSearch_matchesTitle(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some desc")
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Fix login page"}, "some desc")
+
+	results, err := s.Search(ctx, "retry", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Key != "KAN-1" {
+		t.Errorf("expected KAN-1, got %v", results)
+	}
+}
+
+func TestSearch_matchesDescription(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Generic title"}, "webhook delivery retry mechanism")
+
+	results, err := s.Search(ctx, "webhook", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Key != "KAN-1" {
+		t.Errorf("expected KAN-1 via description match, got %v", results)
+	}
+}
+
+func TestSearch_matchesKey(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-42", Source: "work", Kind: "jira", Title: "Some issue"}, "desc")
+
+	results, err := s.Search(ctx, "KAN-42", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Key != "KAN-42" {
+		t.Errorf("expected KAN-42, got %v", results)
+	}
+}
+
+func TestSearch_noResults(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Fix bug"}, "desc")
+
+	results, err := s.Search(ctx, "nonexistent", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected no results, got %v", results)
+	}
+}
+
+func TestSearch_limit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	for i := 0; i < 5; i++ {
+		key := "KAN-" + string(rune('1'+i))
+		_ = s.UpsertEntry(ctx, Entry{Key: key, Source: "work", Kind: "jira", Title: "retry issue"}, "desc")
+	}
+
+	results, err := s.Search(ctx, "retry", 2)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 results with limit, got %d", len(results))
+	}
+}
+
+func TestSearch_ranking(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Title match should rank higher than description-only match.
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Unrelated title"}, "retry logic in the background")
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some description")
+
+	results, err := s.Search(ctx, "retry", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected at least 2 results, got %d", len(results))
+	}
+	if results[0].Key != "KAN-2" {
+		t.Errorf("expected title match KAN-2 first, got %s", results[0].Key)
+	}
+}
+
+func TestDeleteEntry_removes(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "To delete"}, "desc")
+
+	if err := s.DeleteEntry(ctx, "KAN-1", "work"); err != nil {
+		t.Fatalf("DeleteEntry: %v", err)
+	}
+
+	keys, _ := s.AllKeys(ctx, "work")
+	if len(keys) != 0 {
+		t.Errorf("expected 0 keys after delete, got %d", len(keys))
+	}
+
+	// FTS should also be clean.
+	results, _ := s.Search(ctx, "delete", 10)
+	if len(results) != 0 {
+		t.Errorf("expected 0 search results after delete, got %d", len(results))
+	}
+}
+
+func TestDeleteEntry_notFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Should not error on missing entry.
+	if err := s.DeleteEntry(ctx, "NOPE-1", "work"); err != nil {
+		t.Fatalf("DeleteEntry on missing entry: %v", err)
+	}
+}
+
+func TestStats_empty(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if st.TotalEntries != 0 {
+		t.Errorf("expected 0 entries, got %d", st.TotalEntries)
+	}
+}
+
+func TestStats_populated(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
+	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d")
+
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if st.TotalEntries != 3 {
+		t.Errorf("expected 3 entries, got %d", st.TotalEntries)
+	}
+	if st.ByKind["jira"] != 2 {
+		t.Errorf("expected 2 jira, got %d", st.ByKind["jira"])
+	}
+	if st.ByKind["linear"] != 1 {
+		t.Errorf("expected 1 linear, got %d", st.ByKind["linear"])
+	}
+	if st.BySource["work"] != 2 {
+		t.Errorf("expected 2 work, got %d", st.BySource["work"])
+	}
+	if st.BySource["eng"] != 1 {
+		t.Errorf("expected 1 eng, got %d", st.BySource["eng"])
+	}
+}
+
+func TestAllKeys_bySource(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
+	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d")
+
+	keys, err := s.AllKeys(ctx, "work")
+	if err != nil {
+		t.Fatalf("AllKeys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Errorf("expected 2 keys for work, got %d", len(keys))
+	}
+
+	keys, err = s.AllKeys(ctx, "eng")
+	if err != nil {
+		t.Fatalf("AllKeys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Errorf("expected 1 key for eng, got %d", len(keys))
+	}
+}

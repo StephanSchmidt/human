@@ -222,12 +222,13 @@ type Provider interface {
 
 // Instance represents a configured tracker backend ready for use.
 type Instance struct {
-	Name        string // config entry name ("work", "personal"), empty for CLI-flag instances
-	Kind        string // "jira", "github", "linear"
-	URL         string // display URL
-	User        string // display user (Jira only)
-	Description string // optional human-readable description of what this tracker is for
-	Safe        bool   // when true, destructive operations (deletes) are blocked
+	Name        string   // config entry name ("work", "personal"), empty for CLI-flag instances
+	Kind        string   // "jira", "github", "linear"
+	URL         string   // display URL
+	User        string   // display user (Jira only)
+	Description string   // optional human-readable description of what this tracker is for
+	Safe        bool     // when true, destructive operations (deletes) are blocked
+	Projects    []string // projects to index (e.g. ["KAN", "INFRA"])
 	Provider    Provider
 }
 

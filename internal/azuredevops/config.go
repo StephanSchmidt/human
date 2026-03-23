@@ -7,12 +7,13 @@ import (
 
 // Config holds the configuration for a single Azure DevOps instance.
 type Config struct {
-	Name        string `mapstructure:"name"`
-	URL         string `mapstructure:"url"`
-	Org         string `mapstructure:"org"`
-	Token       string `mapstructure:"token"`
-	Description string `mapstructure:"description"`
-	Safe        bool   `mapstructure:"safe"`
+	Name        string   `mapstructure:"name"`
+	URL         string   `mapstructure:"url"`
+	Org         string   `mapstructure:"org"`
+	Token       string   `mapstructure:"token"`
+	Description string   `mapstructure:"description"`
+	Safe        bool     `mapstructure:"safe"`
+	Projects    []string `mapstructure:"projects"`
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -49,6 +50,7 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 			URL:         cfg.URL,
 			Description: cfg.Description,
 			Safe:        cfg.Safe,
+			Projects:    cfg.Projects,
 			Provider:    New(cfg.URL, cfg.Org, cfg.Token),
 		}, true
 	},
