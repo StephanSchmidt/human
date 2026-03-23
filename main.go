@@ -15,7 +15,9 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdbrowser"
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/cmd/cmdfigma"
+	"github.com/StephanSchmidt/human/cmd/cmdindex"
 	"github.com/StephanSchmidt/human/cmd/cmdinit"
+	"github.com/StephanSchmidt/human/cmd/cmdtui"
 	"github.com/StephanSchmidt/human/cmd/cmdnotion"
 	"github.com/StephanSchmidt/human/cmd/cmdprovider"
 	"github.com/StephanSchmidt/human/cmd/cmdtelegram"
@@ -70,6 +72,7 @@ Queries Amplitude product analytics. Reads Telegram bot messages.
 Use it to:
   - fetch a ticket before planning implementation
   - check what issues exist in a project
+  - search across all trackers with a local index
   - create tickets for bugs or features you discover
   - add comments with status updates or findings
   - look up ticket details (status, assignee, description)
@@ -236,6 +239,19 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	usageCmd.GroupID = "utility"
 	rootCmd.AddCommand(usageCmd)
 
+	indexDeps := cmdindex.DefaultIndexDeps()
+	indexCmd := cmdindex.BuildIndexCmd(indexDeps)
+	indexCmd.GroupID = "utility"
+	rootCmd.AddCommand(indexCmd)
+
+	searchCmd := cmdindex.BuildSearchCmd(indexDeps)
+	searchCmd.GroupID = "shortcuts"
+	rootCmd.AddCommand(searchCmd)
+
+	tuiCmd := cmdtui.BuildTuiCmd()
+	tuiCmd.GroupID = "utility"
+	rootCmd.AddCommand(tuiCmd)
+
 	return rootCmd
 }
 
@@ -280,7 +296,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage"
+		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui"
 	}
 	return false
 }
