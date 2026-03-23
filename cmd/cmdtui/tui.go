@@ -198,15 +198,20 @@ func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 		procLister := &claude.OSProcessLister{Runner: runner}
 		panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
 
-		// Build container ID → state map from discovered instances.
+		// Build state maps from already-resolved instances so panes
+		// show the same state as the instance list (no second disk read).
 		containerState := make(map[string]claude.InstanceState)
+		hostState := make(map[int]claude.InstanceState)
 		for _, iu := range data.Instances {
 			if iu.Instance.Source == "container" && iu.Instance.ContainerID != "" {
 				containerState[iu.Instance.ContainerID] = iu.State
 			}
+			if iu.Instance.PID > 0 {
+				hostState[iu.Instance.PID] = iu.State
+			}
 		}
 
-		resolvePaneStates(panes, containerState)
+		resolvePaneStates(panes, containerState, hostState)
 		data.Panes = panes
 
 		return usageMsg{data: data}
@@ -214,16 +219,27 @@ func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 }
 
 // resolvePaneStates resolves busy/ready state for each tmux pane.
-func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude.InstanceState) {
+// It prefers states already resolved for discovered instances (hostState,
+// containerState) so the pane list stays in sync with the instance list.
+func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude.InstanceState, hostState map[int]claude.InstanceState) {
 	home, _ := os.UserHomeDir()
 	sessResolver := claude.FileSessionResolver{HomeDir: home}
 	for i := range panes {
+		// Devcontainer panes: reuse container instance state.
 		if panes[i].Devcontainer && panes[i].ContainerID != "" {
 			if st, ok := containerState[panes[i].ContainerID]; ok {
 				panes[i].State = st
 				continue
 			}
 		}
+		// Host panes: reuse host instance state when available.
+		if panes[i].ClaudePID > 0 {
+			if st, ok := hostState[panes[i].ClaudePID]; ok {
+				panes[i].State = st
+				continue
+			}
+		}
+		// Fallback: read state from disk for panes not matched to an instance.
 		if home == "" || panes[i].Cwd == "" {
 			continue
 		}
@@ -237,7 +253,6 @@ func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude
 				if _, fErr := os.Stat(sessionPath); fErr == nil {
 					stateReader = claude.FileStateReader{Path: sessionPath}
 				} else {
-					// Session file exists but JSONL not yet created — idle at prompt.
 					stateReader = claude.ReadyStateReader{}
 				}
 			}
@@ -260,7 +275,11 @@ var (
 )
 
 func renderHeader() string {
-	return headerStyle.Render("human tui — Claude Code Dashboard")
+	title := "human tui — Claude Code Dashboard"
+	if host, err := os.Hostname(); err == nil && host != "" {
+		title = fmt.Sprintf("human tui — Claude Code Dashboard (%s)", host)
+	}
+	return headerStyle.Render(title)
 }
 
 func renderDaemonStatus(pid int, alive bool) string {
@@ -287,8 +306,6 @@ func renderUsage(b *strings.Builder, data *usageData) {
 	switch {
 	case len(data.Instances) == 0:
 		_ = claude.FormatUsage(&usageBuf, &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}}, now)
-	case len(data.Instances) == 1:
-		_ = claude.FormatUsage(&usageBuf, data.Instances[0].Summary, now)
 	default:
 		_ = claude.FormatMultiUsage(&usageBuf, data.Instances, now)
 	}

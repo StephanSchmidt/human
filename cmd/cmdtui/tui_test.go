@@ -169,6 +169,17 @@ func TestRenderDaemonStatus(t *testing.T) {
 	}
 }
 
+func TestRenderHeader_ContainsHostname(t *testing.T) {
+	header := renderHeader()
+	if !strings.Contains(header, "Claude Code Dashboard") {
+		t.Errorf("expected 'Claude Code Dashboard' in header, got: %s", header)
+	}
+	// os.Hostname should succeed in test environments, so we expect a parenthesized host.
+	if !strings.Contains(header, "(") {
+		t.Errorf("expected hostname in parentheses in header, got: %s", header)
+	}
+}
+
 func TestModelView_Quitting(t *testing.T) {
 	m := testModel()
 	m.quitting = true
