@@ -32,6 +32,7 @@ type Instance struct {
 	Root        string      // JSONL root path (or virtual path for containers)
 	Memory      *MemoryInfo // memory usage (containers only)
 	ContainerID string      // full Docker container ID (containers only)
+	PID         int         // host PID of the claude process (0 for containers)
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -234,6 +235,7 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			Walker:      OSDirWalker{},
 			StateReader: stateReader,
 			Root:        root,
+			PID:         pidNum,
 		})
 	}
 	return instances, nil

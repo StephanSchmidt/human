@@ -153,11 +153,17 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 	if !strings.Contains(instances[0].Label, "PID 12345") {
 		t.Errorf("label = %q, want to contain PID 12345", instances[0].Label)
 	}
+	if instances[0].PID != 12345 {
+		t.Errorf("PID = %d, want 12345", instances[0].PID)
+	}
 	if !strings.HasSuffix(instances[0].Root, "-home-testuser-projects-alpha") {
 		t.Errorf("root = %q, want suffix -home-testuser-projects-alpha", instances[0].Root)
 	}
 	if !strings.Contains(instances[1].Label, "projects/beta") {
 		t.Errorf("label = %q, want to contain projects/beta", instances[1].Label)
+	}
+	if instances[1].PID != 67890 {
+		t.Errorf("PID = %d, want 67890", instances[1].PID)
 	}
 }
 
