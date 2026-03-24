@@ -91,6 +91,11 @@ type ChildTreeProbe struct {
 
 func (c *ChildTreeProbe) Name() string { return "child-tree" }
 
+// childMaxAge is the maximum age for a child process to be considered
+// a tool invocation. Processes older than this are assumed to be long-lived
+// daemons (e.g. gopls, typescript-language-server) and are ignored.
+const childMaxAge = 30 * time.Second
+
 func (c *ChildTreeProbe) Check(pid int, _ string) (*ProbeResult, error) {
 	if pid <= 0 {
 		return nil, nil
@@ -114,6 +119,7 @@ func (c *ChildTreeProbe) findChildren(fs ProcFS, ppid int) []int {
 		return nil
 	}
 
+	uptimeSecs := readUptime(fs)
 	ppidStr := strconv.Itoa(ppid)
 	var children []int
 
@@ -132,16 +138,75 @@ func (c *ChildTreeProbe) findChildren(fs ProcFS, ppid int) []int {
 			continue
 		}
 
+		isChild := false
 		for _, line := range strings.Split(string(data), "\n") {
 			if strings.HasPrefix(line, "PPid:\t") {
 				if strings.TrimPrefix(line, "PPid:\t") == ppidStr {
-					children = append(children, childPID)
+					isChild = true
 				}
 				break
 			}
 		}
+		if !isChild {
+			continue
+		}
+
+		// Skip long-lived children (e.g. LSP servers like gopls).
+		if uptimeSecs > 0 && isOldProcess(fs, childPID, uptimeSecs, childMaxAge) {
+			continue
+		}
+
+		children = append(children, childPID)
 	}
 	return children
+}
+
+// readUptime reads system uptime in seconds from /proc/uptime.
+func readUptime(fs ProcFS) float64 {
+	data, err := fs.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0
+	}
+	secs, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	return secs
+}
+
+// isOldProcess checks if a process has been running longer than maxAge.
+// It reads starttime (field 22) from /proc/<pid>/stat and compares
+// against system uptime. Assumes 100 ticks/sec (standard Linux HZ).
+func isOldProcess(fs ProcFS, pid int, uptimeSecs float64, maxAge time.Duration) bool {
+	statPath := fmt.Sprintf("/proc/%d/stat", pid)
+	data, err := fs.ReadFile(statPath)
+	if err != nil {
+		return false
+	}
+
+	// Parse starttime (field 22, 0-indexed after comm).
+	content := string(data)
+	closeParen := strings.LastIndex(content, ")")
+	if closeParen < 0 || closeParen+2 >= len(content) {
+		return false
+	}
+	fields := strings.Fields(content[closeParen+2:])
+	// After ")" fields are: state(0) ppid(1) ... starttime(19)
+	if len(fields) < 20 {
+		return false
+	}
+	startTicks, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil {
+		return false
+	}
+
+	startSecs := float64(startTicks) / 100.0 // 100 ticks/sec
+	ageSecs := uptimeSecs - startSecs
+	return ageSecs > maxAge.Seconds()
 }
 
 func (c *ChildTreeProbe) procFS() ProcFS {
@@ -296,16 +361,17 @@ func (m *MtimeProbe) Check(_ int, jsonlPath string) (*ProbeResult, error) {
 	}
 
 	if cached, ok := m.cache[jsonlPath]; ok {
-		if cached.mtime.Equal(mtime) {
+		if cached.mtime.Equal(mtime) && cached.state == StateBusy {
+			// Only replay Busy from cache — never claim Ready.
 			return &ProbeResult{
-				State:      cached.state,
+				State:      StateBusy,
 				Confidence: 0.6,
 				Source:     "mtime",
 			}, nil
 		}
 	}
 
-	// Mtime changed — don't return a result (let JSONL probe re-read).
+	// Mtime changed or cached state was not Busy — abstain.
 	return nil, nil
 }
 

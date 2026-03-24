@@ -34,8 +34,8 @@ func TestDetermineState_EndTurn(t *testing.T) {
 		makeStateEntry(t, "assistant", strPtr("end_turn")),
 	}
 	got := DetermineState(lines)
-	if got != StateReady {
-		t.Errorf("end_turn: got %v, want Ready", got)
+	if got != StateUnknown {
+		t.Errorf("end_turn: got %v, want Unknown (cannot confirm idle)", got)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestDetermineState_User(t *testing.T) {
 		makeStateEntry(t, "user", nil),
 	}
 	got := DetermineState(lines)
-	if got != StateBusy {
-		t.Errorf("user: got %v, want Busy", got)
+	if got != StateUnknown {
+		t.Errorf("user: got %v, want Unknown (user can type while idle)", got)
 	}
 }
 
@@ -76,8 +76,8 @@ func TestDetermineState_SkipsMetadata(t *testing.T) {
 		makeStateEntry(t, "file-history-snapshot", nil),
 	}
 	got := DetermineState(lines)
-	if got != StateReady {
-		t.Errorf("skip metadata: got %v, want Ready", got)
+	if got != StateUnknown {
+		t.Errorf("skip metadata: got %v, want Unknown", got)
 	}
 }
 
@@ -104,8 +104,8 @@ func TestDetermineState_SkipsMalformedBeforeValid(t *testing.T) {
 		[]byte("{invalid json"),
 	}
 	got := DetermineState(lines)
-	if got != StateBusy {
-		t.Errorf("malformed then user: got %v, want Busy", got)
+	if got != StateUnknown {
+		t.Errorf("malformed then user: got %v, want Unknown", got)
 	}
 }
 
@@ -140,8 +140,9 @@ func TestOSStateReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Use streaming assistant (null stop_reason) — reliable busy signal.
 	newFile := filepath.Join(dir, "new.jsonl")
-	busyEntry := makeStateEntry(t, "user", nil)
+	busyEntry := makeStateEntry(t, "assistant", nil)
 	if err := os.WriteFile(newFile, append(busyEntry, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +193,7 @@ func TestByteStateReader_Empty(t *testing.T) {
 	}
 }
 
-func TestFileStateReader_Ready(t *testing.T) {
+func TestFileStateReader_EndTurn(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 	entry := makeStateEntry(t, "assistant", strPtr("end_turn"))
@@ -205,15 +206,16 @@ func TestFileStateReader_Ready(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != StateReady {
-		t.Errorf("FileStateReader ready: got %v, want Ready", state)
+	if state != StateUnknown {
+		t.Errorf("FileStateReader end_turn: got %v, want Unknown", state)
 	}
 }
 
 func TestFileStateReader_Busy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
-	entry := makeStateEntry(t, "user", nil)
+	// Streaming assistant (null stop_reason) — reliable busy signal.
+	entry := makeStateEntry(t, "assistant", nil)
 	if err := os.WriteFile(path, append(entry, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -20,8 +20,13 @@ func (j *JSONLProbe) Check(_ int, jsonlPath string) (*ProbeResult, error) {
 		return nil, err
 	}
 
+	// Only report Busy — abstain on Unknown (no evidence either way).
+	if state != StateBusy {
+		return nil, nil
+	}
+
 	return &ProbeResult{
-		State:      state,
+		State:      StateBusy,
 		Confidence: 0.8,
 		Source:     "jsonl",
 	}, nil
@@ -42,8 +47,14 @@ func (o *OSStateFallbackProbe) Check(_ int, _ string) (*ProbeResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Only report Busy — abstain on Unknown (no evidence either way).
+	if state != StateBusy {
+		return nil, nil
+	}
+
 	return &ProbeResult{
-		State:      state,
+		State:      StateBusy,
 		Confidence: 0.7,
 		Source:     "jsonl",
 	}, nil

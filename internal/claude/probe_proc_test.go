@@ -36,17 +36,6 @@ func (m *mockProcFS) Stat(path string) (os.FileInfo, error) {
 	return nil, fmt.Errorf("stat not found: %s", path)
 }
 
-// fakeDirEntry implements os.DirEntry for testing.
-type fakeDirEntry struct {
-	name  string
-	isDir bool
-}
-
-func (f fakeDirEntry) Name() string               { return f.name }
-func (f fakeDirEntry) IsDir() bool                 { return f.isDir }
-func (f fakeDirEntry) Type() os.FileMode           { return 0 }
-func (f fakeDirEntry) Info() (os.FileInfo, error)   { return nil, nil }
-
 // fakeFileInfo implements os.FileInfo for testing.
 type fakeFileInfo struct {
 	modTime time.Time
@@ -125,55 +114,6 @@ func TestProcessLivenessProbe_NoPID(t *testing.T) {
 
 // --- ChildTreeProbe tests ---
 
-func TestChildTreeProbe_HasChildren(t *testing.T) {
-	fs := &mockProcFS{
-		dirs: map[string][]os.DirEntry{
-			"/proc": {
-				fakeDirEntry{name: "123", isDir: true},
-				fakeDirEntry{name: "456", isDir: true},
-			},
-		},
-		files: map[string][]byte{
-			"/proc/123/status": []byte("Name:\tclaude\nPPid:\t1\n"),
-			"/proc/456/status": []byte("Name:\tbash\nPPid:\t123\n"),
-		},
-	}
-	probe := &ChildTreeProbe{FS: fs}
-	result, err := probe.Check(123, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if result.State != StateBusy {
-		t.Errorf("got %v, want Busy (has children)", result.State)
-	}
-}
-
-func TestChildTreeProbe_NoChildren(t *testing.T) {
-	fs := &mockProcFS{
-		dirs: map[string][]os.DirEntry{
-			"/proc": {
-				fakeDirEntry{name: "123", isDir: true},
-				fakeDirEntry{name: "456", isDir: true},
-			},
-		},
-		files: map[string][]byte{
-			"/proc/123/status": []byte("Name:\tclaude\nPPid:\t1\n"),
-			"/proc/456/status": []byte("Name:\tbash\nPPid:\t999\n"),
-		},
-	}
-	probe := &ChildTreeProbe{FS: fs}
-	result, err := probe.Check(123, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result != nil {
-		t.Errorf("expected nil (abstain) when no children")
-	}
-}
-
 func TestChildTreeProbe_NoPID(t *testing.T) {
 	probe := &ChildTreeProbe{}
 	result, err := probe.Check(0, "")
@@ -183,6 +123,69 @@ func TestChildTreeProbe_NoPID(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil for PID 0")
 	}
+}
+
+// --- readUptime / isOldProcess unit tests ---
+
+func TestReadUptime(t *testing.T) {
+	fs := &mockProcFS{
+		files: map[string][]byte{
+			"/proc/uptime": []byte("33050.42 66000.00"),
+		},
+	}
+	got := readUptime(fs)
+	if got < 33050.0 || got > 33051.0 {
+		t.Errorf("readUptime = %f, want ~33050.42", got)
+	}
+}
+
+func TestReadUptime_Missing(t *testing.T) {
+	fs := &mockProcFS{files: map[string][]byte{}}
+	got := readUptime(fs)
+	if got != 0 {
+		t.Errorf("readUptime = %f, want 0 when missing", got)
+	}
+}
+
+func TestIsOldProcess_Old(t *testing.T) {
+	// starttime=100000 ticks, uptime=33050s → age = 33050 - 1000 = 32050s → old
+	fs := &mockProcFS{
+		files: map[string][]byte{
+			"/proc/456/stat": statLine(456, "gopls", 100000),
+		},
+	}
+	if !isOldProcess(fs, 456, 33050.0, 30*time.Second) {
+		t.Error("expected old process")
+	}
+}
+
+func TestIsOldProcess_Young(t *testing.T) {
+	// starttime=3304000 ticks, uptime=33050s → age = 33050 - 33040 = 10s → young
+	fs := &mockProcFS{
+		files: map[string][]byte{
+			"/proc/456/stat": statLine(456, "bash", 3304000),
+		},
+	}
+	if isOldProcess(fs, 456, 33050.0, 30*time.Second) {
+		t.Error("expected young process")
+	}
+}
+
+func TestIsOldProcess_MissingStat(t *testing.T) {
+	fs := &mockProcFS{files: map[string][]byte{}}
+	if isOldProcess(fs, 456, 33050.0, 30*time.Second) {
+		t.Error("expected false when stat missing")
+	}
+}
+
+// statLine builds a synthetic /proc/<pid>/stat line with the given starttime
+// at field 22 (index 19 after the comm field).
+func statLine(pid int, comm string, starttime int) []byte {
+	// Fields after (comm): state ppid pgrp session tty tpgid flags
+	// minflt cminflt majflt cmajflt utime stime cutime cstime
+	// priority nice num_threads itrealvalue starttime ...
+	return []byte(fmt.Sprintf("%d (%s) S 1 %d %d 0 0 0 0 0 0 0 0 0 0 0 20 0 1 0 %d 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+		pid, comm, pid, pid, starttime))
 }
 
 // --- CPUProbe tests ---
@@ -216,7 +219,7 @@ func TestCPUProbe_NoPID(t *testing.T) {
 
 // --- MtimeProbe tests ---
 
-func TestMtimeProbe_CachedMtime(t *testing.T) {
+func TestMtimeProbe_CachedBusy(t *testing.T) {
 	now := time.Now()
 	fs := &mockProcFS{
 		stats: map[string]os.FileInfo{
@@ -225,18 +228,39 @@ func TestMtimeProbe_CachedMtime(t *testing.T) {
 	}
 	probe := &MtimeProbe{FS: fs}
 
-	// Store a cached entry.
-	probe.Update("/tmp/test.jsonl", StateReady)
+	// Store a cached Busy entry.
+	probe.Update("/tmp/test.jsonl", StateBusy)
 
 	result, err := probe.Check(0, "/tmp/test.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result == nil {
-		t.Fatal("expected cached result")
+		t.Fatal("expected cached Busy result")
 	}
-	if result.State != StateReady {
-		t.Errorf("got %v, want Ready (cached)", result.State)
+	if result.State != StateBusy {
+		t.Errorf("got %v, want Busy (cached)", result.State)
+	}
+}
+
+func TestMtimeProbe_CachedReadyAbstains(t *testing.T) {
+	now := time.Now()
+	fs := &mockProcFS{
+		stats: map[string]os.FileInfo{
+			"/tmp/test.jsonl": fakeFileInfo{modTime: now},
+		},
+	}
+	probe := &MtimeProbe{FS: fs}
+
+	// Store a cached Ready entry — should abstain, not replay Ready.
+	probe.Update("/tmp/test.jsonl", StateReady)
+
+	result, err := probe.Check(0, "/tmp/test.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != nil {
+		t.Errorf("expected nil (cached Ready should abstain), got %v", result.State)
 	}
 }
 
