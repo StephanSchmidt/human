@@ -1,11 +1,20 @@
 package claude
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // busyDebounce is how long the JSONL probe stays sticky-busy after seeing
 // a Busy signal. This prevents flickering during tool-use loops where the
 // JSONL tail briefly shows "user" or "end_turn" between tool calls.
 const busyDebounce = 5 * time.Second
+
+// staleThreshold is how long a JSONL file can go unmodified before a
+// "streaming" entry (assistant with null stop_reason) is considered stale.
+// Claude writes progress entries every ~100ms during streaming, so if the
+// file hasn't been touched in 3s, the streaming entry is abandoned.
+const staleThreshold = 3 * time.Second
 
 // JSONLProbe reads state from a JSONL file using the existing DetermineState logic.
 // Once Busy is detected, it stays Busy for busyDebounce to avoid flickering.
@@ -28,6 +37,15 @@ func (j *JSONLProbe) Check(_ int, jsonlPath string) (*ProbeResult, error) {
 	now := time.Now()
 
 	if state == StateBusy {
+		// Guard against stale streaming entries: if the file hasn't been
+		// modified recently, the "busy" signal is an abandoned write
+		// (e.g. Claude finished but never wrote end_turn).
+		if info, sErr := os.Stat(jsonlPath); sErr == nil {
+			if now.Sub(info.ModTime()) > staleThreshold {
+				return nil, nil // stale — abstain
+			}
+		}
+
 		// Refresh the debounce window.
 		if j.busyUntil == nil {
 			j.busyUntil = make(map[string]time.Time)
