@@ -190,19 +190,73 @@ func statLine(pid int, comm string, starttime int) []byte {
 
 // --- CPUProbe tests ---
 
-func TestCPUProbe_FirstReadAbstains(t *testing.T) {
-	fs := &mockProcFS{
-		files: map[string][]byte{
-			"/proc/123/stat": []byte("123 (claude) S 1 123 123 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"),
+// sequentialProcFS returns different data on successive reads of the same path.
+type sequentialProcFS struct {
+	reads map[string][][]byte
+	index map[string]int
+}
+
+func (s *sequentialProcFS) ReadFile(path string) ([]byte, error) {
+	if s.index == nil {
+		s.index = make(map[string]int)
+	}
+	seq, ok := s.reads[path]
+	if !ok || len(seq) == 0 {
+		return nil, fmt.Errorf("not found: %s", path)
+	}
+	idx := s.index[path]
+	if idx >= len(seq) {
+		idx = len(seq) - 1 // repeat last
+	}
+	s.index[path] = idx + 1
+	return seq[idx], nil
+}
+
+func (s *sequentialProcFS) ReadDir(path string) ([]os.DirEntry, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (s *sequentialProcFS) Stat(path string) (os.FileInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func TestCPUProbe_BusyWhenCPUActive(t *testing.T) {
+	// Two readings: utime goes from 1000 to 1020 (20 ticks in 100ms = high CPU).
+	fs := &sequentialProcFS{
+		reads: map[string][][]byte{
+			"/proc/123/stat": {
+				[]byte("123 (claude) S 1 123 123 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"),
+				[]byte("123 (claude) S 1 123 123 0 0 0 0 0 0 0 1020 500 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"),
+			},
 		},
 	}
-	probe := &CPUProbe{FS: fs}
+	probe := &CPUProbe{FS: fs, Delay: time.Millisecond}
+	result, err := probe.Check(123, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || result.State != StateBusy {
+		t.Errorf("expected Busy, got %v", result)
+	}
+}
+
+func TestCPUProbe_AbstainsWhenIdle(t *testing.T) {
+	// Two readings: no change in CPU ticks.
+	fs := &sequentialProcFS{
+		reads: map[string][][]byte{
+			"/proc/123/stat": {
+				[]byte("123 (claude) S 1 123 123 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"),
+				[]byte("123 (claude) S 1 123 123 0 0 0 0 0 0 0 1000 500 0 0 20 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"),
+			},
+		},
+	}
+	probe := &CPUProbe{FS: fs, Delay: time.Millisecond}
 	result, err := probe.Check(123, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result != nil {
-		t.Errorf("expected nil (abstain) on first read")
+		t.Errorf("expected nil (abstain) for idle CPU, got %v", result.State)
 	}
 }
 

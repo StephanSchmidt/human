@@ -219,18 +219,10 @@ func (c *ChildTreeProbe) procFS() ProcFS {
 // --- CPUProbe (A2) ---
 
 // CPUProbe checks whether a process is actively consuming CPU.
-// If the process has significant CPU time delta, it's likely busy.
+// Takes two readings 100ms apart and compares the delta.
 type CPUProbe struct {
-	FS ProcFS
-
-	mu       sync.Mutex
-	prevStat map[int]cpuSnapshot
-}
-
-type cpuSnapshot struct {
-	utime uint64
-	stime uint64
-	at    time.Time
+	FS    ProcFS
+	Delay time.Duration // override for testing; zero defaults to 100ms
 }
 
 func (cp *CPUProbe) Name() string { return "cpu" }
@@ -242,41 +234,26 @@ func (cp *CPUProbe) Check(pid int, _ string) (*ProbeResult, error) {
 
 	fs := cp.procFS()
 
-	statPath := fmt.Sprintf("/proc/%d/stat", pid)
-	data, err := fs.ReadFile(statPath)
+	utime1, stime1, err := cp.readCPU(fs, pid)
 	if err != nil {
 		return nil, nil // abstain
 	}
 
-	utime, stime, err := parseProcStat(string(data))
+	delay := cp.Delay
+	if delay == 0 {
+		delay = 100 * time.Millisecond
+	}
+	time.Sleep(delay)
+
+	utime2, stime2, err := cp.readCPU(fs, pid)
 	if err != nil {
 		return nil, nil
 	}
 
-	now := time.Now()
-	current := cpuSnapshot{utime: utime, stime: stime, at: now}
-
-	cp.mu.Lock()
-	if cp.prevStat == nil {
-		cp.prevStat = make(map[int]cpuSnapshot)
-	}
-	prev, hasPrev := cp.prevStat[pid]
-	cp.prevStat[pid] = current
-	cp.mu.Unlock()
-
-	if !hasPrev {
-		return nil, nil // first reading, abstain
-	}
-
-	elapsed := now.Sub(prev.at).Seconds()
-	if elapsed < 0.1 {
-		return nil, nil // too close, abstain
-	}
-
 	// CPU ticks consumed (user + system).
-	delta := float64((current.utime - prev.utime) + (current.stime - prev.stime))
+	delta := float64((utime2 - utime1) + (stime2 - stime1))
 	// Assume 100 ticks/sec (standard Linux HZ).
-	cpuPct := (delta / 100.0) / elapsed
+	cpuPct := (delta / 100.0) / delay.Seconds()
 
 	if cpuPct > 0.05 { // >5% CPU usage
 		return &ProbeResult{
@@ -287,6 +264,15 @@ func (cp *CPUProbe) Check(pid int, _ string) (*ProbeResult, error) {
 	}
 
 	return nil, nil // low CPU, abstain
+}
+
+func (cp *CPUProbe) readCPU(fs ProcFS, pid int) (utime, stime uint64, err error) {
+	statPath := fmt.Sprintf("/proc/%d/stat", pid)
+	data, err := fs.ReadFile(statPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	return parseProcStat(string(data))
 }
 
 // parseProcStat extracts utime and stime from /proc/<pid>/stat.

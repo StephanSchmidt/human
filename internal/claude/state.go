@@ -42,7 +42,7 @@ type stateEntry struct {
 }
 
 // DetermineState walks lines backward looking for evidence the instance is busy.
-// It can only return StateBusy or StateUnknown — never StateReady.
+// It returns StateBusy or StateUnknown — never StateReady.
 // The absence of busy evidence is not proof of idle; callers (CompositeStateReader)
 // default to Ready when no probe detects Busy.
 func DetermineState(lines [][]byte) InstanceState {
@@ -62,8 +62,8 @@ func DetermineState(lines [][]byte) InstanceState {
 
 		switch entry.Type {
 		case "user":
-			// Users can type while agents are running, so a trailing
-			// "user" entry is not reliable evidence of busy.
+			// Users can type while agents run, so a trailing "user"
+			// entry is not reliable evidence of busy or idle.
 			return StateUnknown
 		case "assistant":
 			if entry.Message.StopReason == nil {
@@ -71,8 +71,7 @@ func DetermineState(lines [][]byte) InstanceState {
 				return StateBusy
 			}
 			if *entry.Message.StopReason == "end_turn" {
-				// Turn completed — but we cannot know if a new request
-				// is already in flight. Return unknown, not ready.
+				// Turn completed — not evidence of busy.
 				return StateUnknown
 			}
 			// tool_use or any other stop_reason = mid-turn busy.
