@@ -15,10 +15,40 @@ Whatever you do, the new state needs to be 'done done'.
 
 # Tickets
 
-Use Human on Shortcut to read PM tickets on what to do.
-Use HUM on Linear to create implementation plan tickets.
+There are two kinds of tickets:
 
-Use 'human' to read and write tickets.
+- **PM tickets** (Shortcut, project "Stephan Schmidt's Team"): Product requirements, user stories, feature requests. Read these to understand what to build.
+- **Engineering tickets** (Linear, project "HUM"): Implementation plans, technical tasks, bugs. Create these when planning and executing work.
+
+Use 'human' to read and write tickets on both trackers.
+
+Maintain traceability from PM ticket → engineering ticket → git commits. Reference the Shortcut ticket in the Linear ticket, and reference the PM ticket (Shortcut) in commit messages.
+
+# Tracker Tokens
+
+Tracker API tokens are stored in 1Password. Use `op.exe` (Windows host) to retrieve them and set as env vars before running `human`:
+
+```sh
+# Shortcut
+export SHORTCUT_HUMAN_TOKEN="$(op.exe item get 'Shortcut Token' --fields label=notesPlain)"
+
+# Linear
+export LINEAR_WORK_TOKEN="$(op.exe item get 'Linear Token' --fields label=notesPlain)"
+
+# Jira
+export JIRA_AMAZINGCTO_KEY="$(op.exe item get 'Jira API Key' --fields label=notesPlain)"
+
+# GitLab
+export GITLAB_HUMAN_TOKEN="$(op.exe item get 'Gitlab Token' --fields label=notesPlain)"
+
+# Azure DevOps
+export AZUREDEVOPS_GETHUMAN_TOKEN="$(op.exe item get 'Azure Token' --fields label=notesPlain)"
+
+# Telegram
+export TELEGRAM_BOT_TOKEN="$(op.exe item get 'Telegram Token' --fields label=notesPlain)"
+```
+
+The env var naming convention is `<TRACKER>_<CONFIG_NAME>_TOKEN` (or `_KEY` for Jira), matching the uppercase `name:` field in `.humanconfig`.
 
 # Project Structure
 
