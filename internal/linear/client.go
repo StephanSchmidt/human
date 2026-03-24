@@ -15,14 +15,28 @@ var _ tracker.Provider = (*Client)(nil)
 
 const listIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	issues(filter: { team: { key: { eq: $teamKey } } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description state { name } priorityLabel
+		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listOpenIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description state { name } priorityLabel
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
+const listIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTime!) {
+	issues(filter: { team: { key: { eq: $teamKey } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
+const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTime!) {
+	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
@@ -110,9 +124,18 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		"first":   opts.MaxResults,
 	}
 
-	query := listOpenIssuesQuery
-	if opts.IncludeAll {
+	var query string
+	if !opts.UpdatedSince.IsZero() {
+		vars["since"] = opts.UpdatedSince.Format(time.RFC3339)
+		if opts.IncludeAll {
+			query = listIssuesUpdatedSinceQuery
+		} else {
+			query = listOpenIssuesUpdatedSinceQuery
+		}
+	} else if opts.IncludeAll {
 		query = listIssuesQuery
+	} else {
+		query = listOpenIssuesQuery
 	}
 
 	data, err := c.doGraphQL(ctx, query, vars)
@@ -556,6 +579,9 @@ func toTrackerIssue(li linearIssue, project string) tracker.Issue {
 		Description: li.Description,
 	}
 
+	if li.UpdatedAt != "" {
+		issue.UpdatedAt, _ = time.Parse(time.RFC3339, li.UpdatedAt)
+	}
 	if li.Assignee != nil {
 		issue.Assignee = li.Assignee.Name
 	}

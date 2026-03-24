@@ -33,5 +33,6 @@ type Store interface {
 	Search(ctx context.Context, query string, limit int) ([]Entry, error)
 	Stats(ctx context.Context) (*Stats, error)
 	AllKeys(ctx context.Context, source string) ([]string, error)
+	LastIndexedAt(ctx context.Context, source string) (time.Time, error)
 	Close() error
 }

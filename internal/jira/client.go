@@ -46,6 +46,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if !opts.IncludeAll {
 		jql += " AND statusCategory != Done"
 	}
+	if !opts.UpdatedSince.IsZero() {
+		jql += fmt.Sprintf(` AND updated >= "%s"`, opts.UpdatedSince.Format("2006-01-02 15:04"))
+	}
 	jql += " order by created DESC"
 	query := url.Values{
 		"jql":        {jql},
@@ -71,6 +74,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 			Key:    iss.Key,
 			Title:  iss.Fields.Summary,
 			Status: iss.Fields.Status.Name,
+		}
+		if iss.Fields.Updated != "" {
+			issues[i].UpdatedAt, _ = time.Parse("2006-01-02T15:04:05.000-0700", iss.Fields.Updated)
 		}
 	}
 	return issues, nil

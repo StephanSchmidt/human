@@ -12,6 +12,13 @@ type scStory struct {
 	RequestedByID   string   `json:"requested_by_id"`
 	Archived        bool     `json:"archived"`
 	ProjectID       *int64   `json:"project_id"`
+	UpdatedAt       string   `json:"updated_at"`
+}
+
+// scSearchRequest is the request body for POST /api/v3/stories/search.
+type scSearchRequest struct {
+	GroupIDs       []string `json:"group_ids,omitempty"`
+	UpdatedAtStart string   `json:"updated_at_start,omitempty"`
 }
 
 // scComment is a single story comment.

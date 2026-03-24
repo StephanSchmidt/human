@@ -10,6 +10,7 @@ type glIssue struct {
 	Author      *glUser  `json:"author"`
 	Assignees   []glUser `json:"assignees"`
 	Labels      []string `json:"labels"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 // glUser is the GitLab API representation of a user.

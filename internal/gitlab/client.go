@@ -60,6 +60,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if !opts.IncludeAll {
 		query.Set("state", "opened")
 	}
+	if !opts.UpdatedSince.IsZero() {
+		query.Set("updated_after", opts.UpdatedSince.Format(time.RFC3339))
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode(), nil)
 	if err != nil {
@@ -450,6 +453,9 @@ func toTrackerIssue(project string, gi glIssue) tracker.Issue {
 		Description: gi.Description,
 	}
 
+	if gi.UpdatedAt != "" {
+		issue.UpdatedAt, _ = time.Parse(time.RFC3339, gi.UpdatedAt)
+	}
 	if len(gi.Labels) > 0 {
 		issue.Type = gi.Labels[0]
 	}

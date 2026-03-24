@@ -53,9 +53,8 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 	c.api.SetHTTPDoer(doer)
 }
 
-// ListIssues implements tracker.Lister using GET /api/v3/groups/{id}/stories.
-// The project name is resolved to a Shortcut group (team) UUID. Stories are
-// fetched directly from the group endpoint to avoid search-index latency.
+// ListIssues implements tracker.Lister using GET /api/v3/groups/{id}/stories
+// for full sync, or POST /api/v3/stories/search for incremental sync.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	project := opts.Project
 	if project == "" {
@@ -70,16 +69,14 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		return nil, errors.WithDetails("group not found in Shortcut", "project", project)
 	}
 
-	path := fmt.Sprintf("/api/v3/groups/%s/stories", groupID)
-	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
+	var stories []scStory
+	if !opts.UpdatedSince.IsZero() {
+		stories, err = c.searchStories(ctx, groupID, opts.UpdatedSince)
+	} else {
+		stories, err = c.listGroupStories(ctx, groupID)
+	}
 	if err != nil {
 		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	var stories []scStory
-	if err := json.NewDecoder(resp.Body).Decode(&stories); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding group stories", "project", project)
 	}
 
 	issues := make([]tracker.Issue, 0, len(stories))
@@ -95,6 +92,46 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		issues = append(issues, issue)
 	}
 	return issues, nil
+}
+
+// listGroupStories fetches all stories for a group via the group endpoint.
+func (c *Client) listGroupStories(ctx context.Context, groupID string) ([]scStory, error) {
+	path := fmt.Sprintf("/api/v3/groups/%s/stories", groupID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var stories []scStory
+	if err := json.NewDecoder(resp.Body).Decode(&stories); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding group stories", "groupID", groupID)
+	}
+	return stories, nil
+}
+
+// searchStories uses POST /api/v3/stories/search with updated_at_start filter.
+func (c *Client) searchStories(ctx context.Context, groupID string, since time.Time) ([]scStory, error) {
+	body := scSearchRequest{
+		GroupIDs:       []string{groupID},
+		UpdatedAtStart: since.Format(time.RFC3339),
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling search request")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v3/stories/search", "", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var stories []scStory
+	if err := json.NewDecoder(resp.Body).Decode(&stories); err != nil {
+		return nil, errors.WrapWithDetails(err, "decoding search stories")
+	}
+	return stories, nil
 }
 
 // GetIssue implements tracker.Getter.
@@ -589,7 +626,7 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 
 	reporter, _ := c.resolveMemberName(ctx, story.RequestedByID)
 
-	return tracker.Issue{
+	issue := tracker.Issue{
 		Key:         strconv.FormatInt(story.ID, 10),
 		Project:     project,
 		Type:        story.StoryType,
@@ -598,7 +635,11 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 		Assignee:    assignee,
 		Reporter:    reporter,
 		Description: story.Description,
-	}, nil
+	}
+	if story.UpdatedAt != "" {
+		issue.UpdatedAt, _ = time.Parse(time.RFC3339, story.UpdatedAt)
+	}
+	return issue, nil
 }
 
 // toTrackerComment converts a Shortcut comment to a tracker.Comment.

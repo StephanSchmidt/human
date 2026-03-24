@@ -10,6 +10,7 @@ type linearIssue struct {
 	Assignee      *nameNode       `json:"assignee"`
 	Creator       *nameNode       `json:"creator"`
 	Labels        labelConnection `json:"labels"`
+	UpdatedAt     string          `json:"updatedAt"`
 }
 
 type nameNode struct {

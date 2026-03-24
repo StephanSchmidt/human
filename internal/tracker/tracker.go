@@ -168,15 +168,16 @@ func DetectKind(key string) string {
 
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
-	Key         string `json:"key"`
-	Project     string `json:"project"` // project key, e.g. "KAN"
-	Type        string `json:"type"`    // issue type, e.g. "Task", "Bug"
-	Title       string `json:"title"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
-	Assignee    string `json:"assignee"`
-	Reporter    string `json:"reporter"`
-	Description string `json:"description"` // markdown
+	Key         string    `json:"key"`
+	Project     string    `json:"project"` // project key, e.g. "KAN"
+	Type        string    `json:"type"`    // issue type, e.g. "Task", "Bug"
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Priority    string    `json:"priority"`
+	Assignee    string    `json:"assignee"`
+	Reporter    string    `json:"reporter"`
+	Description string    `json:"description"` // markdown
+	UpdatedAt   time.Time `json:"updated_at"`  // last modification timestamp
 }
 
 // Comment is a provider-agnostic comment representation.
@@ -189,9 +190,10 @@ type Comment struct {
 
 // ListOptions controls issue listing behaviour.
 type ListOptions struct {
-	Project    string
-	MaxResults int
-	IncludeAll bool // when false, only open/active issues are returned
+	Project      string
+	MaxResults   int
+	IncludeAll   bool      // when false, only open/active issues are returned
+	UpdatedSince time.Time // when non-zero, only return issues updated after this time
 }
 
 // Read interfaces (implemented now).

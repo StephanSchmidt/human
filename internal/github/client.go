@@ -57,6 +57,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
 		"state":    {state},
 	}
+	if !opts.UpdatedSince.IsZero() {
+		query.Set("since", opts.UpdatedSince.Format(time.RFC3339))
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query.Encode(), nil)
 	if err != nil {
@@ -402,6 +405,9 @@ func toTrackerIssue(owner, repo string, gi ghIssue) tracker.Issue {
 		Description: gi.Body,
 	}
 
+	if gi.UpdatedAt != "" {
+		issue.UpdatedAt, _ = time.Parse(time.RFC3339, gi.UpdatedAt)
+	}
 	if len(gi.Labels) > 0 {
 		issue.Type = gi.Labels[0].Name
 	}

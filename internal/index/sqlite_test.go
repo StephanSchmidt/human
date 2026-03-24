@@ -237,6 +237,53 @@ func TestStats_populated(t *testing.T) {
 	}
 }
 
+func TestLastIndexedAt_empty(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	ts, err := s.LastIndexedAt(ctx, "work")
+	if err != nil {
+		t.Fatalf("LastIndexedAt: %v", err)
+	}
+	if !ts.IsZero() {
+		t.Errorf("expected zero time for empty source, got %v", ts)
+	}
+}
+
+func TestLastIndexedAt_populated(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
+	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
+
+	ts, err := s.LastIndexedAt(ctx, "work")
+	if err != nil {
+		t.Fatalf("LastIndexedAt: %v", err)
+	}
+	if ts.IsZero() {
+		t.Error("expected non-zero time for populated source")
+	}
+
+	// Different source should have its own timestamp.
+	ts2, err := s.LastIndexedAt(ctx, "eng")
+	if err != nil {
+		t.Fatalf("LastIndexedAt: %v", err)
+	}
+	if ts2.IsZero() {
+		t.Error("expected non-zero time for eng source")
+	}
+
+	// Non-existent source should return zero.
+	ts3, err := s.LastIndexedAt(ctx, "nonexistent")
+	if err != nil {
+		t.Fatalf("LastIndexedAt: %v", err)
+	}
+	if !ts3.IsZero() {
+		t.Errorf("expected zero time for nonexistent source, got %v", ts3)
+	}
+}
+
 func TestAllKeys_bySource(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -14,6 +14,7 @@ type issue struct {
 type issueFields struct {
 	Summary string      `json:"summary"`
 	Status  statusField `json:"status"`
+	Updated string      `json:"updated"`
 }
 
 type statusField struct {

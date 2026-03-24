@@ -18,6 +18,7 @@ type adoFields struct {
 	CreatedBy    *adoIdentityRef `json:"System.CreatedBy"`
 	Priority     int             `json:"Microsoft.VSTS.Common.Priority"`
 	TeamProject  string          `json:"System.TeamProject"`
+	ChangedDate  string          `json:"System.ChangedDate"`
 }
 
 // adoIdentityRef is an Azure DevOps identity reference.

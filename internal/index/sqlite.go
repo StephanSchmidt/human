@@ -256,6 +256,23 @@ func (s *SQLiteStore) Stats(ctx context.Context) (*Stats, error) {
 	return st, nil
 }
 
+// LastIndexedAt returns the most recent indexed_at timestamp for a given source.
+// Returns the zero time if no entries exist for the source.
+func (s *SQLiteStore) LastIndexedAt(ctx context.Context, source string) (time.Time, error) {
+	var lastIndexed sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		"SELECT MAX(indexed_at) FROM entries WHERE source = ?", source,
+	).Scan(&lastIndexed)
+	if err != nil {
+		return time.Time{}, errors.WrapWithDetails(err, "query last indexed at", "source", source)
+	}
+	if !lastIndexed.Valid {
+		return time.Time{}, nil
+	}
+	t, _ := time.Parse("2006-01-02 15:04:05", lastIndexed.String)
+	return t, nil
+}
+
 // AllKeys returns all indexed keys for a given source instance.
 func (s *SQLiteStore) AllKeys(ctx context.Context, source string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT key FROM entries WHERE source = ?", source)

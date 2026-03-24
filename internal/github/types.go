@@ -10,6 +10,7 @@ type ghIssue struct {
 	Assignee    *ghUser   `json:"assignee"`
 	Labels      []ghLabel `json:"labels"`
 	PullRequest *struct{} `json:"pull_request"` // non-nil means this is a PR
+	UpdatedAt   string    `json:"updated_at"`
 }
 
 type ghUser struct {

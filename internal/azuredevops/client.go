@@ -56,6 +56,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if !opts.IncludeAll {
 		query += " AND [System.State] <> 'Done' AND [System.State] <> 'Removed'"
 	}
+	if !opts.UpdatedSince.IsZero() {
+		query += fmt.Sprintf(" AND [System.ChangedDate] > '%s'", opts.UpdatedSince.Format("2006-01-02T15:04:05Z"))
+	}
 
 	wiqlBody, err := json.Marshal(map[string]string{"query": query})
 	if err != nil {
@@ -478,6 +481,9 @@ func toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 		Description: wi.Fields.Description,
 	}
 
+	if wi.Fields.ChangedDate != "" {
+		issue.UpdatedAt, _ = time.Parse(time.RFC3339, wi.Fields.ChangedDate)
+	}
 	if wi.Fields.Priority > 0 {
 		issue.Priority = strconv.Itoa(wi.Fields.Priority)
 	}

@@ -17,7 +17,9 @@ type SyncResult struct {
 
 // Sync iterates all instances, lists issues per configured project,
 // fetches descriptions, upserts entries, and prunes stale keys.
-func Sync(ctx context.Context, store Store, instances []tracker.Instance, includeAll bool, logger io.Writer) (*SyncResult, error) {
+// When fullSync is false, it performs incremental sync using the last
+// indexed timestamp per source to only fetch recently updated issues.
+func Sync(ctx context.Context, store Store, instances []tracker.Instance, fullSync bool, logger io.Writer) (*SyncResult, error) {
 	result := &SyncResult{}
 
 	for i := range instances {
@@ -26,7 +28,7 @@ func Sync(ctx context.Context, store Store, instances []tracker.Instance, includ
 			_, _ = fmt.Fprintf(logger, "Skipping %s (%s): no projects configured\n", inst.Name, inst.Kind)
 			continue
 		}
-		if err := syncInstance(ctx, store, inst, includeAll, logger, result); err != nil {
+		if err := syncInstance(ctx, store, inst, fullSync, logger, result); err != nil {
 			_, _ = fmt.Fprintf(logger, "Error syncing %s (%s): %v\n", inst.Name, inst.Kind, err)
 			result.Errors++
 		}
@@ -36,15 +38,34 @@ func Sync(ctx context.Context, store Store, instances []tracker.Instance, includ
 }
 
 // syncInstance syncs a single tracker instance.
-func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, includeAll bool, logger io.Writer, result *SyncResult) error {
+func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, fullSync bool, logger io.Writer, result *SyncResult) error {
 	seen := make(map[string]bool)
 
+	// Determine if we can do incremental sync.
+	lastIndexed, err := store.LastIndexedAt(ctx, inst.Name)
+	if err != nil {
+		return err
+	}
+
+	incremental := !fullSync && !lastIndexed.IsZero()
+
+	if incremental {
+		_, _ = fmt.Fprintf(logger, "Incremental sync for %s (%s) since %s\n", inst.Name, inst.Kind, lastIndexed.Format("2006-01-02 15:04:05"))
+	} else {
+		_, _ = fmt.Fprintf(logger, "Full sync for %s (%s)\n", inst.Name, inst.Kind)
+	}
+
 	for _, project := range inst.Projects {
-		issues, err := inst.Provider.ListIssues(ctx, tracker.ListOptions{
+		opts := tracker.ListOptions{
 			Project:    project,
 			MaxResults: 100,
-			IncludeAll: includeAll,
-		})
+			IncludeAll: fullSync,
+		}
+		if incremental {
+			opts.UpdatedSince = lastIndexed
+		}
+
+		issues, err := inst.Provider.ListIssues(ctx, opts)
 		if err != nil {
 			_, _ = fmt.Fprintf(logger, "  Error listing %s/%s: %v\n", inst.Name, project, err)
 			result.Errors++
@@ -81,19 +102,21 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, incl
 		}
 	}
 
-	// Prune stale entries for this instance.
-	existingKeys, err := store.AllKeys(ctx, inst.Name)
-	if err != nil {
-		return err
-	}
-	for _, key := range existingKeys {
-		if !seen[key] {
-			if err := store.DeleteEntry(ctx, key, inst.Name); err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error pruning %s: %v\n", key, err)
-				result.Errors++
-				continue
+	// Only prune on full sync — incremental sync cannot detect deletions.
+	if !incremental {
+		existingKeys, err := store.AllKeys(ctx, inst.Name)
+		if err != nil {
+			return err
+		}
+		for _, key := range existingKeys {
+			if !seen[key] {
+				if err := store.DeleteEntry(ctx, key, inst.Name); err != nil {
+					_, _ = fmt.Fprintf(logger, "  Error pruning %s: %v\n", key, err)
+					result.Errors++
+					continue
+				}
+				result.Pruned++
 			}
-			result.Pruned++
 		}
 	}
 
