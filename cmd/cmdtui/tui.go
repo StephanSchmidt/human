@@ -22,19 +22,23 @@ import (
 
 // BuildTuiCmd creates the "tui" command.
 func BuildTuiCmd() *cobra.Command {
-	return &cobra.Command{
+	var debug bool
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive dashboard for Claude Code usage",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runTUI(cmd.Context())
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return runTUI(debug)
 		},
 	}
+	cmd.Flags().BoolVar(&debug, "debug", false, "Show probe reasoning for state detection")
+	return cmd
 }
 
-func runTUI(_ context.Context) error {
+func runTUI(debug bool) error {
 	ensureDaemon()
 	finder := buildFinder()
 	m := newModel(finder)
+	m.debug = debug
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	// RC-1: Create fsnotify-based state watcher. On file changes, send
@@ -114,6 +118,7 @@ type model struct {
 	width    int
 	height   int
 	quitting bool
+	debug    bool
 }
 
 func newModel(finder claude.InstanceFinder) model {
@@ -173,7 +178,7 @@ func (m model) View() string {
 		_, _ = fmt.Fprintln(&b, renderError(m.data.Err))
 		return b.String()
 	}
-	renderUsage(&b, m.data)
+	renderUsage(&b, m.data, m.debug)
 	_, _ = fmt.Fprintln(&b)
 	_, _ = fmt.Fprintln(&b, renderFooter(m.data.FetchedAt, m.data.TelegramStatus))
 	return b.String()
@@ -323,7 +328,7 @@ func renderError(err error) string {
 	return errorStyle.Render("  Error: " + err.Error())
 }
 
-func renderUsage(b *strings.Builder, data *usageData) {
+func renderUsage(b *strings.Builder, data *usageData, debug bool) {
 	now := data.FetchedAt
 	ws := claude.WindowStart(now)
 	we := claude.WindowEnd(ws)
@@ -340,6 +345,14 @@ func renderUsage(b *strings.Builder, data *usageData) {
 		_ = claude.FormatMultiUsage(&usageBuf, data.Instances, now)
 	}
 	_, _ = fmt.Fprint(b, usageBuf.String())
+
+	if debug {
+		for _, iu := range data.Instances {
+			if csr, ok := iu.Instance.StateReader.(*claude.CompositeStateReader); ok && csr.LastTrace != nil {
+				_, _ = fmt.Fprintf(b, "  %s\n", csr.LastTrace)
+			}
+		}
+	}
 
 	// Tmux panes.
 	if len(data.Panes) > 0 {
