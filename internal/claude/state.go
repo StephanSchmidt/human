@@ -177,13 +177,7 @@ func splitLines(data []byte) [][]byte {
 			start = i + 1
 		}
 	}
-	// Trailing content without newline.
-	if start < len(data) {
-		line := data[start:]
-		if len(line) > 0 {
-			lines = append(lines, line)
-		}
-	}
+	// RC-9: Discard trailing content without newline — treat as incomplete write.
 	return lines
 }
 

@@ -260,20 +260,26 @@ type InstanceUsage struct {
 }
 
 // CollectInstanceUsage calculates usage for each instance and returns results.
+// RC-12: Caches the resolved state on the instance so downstream callers
+// (e.g. FindIdleAgents) don't re-read from disk.
 func CollectInstanceUsage(instances []Instance, now time.Time) []InstanceUsage {
 	var results []InstanceUsage
-	for _, inst := range instances {
+	for i, inst := range instances {
 		summary, err := CalculateUsage(inst.Walker, inst.Root, now)
 		if err != nil {
 			continue
 		}
 		state := StateUnknown
-		if inst.StateReader != nil {
+		if inst.CachedState != nil {
+			state = *inst.CachedState
+		} else if inst.StateReader != nil {
 			if s, sErr := inst.StateReader.ReadState(inst.Root); sErr == nil {
 				state = s
 			}
 		}
-		results = append(results, InstanceUsage{Instance: inst, Summary: summary, State: state})
+		// Store cached state back on the instance.
+		instances[i].CachedState = &state
+		results = append(results, InstanceUsage{Instance: instances[i], Summary: summary, State: state})
 	}
 	return results
 }

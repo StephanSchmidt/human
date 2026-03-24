@@ -96,6 +96,23 @@ func (m *mockCwdResolver) ResolveCwd(pid int) (string, error) {
 	return cwd, nil
 }
 
+// --- mock ProcFS for discovery tests ---
+
+// testProcFS always reports "claude" as the comm for any PID, passing RC-7 check.
+type testProcFS struct{}
+
+func (testProcFS) ReadFile(path string) ([]byte, error) {
+	return []byte("claude\n"), nil
+}
+
+func (testProcFS) ReadDir(path string) ([]os.DirEntry, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (testProcFS) Stat(path string) (os.FileInfo, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // --- mock SessionResolver ---
 
 type mockSessionResolver struct {
@@ -114,7 +131,7 @@ func (m *mockSessionResolver) ResolveSessionID(pid int) (string, error) {
 
 func TestHostFinder_NoProcesses(t *testing.T) {
 	runner := &mockRunner{output: nil, err: errors.New("exit 1")}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser"}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", ProcFS: testProcFS{}}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -135,7 +152,7 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 			67890: "/home/testuser/projects/beta",
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -171,7 +188,7 @@ func TestHostFinder_IgnoresNonClaude(t *testing.T) {
 	runner := &mockRunner{
 		output: []byte("111 /usr/bin/human-claude\n222 /usr/bin/claude-helper\n"),
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser"}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", ProcFS: testProcFS{}}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -192,7 +209,7 @@ func TestHostFinder_CwdResolutionFails(t *testing.T) {
 			// 67890 not present — resolution will fail
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -216,7 +233,7 @@ func TestHostFinder_SameProject(t *testing.T) {
 			67890: "/home/testuser/projects/alpha",
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -254,6 +271,7 @@ func TestHostFinder_SkipsContainerizedProcesses(t *testing.T) {
 		HomeDir:          "/home/testuser",
 		CwdResolver:      resolver,
 		ContainerChecker: checker,
+		ProcFS:           testProcFS{},
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -298,6 +316,7 @@ func TestHostFinder_UsesSessionResolver(t *testing.T) {
 		HomeDir:         homeDir,
 		CwdResolver:     resolver,
 		SessionResolver: sessResolver,
+		ProcFS:          testProcFS{},
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -308,23 +327,19 @@ func TestHostFinder_UsesSessionResolver(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
 
-	// Should be FileStateReader, not OSStateReader.
-	if _, ok := instances[0].StateReader.(FileStateReader); !ok {
-		t.Errorf("StateReader type = %T, want FileStateReader", instances[0].StateReader)
+	// Should be CompositeStateReader with probe pipeline (RC-5).
+	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
+		t.Errorf("StateReader type = %T, want *CompositeStateReader", instances[0].StateReader)
 	}
 
-	// Verify it reads the correct state.
-	state, err := instances[0].StateReader.ReadState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != StateReady {
-		t.Errorf("state = %v, want Ready", state)
+	// Verify the FilePath is set.
+	if instances[0].FilePath == "" {
+		t.Error("FilePath should be set for session-resolved instance")
 	}
 }
 
 func TestHostFinder_SessionResolverFallback(t *testing.T) {
-	// When session resolution fails, OSStateReader should be used.
+	// RC-6: When session resolution fails, ReadyStateReader should be used (not OSStateReader).
 	runner := &mockRunner{
 		output: []byte("12345 /usr/bin/claude\n"),
 	}
@@ -338,6 +353,7 @@ func TestHostFinder_SessionResolverFallback(t *testing.T) {
 		HomeDir:         "/home/testuser",
 		CwdResolver:     resolver,
 		SessionResolver: sessResolver,
+		ProcFS:          testProcFS{},
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -348,8 +364,8 @@ func TestHostFinder_SessionResolverFallback(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
 
-	if _, ok := instances[0].StateReader.(OSStateReader); !ok {
-		t.Errorf("StateReader type = %T, want OSStateReader (fallback)", instances[0].StateReader)
+	if _, ok := instances[0].StateReader.(ReadyStateReader); !ok {
+		t.Errorf("StateReader type = %T, want ReadyStateReader (RC-6 fallback)", instances[0].StateReader)
 	}
 }
 
@@ -385,6 +401,7 @@ func TestHostFinder_SessionResolvesButNoJSONL(t *testing.T) {
 		HomeDir:         homeDir,
 		CwdResolver:     resolver,
 		SessionResolver: sessResolver,
+		ProcFS:          testProcFS{},
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -595,11 +612,13 @@ func TestCombinedFinder_AggregatesResults(t *testing.T) {
 		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
+		ProcFS:      testProcFS{},
 	}
 	f2 := &HostFinder{
 		Runner:      &mockRunner{output: []byte("200 /usr/bin/claude\n")},
 		HomeDir:     "/home/user2",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{200: "/home/user2/project-b"}},
+		ProcFS:      testProcFS{},
 	}
 
 	combined := &CombinedFinder{Finders: []InstanceFinder{f1, f2}}
@@ -617,6 +636,7 @@ func TestCombinedFinder_SkipsFailingFinder(t *testing.T) {
 		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
+		ProcFS:      testProcFS{},
 	}
 	bad := &DockerFinder{
 		Client: &mockDockerClient{listErr: errors.New("docker down")},

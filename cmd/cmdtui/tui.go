@@ -17,6 +17,7 @@ import (
 
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
 // BuildTuiCmd creates the "tui" command.
@@ -35,6 +36,17 @@ func runTUI(_ context.Context) error {
 	finder := buildFinder()
 	m := newModel(finder)
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// RC-1: Create fsnotify-based state watcher. On file changes, send
+	// stateChangedMsg to BubbleTea to trigger immediate re-fetch.
+	watcher, wErr := claude.NewStateWatcher(func(_ string) {
+		p.Send(stateChangedMsg{})
+	})
+	if wErr == nil {
+		m.watcher = watcher
+		defer func() { _ = watcher.Close() }()
+	}
+
 	_, err := p.Run()
 	return err
 }
@@ -86,16 +98,18 @@ func buildFinder() claude.InstanceFinder {
 // --- bubbletea model ---
 
 type usageData struct {
-	Instances []claude.InstanceUsage
-	Panes     []claude.TmuxPane
-	DaemonPid int
-	DaemonUp  bool
-	FetchedAt time.Time
-	Err       error
+	Instances      []claude.InstanceUsage
+	Panes          []claude.TmuxPane
+	DaemonPid      int
+	DaemonUp       bool
+	TelegramStatus string
+	FetchedAt      time.Time
+	Err            error
 }
 
 type model struct {
 	finder   claude.InstanceFinder
+	watcher  *claude.StateWatcher
 	data     *usageData
 	width    int
 	height   int
@@ -110,6 +124,8 @@ func newModel(finder claude.InstanceFinder) model {
 
 type tickMsg time.Time
 
+type stateChangedMsg struct{} // RC-1: fsnotify triggered state change
+
 type usageMsg struct {
 	data *usageData
 }
@@ -117,7 +133,7 @@ type usageMsg struct {
 // --- tea.Model implementation (v1 API) ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchUsage(m.finder), tickCmd())
+	return tea.Batch(fetchUsage(m.finder, m.watcher), tickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -131,7 +147,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tickMsg:
-		return m, tea.Batch(fetchUsage(m.finder), tickCmd())
+		return m, tea.Batch(fetchUsage(m.finder, m.watcher), tickCmd())
+	case stateChangedMsg:
+		// RC-1: fsnotify detected a change — re-fetch immediately.
+		return m, fetchUsage(m.finder, m.watcher)
 	case usageMsg:
 		m.data = msg.data
 	}
@@ -156,19 +175,20 @@ func (m model) View() string {
 	}
 	renderUsage(&b, m.data)
 	_, _ = fmt.Fprintln(&b)
-	_, _ = fmt.Fprintln(&b, renderFooter(m.data.FetchedAt))
+	_, _ = fmt.Fprintln(&b, renderFooter(m.data.FetchedAt, m.data.TelegramStatus))
 	return b.String()
 }
 
 // --- commands ---
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+	// RC-1: Reduced from 5s to 2s as fallback for containers and pane discovery.
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
+func fetchUsage(finder claude.InstanceFinder, watcher *claude.StateWatcher) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		now := time.Now()
@@ -177,11 +197,21 @@ func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 		pid, alive := cmddaemon.ReadAlivePid()
 		data.DaemonPid = pid
 		data.DaemonUp = alive
+		data.TelegramStatus = telegramStatus()
 
 		instances, err := finder.FindInstances(ctx)
 		if err != nil {
 			data.Err = err
 			return usageMsg{data: data}
+		}
+
+		// RC-1: Register JSONL file paths with fsnotify watcher.
+		if watcher != nil {
+			for _, inst := range instances {
+				if inst.FilePath != "" {
+					_ = watcher.Watch(inst.FilePath)
+				}
+			}
 		}
 
 		data.Instances = claude.CollectInstanceUsage(instances, now)
@@ -319,8 +349,27 @@ func renderUsage(b *strings.Builder, data *usageData) {
 	}
 }
 
-func renderFooter(fetchedAt time.Time) string {
+func renderFooter(fetchedAt time.Time, tgStatus string) string {
 	return footerStyle.Render(fmt.Sprintf(
-		"  Last updated: %s  |  Refreshes every 5s  |  Press q to quit",
-		fetchedAt.Format("15:04:05")))
+		"  Last updated: %s  |  %s  |  Refreshes every 2s  |  Press q to quit",
+		fetchedAt.Format("15:04:05"), tgStatus))
+}
+
+// telegramStatus returns a human-readable Telegram dispatch status.
+func telegramStatus() string {
+	configs, err := telegram.LoadConfigs(".")
+	if err != nil {
+		return "Telegram: config error"
+	}
+	if len(configs) == 0 {
+		return "Telegram: not configured"
+	}
+	instances, err := telegram.LoadInstances(".")
+	if err != nil {
+		return "Telegram: config error"
+	}
+	if len(instances) == 0 {
+		return "Telegram: missing token"
+	}
+	return "Telegram dispatch"
 }

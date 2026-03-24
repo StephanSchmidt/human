@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -33,6 +35,8 @@ type Instance struct {
 	Memory      *MemoryInfo // memory usage (containers only)
 	ContainerID string      // full Docker container ID (containers only)
 	PID         int         // host PID of the claude process (0 for containers)
+	FilePath    string      // resolved JSONL path for fsnotify (host instances only)
+	CachedState *InstanceState // cached state from last read (RC-12)
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -75,6 +79,11 @@ type ContainerChecker interface {
 type ProcContainerChecker struct{}
 
 func (ProcContainerChecker) IsContainerized(pid int) bool {
+	// RC-11: If we ourselves are containerized, don't skip sibling processes.
+	if IsSelfContainerized(nil) {
+		return false
+	}
+
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err != nil {
 		return false
@@ -150,6 +159,7 @@ type HostFinder struct {
 	CwdResolver      CwdResolver      // nil defaults to ProcCwdResolver
 	ContainerChecker ContainerChecker // nil defaults to ProcContainerChecker
 	SessionResolver  SessionResolver  // nil defaults to FileSessionResolver{HomeDir: h.HomeDir}
+	ProcFS           ProcFS           // nil defaults to OSProcFS{}; used for RC-7 comm check
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
@@ -201,6 +211,12 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
+		// RC-7: Verify /proc/<pid>/comm == "claude" after pgrep.
+		if !VerifyProcComm(h.ProcFS, pidNum) {
+			log.Debug().Int("pid", pidNum).Msg("proc comm mismatch, skipping")
+			continue
+		}
+
 		// Skip processes running inside containers — DockerFinder handles those.
 		if ctrChecker.IsContainerized(pidNum) {
 			log.Debug().Int("pid", pidNum).Msg("skipping containerized process")
@@ -218,15 +234,31 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
 		label := fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
 
-		var stateReader StateReader = OSStateReader{}
+		var stateReader StateReader
+		var filePath string
+
 		if sessionID, sErr := sessResolver.ResolveSessionID(pidNum); sErr == nil {
 			sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
 			if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 — sessionID comes from trusted local file
-				stateReader = FileStateReader{Path: sessionPath}
+				filePath = sessionPath
+				// RC-5: Use CompositeStateReader with full probe pipeline.
+				stateReader = &CompositeStateReader{
+					Probes: []Probe{
+						&ProcessLivenessProbe{},
+						&ChildTreeProbe{},
+						&CPUProbe{},
+						&JSONLProbe{},
+					},
+					PID:      pidNum,
+					FilePath: sessionPath,
+				}
 			} else {
 				// Session file exists but JSONL not yet created — idle at prompt.
 				stateReader = ReadyStateReader{}
 			}
+		} else {
+			// RC-6: Failed session resolution → ReadyStateReader (not OSStateReader).
+			stateReader = ReadyStateReader{}
 		}
 
 		instances = append(instances, Instance{
@@ -236,20 +268,36 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			StateReader: stateReader,
 			Root:        root,
 			PID:         pidNum,
+			FilePath:    filePath,
 		})
 	}
 	return instances, nil
 }
 
+// dockerCacheEntry holds cached container JSONL data with a TTL.
+type dockerCacheEntry struct {
+	data      []byte
+	fetchedAt time.Time
+}
+
 // DockerFinder discovers Claude Code instances inside Docker containers.
 type DockerFinder struct {
-	Client DockerClient
+	Client   DockerClient
+	CacheTTL time.Duration // TTL for container data cache; defaults to 2s
+
+	mu    sync.Mutex
+	cache map[string]*dockerCacheEntry
 }
 
 func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 	containers, err := d.Client.ListContainers(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	ttl := d.CacheTTL
+	if ttl == 0 {
+		ttl = 2 * time.Second
 	}
 
 	var instances []Instance
@@ -260,36 +308,14 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
-		// List JSONL files with modification times from the container.
-		_, listReader, err := d.Client.Exec(ctx, ctr.ID, []string{
-			"sh", "-c",
-			"find /root/.claude/projects /home -maxdepth 6 -name '*.jsonl' -exec stat -c '%Y %n' {} + 2>/dev/null",
-		})
-		if err != nil {
-			continue
-		}
-
-		listData, err := io.ReadAll(listReader)
-		if err != nil {
-			continue
-		}
-
-		// Parse and sort files by modification time (oldest first, newest last).
-		sortedFiles := sortFilesByMtime(listData)
-		if len(sortedFiles) == 0 {
-			continue
-		}
-
-		// Cat the files in sorted order so newest session data is last.
-		catArgs := append([]string{"cat"}, sortedFiles...)
-		_, catReader, err := d.Client.Exec(ctx, ctr.ID, catArgs)
-		if err != nil {
-			continue
-		}
-
-		data, err := io.ReadAll(catReader)
-		if err != nil {
-			continue
+		// RC-4: Check TTL cache before executing docker exec.
+		data := d.getCached(ctr.ID, ttl)
+		if data == nil {
+			data = d.fetchContainerData(ctx, ctr.ID)
+			if data == nil {
+				continue
+			}
+			d.putCache(ctr.ID, data)
 		}
 
 		shortID := ctr.ID
@@ -314,6 +340,68 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		})
 	}
 	return instances, nil
+}
+
+func (d *DockerFinder) fetchContainerData(ctx context.Context, containerID string) []byte {
+	// List JSONL files with modification times from the container.
+	_, listReader, err := d.Client.Exec(ctx, containerID, []string{
+		"sh", "-c",
+		"find /root/.claude/projects /home -maxdepth 6 -name '*.jsonl' -exec stat -c '%Y %n' {} + 2>/dev/null",
+	})
+	if err != nil {
+		return nil
+	}
+
+	listData, err := io.ReadAll(listReader)
+	if err != nil {
+		return nil
+	}
+
+	sortedFiles := sortFilesByMtime(listData)
+	if len(sortedFiles) == 0 {
+		return nil
+	}
+
+	catArgs := append([]string{"cat"}, sortedFiles...)
+	_, catReader, err := d.Client.Exec(ctx, containerID, catArgs)
+	if err != nil {
+		return nil
+	}
+
+	data, err := io.ReadAll(catReader)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (d *DockerFinder) getCached(containerID string, ttl time.Duration) []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cache == nil {
+		return nil
+	}
+	entry, ok := d.cache[containerID]
+	if !ok {
+		return nil
+	}
+	if time.Since(entry.fetchedAt) > ttl {
+		delete(d.cache, containerID)
+		return nil
+	}
+	return entry.data
+}
+
+func (d *DockerFinder) putCache(containerID string, data []byte) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cache == nil {
+		d.cache = make(map[string]*dockerCacheEntry)
+	}
+	d.cache[containerID] = &dockerCacheEntry{
+		data:      data,
+		fetchedAt: time.Now(),
+	}
 }
 
 // sortFilesByMtime parses `stat -c '%Y %n'` output and returns file paths
