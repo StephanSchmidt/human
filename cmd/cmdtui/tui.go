@@ -347,11 +347,7 @@ func renderUsage(b *strings.Builder, data *usageData, debug bool) {
 	_, _ = fmt.Fprint(b, usageBuf.String())
 
 	if debug {
-		for _, iu := range data.Instances {
-			if csr, ok := iu.Instance.StateReader.(*claude.CompositeStateReader); ok && csr.LastTrace != nil {
-				_, _ = fmt.Fprintf(b, "  %s\n", csr.LastTrace)
-			}
-		}
+		writeProbeDebugLog(data.Instances)
 	}
 
 	// Tmux panes.
@@ -359,6 +355,26 @@ func renderUsage(b *strings.Builder, data *usageData, debug bool) {
 		var panesBuf strings.Builder
 		_ = claude.FormatTmuxPanes(&panesBuf, data.Panes)
 		_, _ = fmt.Fprint(b, panesBuf.String())
+	}
+}
+
+func writeProbeDebugLog(instances []claude.InstanceUsage) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(home, ".claude", "debug", "probes.log")
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	ts := time.Now().Format(time.RFC3339)
+	for _, iu := range instances {
+		if csr, ok := iu.Instance.StateReader.(*claude.CompositeStateReader); ok && csr.LastTrace != nil {
+			_, _ = fmt.Fprintf(f, "%s %s\n", ts, csr.LastTrace)
+		}
 	}
 }
 
