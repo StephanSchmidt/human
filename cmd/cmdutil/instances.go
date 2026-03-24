@@ -9,8 +9,10 @@ import (
 	"github.com/StephanSchmidt/human/internal/azuredevops"
 	"github.com/StephanSchmidt/human/internal/github"
 	"github.com/StephanSchmidt/human/internal/gitlab"
+	"github.com/StephanSchmidt/human/internal/index"
 	"github.com/StephanSchmidt/human/internal/jira"
 	"github.com/StephanSchmidt/human/internal/linear"
+	"github.com/StephanSchmidt/human/internal/notion"
 	"github.com/StephanSchmidt/human/internal/shortcut"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -143,6 +145,24 @@ func InstanceFromFlags(cmd *cobra.Command) *tracker.Instance {
 	}
 
 	return nil
+}
+
+// LoadNotionIndexInstances loads Notion instances and converts them
+// to index.NotionInstance for use by the indexer.
+func LoadNotionIndexInstances(dir string) ([]index.NotionInstance, error) {
+	notionInsts, err := notion.LoadInstances(dir)
+	if err != nil {
+		return nil, err
+	}
+	var result []index.NotionInstance
+	for _, ni := range notionInsts {
+		result = append(result, index.NotionInstance{
+			Name:   ni.Name,
+			URL:    ni.URL,
+			Client: ni.Client,
+		})
+	}
+	return result, nil
 }
 
 // AuditLogPath returns the path to the audit log file (~/.human/audit.log),

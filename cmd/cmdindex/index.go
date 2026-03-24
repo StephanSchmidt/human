@@ -15,16 +15,18 @@ import (
 
 // IndexDeps holds injectable dependencies for index commands.
 type IndexDeps struct {
-	LoadInstances func(dir string) ([]tracker.Instance, error)
-	DBPath        func() string
-	NewStore      func(dbPath string) (index.Store, error)
+	LoadInstances       func(dir string) ([]tracker.Instance, error)
+	LoadNotionInstances func(dir string) ([]index.NotionInstance, error)
+	DBPath              func() string
+	NewStore            func(dbPath string) (index.Store, error)
 }
 
 // DefaultIndexDeps returns production dependencies.
 func DefaultIndexDeps() IndexDeps {
 	return IndexDeps{
-		LoadInstances: cmdutil.LoadAllInstances,
-		DBPath:        index.DefaultDBPath,
+		LoadInstances:       cmdutil.LoadAllInstances,
+		LoadNotionInstances: cmdutil.LoadNotionIndexInstances,
+		DBPath:              index.DefaultDBPath,
 		NewStore: func(dbPath string) (index.Store, error) {
 			return index.NewSQLiteStore(dbPath)
 		},
@@ -41,8 +43,8 @@ func BuildIndexCmd(deps IndexDeps) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "index",
-		Short: "Build search index from configured trackers",
-		Long:  "Sync issues from all configured tracker instances into a local SQLite index for fast full-text search.",
+		Short: "Build search index from configured trackers and Notion",
+		Long:  "Sync issues from all configured tracker instances and Notion workspaces into a local SQLite index for fast full-text search.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if status {
 				return RunIndexStatus(cmd.Context(), cmd.OutOrStdout(), deps)
@@ -53,7 +55,7 @@ func BuildIndexCmd(deps IndexDeps) *cobra.Command {
 
 	cmd.Flags().BoolVar(&status, "status", false, "Show index statistics instead of syncing")
 	cmd.Flags().StringVar(&source, "source", "", "Only sync instances of this tracker kind (e.g. jira, linear)")
-	cmd.Flags().BoolVar(&full, "full", false, "Include closed/done issues")
+	cmd.Flags().BoolVar(&full, "full", false, "Force full sync (include closed/done issues, prune stale entries)")
 
 	return cmd
 }
@@ -62,6 +64,7 @@ func BuildIndexCmd(deps IndexDeps) *cobra.Command {
 func BuildSearchCmd(deps IndexDeps) *cobra.Command {
 	var (
 		limit    int
+		source   string
 		jsonOut  bool
 		tableOut bool
 	)
@@ -69,14 +72,15 @@ func BuildSearchCmd(deps IndexDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search QUERY",
 		Short: "Search the local issue index",
-		Long:  "Full-text search across all indexed tracker issues. Run 'human index' first to build the index.",
+		Long:  "Full-text search across all indexed tracker issues and Notion pages. Run 'human index' first to build the index.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunSearch(cmd.Context(), cmd.OutOrStdout(), args[0], limit, jsonOut, tableOut, deps)
+			return RunSearch(cmd.Context(), cmd.OutOrStdout(), args[0], limit, source, jsonOut, tableOut, deps)
 		},
 	}
 
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum number of results")
+	cmd.Flags().StringVar(&source, "source", "", "Filter results by kind (e.g. notion, jira)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as JSON")
 	cmd.Flags().BoolVar(&tableOut, "table", false, "Output as table")
 
@@ -92,11 +96,6 @@ func RunIndex(ctx context.Context, out io.Writer, source string, full bool, deps
 
 	cmdutil.WarnSkippedTrackers(out, ".", instances)
 
-	if len(instances) == 0 {
-		_, _ = fmt.Fprintln(out, "No trackers connected. Run 'human init' or set credentials (see above).")
-		return nil
-	}
-
 	if source != "" {
 		var filtered []tracker.Instance
 		for _, inst := range instances {
@@ -107,23 +106,57 @@ func RunIndex(ctx context.Context, out io.Writer, source string, full bool, deps
 		instances = filtered
 	}
 
+	// Check if we have anything to sync.
+	hasNotion := (source == "" || source == "notion") && deps.LoadNotionInstances != nil
+
+	if len(instances) == 0 && !hasNotion {
+		_, _ = fmt.Fprintln(out, "No trackers connected. Run 'human init' or set credentials (see above).")
+		return nil
+	}
+
 	store, err := deps.NewStore(deps.DBPath())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = store.Close() }()
 
-	result, err := index.Sync(ctx, store, instances, full, out)
-	if err != nil {
-		return err
+	if len(instances) > 0 {
+		result, err := index.Sync(ctx, store, instances, full, out)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintf(out, "Trackers: %d indexed, %d pruned, %d errors\n", result.Indexed, result.Pruned, result.Errors)
 	}
 
-	_, _ = fmt.Fprintf(out, "\nDone: %d indexed, %d pruned, %d errors\n", result.Indexed, result.Pruned, result.Errors)
+	if hasNotion {
+		syncNotion(ctx, out, store, deps)
+	}
+
+	_, _ = fmt.Fprintln(out, "\nDone.")
 	return nil
 }
 
+// syncNotion loads and syncs Notion instances.
+func syncNotion(ctx context.Context, out io.Writer, store index.Store, deps IndexDeps) {
+	notionInstances, err := deps.LoadNotionInstances(".")
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "Warning: failed to load Notion instances: %v\n", err)
+		return
+	}
+	if len(notionInstances) == 0 {
+		return
+	}
+	notionResult, err := index.SyncNotion(ctx, store, notionInstances, out)
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "Error syncing Notion: %v\n", err)
+		return
+	}
+	_, _ = fmt.Fprintf(out, "Notion: %d pages, %d databases indexed, %d pruned, %d errors\n",
+		notionResult.Pages, notionResult.Databases, notionResult.Pruned, notionResult.Errors)
+}
+
 // RunSearch opens the store and searches.
-func RunSearch(ctx context.Context, out io.Writer, query string, limit int, jsonOut, tableOut bool, deps IndexDeps) error {
+func RunSearch(ctx context.Context, out io.Writer, query string, limit int, source string, jsonOut, tableOut bool, deps IndexDeps) error {
 	store, err := deps.NewStore(deps.DBPath())
 	if err != nil {
 		return err
@@ -133,6 +166,16 @@ func RunSearch(ctx context.Context, out io.Writer, query string, limit int, json
 	entries, err := store.Search(ctx, query, limit)
 	if err != nil {
 		return err
+	}
+
+	if source != "" {
+		var filtered []index.Entry
+		for _, e := range entries {
+			if e.Kind == source {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
 	}
 
 	if len(entries) == 0 {
@@ -189,6 +232,16 @@ func RunIndexStatus(ctx context.Context, out io.Writer, deps IndexDeps) error {
 // printSearchDefault prints results in the agent-friendly default format.
 func printSearchDefault(out io.Writer, entries []index.Entry) error {
 	for _, e := range entries {
+		if e.Kind == "notion" {
+			_, _ = fmt.Fprintln(out, e.Title)
+			_, _ = fmt.Fprintf(out, "  notion \u00b7 %s \u00b7 %s\n", e.Source, e.Status)
+			if e.Status == "database" {
+				_, _ = fmt.Fprintf(out, "  \u2192 human notion database query %s\n", e.Key)
+			} else {
+				_, _ = fmt.Fprintf(out, "  \u2192 human notion page get %s\n", e.Key)
+			}
+			continue
+		}
 		_, _ = fmt.Fprintf(out, "%s: %s\n", e.Key, e.Title)
 		meta := fmt.Sprintf("  %s", e.Kind)
 		if e.Source != "" {

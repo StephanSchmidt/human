@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/StephanSchmidt/human/internal/index"
+	"github.com/StephanSchmidt/human/internal/notion"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -22,6 +23,9 @@ func testDeps(t *testing.T) (IndexDeps, *index.SQLiteStore) {
 
 	deps := IndexDeps{
 		LoadInstances: func(_ string) ([]tracker.Instance, error) {
+			return nil, nil
+		},
+		LoadNotionInstances: func(_ string) ([]index.NotionInstance, error) {
 			return nil, nil
 		},
 		DBPath: func() string { return ":memory:" },
@@ -50,7 +54,7 @@ func TestRunSearch_agentOutput(t *testing.T) {
 	seedStore(t, store)
 
 	var buf bytes.Buffer
-	err := RunSearch(context.Background(), &buf, "retry", 10, false, false, deps)
+	err := RunSearch(context.Background(), &buf, "retry", 10, "", false, false, deps)
 	if err != nil {
 		t.Fatalf("RunSearch: %v", err)
 	}
@@ -69,7 +73,7 @@ func TestRunSearch_jsonOutput(t *testing.T) {
 	seedStore(t, store)
 
 	var buf bytes.Buffer
-	err := RunSearch(context.Background(), &buf, "retry", 10, true, false, deps)
+	err := RunSearch(context.Background(), &buf, "retry", 10, "", true, false, deps)
 	if err != nil {
 		t.Fatalf("RunSearch: %v", err)
 	}
@@ -88,7 +92,7 @@ func TestRunSearch_tableOutput(t *testing.T) {
 	seedStore(t, store)
 
 	var buf bytes.Buffer
-	err := RunSearch(context.Background(), &buf, "retry", 10, false, true, deps)
+	err := RunSearch(context.Background(), &buf, "retry", 10, "", false, true, deps)
 	if err != nil {
 		t.Fatalf("RunSearch: %v", err)
 	}
@@ -107,7 +111,7 @@ func TestRunSearch_noResults(t *testing.T) {
 	seedStore(t, store)
 
 	var buf bytes.Buffer
-	err := RunSearch(context.Background(), &buf, "nonexistent", 10, false, false, deps)
+	err := RunSearch(context.Background(), &buf, "nonexistent", 10, "", false, false, deps)
 	if err != nil {
 		t.Fatalf("RunSearch: %v", err)
 	}
@@ -194,6 +198,242 @@ func TestRunIndexStatus_showsStats(t *testing.T) {
 	}
 	if !strings.Contains(out, "jira") {
 		t.Errorf("expected 'jira' in stats, got:\n%s", out)
+	}
+}
+
+// --- Notion integration tests ---
+
+// mockNotionClient implements index.NotionClient for testing.
+type mockNotionClient struct {
+	searchFn        func(ctx context.Context, query string) ([]notion.SearchResult, error)
+	getPageFn       func(ctx context.Context, pageID string) (string, error)
+	listDatabasesFn func(ctx context.Context) ([]notion.DatabaseEntry, error)
+	queryDatabaseFn func(ctx context.Context, dbID string) ([]notion.DatabaseRow, error)
+}
+
+func (m *mockNotionClient) Search(ctx context.Context, query string) ([]notion.SearchResult, error) {
+	return m.searchFn(ctx, query)
+}
+
+func (m *mockNotionClient) GetPage(ctx context.Context, pageID string) (string, error) {
+	return m.getPageFn(ctx, pageID)
+}
+
+func (m *mockNotionClient) ListDatabases(ctx context.Context) ([]notion.DatabaseEntry, error) {
+	return m.listDatabasesFn(ctx)
+}
+
+func (m *mockNotionClient) QueryDatabase(ctx context.Context, dbID string) ([]notion.DatabaseRow, error) {
+	return m.queryDatabaseFn(ctx, dbID)
+}
+
+func TestRunIndex_syncsNotionInstances(t *testing.T) {
+	deps, _ := testDeps(t)
+
+	client := &mockNotionClient{
+		searchFn: func(_ context.Context, _ string) ([]notion.SearchResult, error) {
+			return []notion.SearchResult{
+				{ID: "page-1", Title: "Auth Spec", URL: "https://notion.so/page-1", Type: "page"},
+			}, nil
+		},
+		getPageFn: func(_ context.Context, _ string) (string, error) {
+			return "# Auth Spec content", nil
+		},
+	}
+
+	deps.LoadNotionInstances = func(_ string) ([]index.NotionInstance, error) {
+		return []index.NotionInstance{
+			{Name: "workspace", URL: "https://api.notion.com", Client: client},
+		}, nil
+	}
+
+	var buf bytes.Buffer
+	err := RunIndex(context.Background(), &buf, "", false, deps)
+	if err != nil {
+		t.Fatalf("RunIndex: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "1 pages") {
+		t.Errorf("expected '1 pages' in output, got:\n%s", out)
+	}
+}
+
+func TestRunIndex_filtersNotionSource(t *testing.T) {
+	deps, _ := testDeps(t)
+
+	client := &mockNotionClient{
+		searchFn: func(_ context.Context, _ string) ([]notion.SearchResult, error) {
+			return []notion.SearchResult{
+				{ID: "page-1", Title: "Auth Spec", URL: "https://notion.so/page-1", Type: "page"},
+			}, nil
+		},
+		getPageFn: func(_ context.Context, _ string) (string, error) {
+			return "# Content", nil
+		},
+	}
+
+	deps.LoadNotionInstances = func(_ string) ([]index.NotionInstance, error) {
+		return []index.NotionInstance{
+			{Name: "workspace", URL: "https://api.notion.com", Client: client},
+		}, nil
+	}
+
+	// Should not call tracker ListIssues.
+	deps.LoadInstances = func(_ string) ([]tracker.Instance, error) {
+		return []tracker.Instance{
+			{Name: "work", Kind: "jira", Projects: []string{"KAN"}, Provider: &mockProvider{
+				listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+					t.Fatal("jira should not be called when source=notion")
+					return nil, nil
+				},
+			}},
+		}, nil
+	}
+
+	var buf bytes.Buffer
+	err := RunIndex(context.Background(), &buf, "notion", false, deps)
+	if err != nil {
+		t.Fatalf("RunIndex: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "1 pages") {
+		t.Errorf("expected '1 pages' in output, got:\n%s", out)
+	}
+}
+
+func TestRunIndex_skipsNotionForOtherSource(t *testing.T) {
+	deps, _ := testDeps(t)
+
+	deps.LoadNotionInstances = func(_ string) ([]index.NotionInstance, error) {
+		t.Fatal("LoadNotionInstances should not be called when source=jira")
+		return nil, nil
+	}
+
+	provider := &mockProvider{
+		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+			return []tracker.Issue{{Key: "KAN-1"}}, nil
+		},
+		getFn: func(_ context.Context, key string) (*tracker.Issue, error) {
+			return &tracker.Issue{Key: key, Title: "Test"}, nil
+		},
+	}
+
+	deps.LoadInstances = func(_ string) ([]tracker.Instance, error) {
+		return []tracker.Instance{
+			{Name: "work", Kind: "jira", Projects: []string{"KAN"}, Provider: provider},
+		}, nil
+	}
+
+	var buf bytes.Buffer
+	err := RunIndex(context.Background(), &buf, "jira", false, deps)
+	if err != nil {
+		t.Fatalf("RunIndex: %v", err)
+	}
+}
+
+func TestRunSearch_notionPageOutput(t *testing.T) {
+	deps, store := testDeps(t)
+	ctx := context.Background()
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "abc123", Source: "workspace", Kind: "notion", Project: "workspace",
+		Title: "Auth Spec", Status: "page",
+	}, "authentication specification content")
+
+	var buf bytes.Buffer
+	err := RunSearch(context.Background(), &buf, "Auth Spec", 10, "", false, false, deps)
+	if err != nil {
+		t.Fatalf("RunSearch: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Auth Spec") {
+		t.Errorf("expected title in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "human notion page get abc123") {
+		t.Errorf("expected notion page get hint, got:\n%s", out)
+	}
+}
+
+func TestRunSearch_notionDatabaseOutput(t *testing.T) {
+	deps, store := testDeps(t)
+	ctx := context.Background()
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "db456", Source: "workspace", Kind: "notion", Project: "workspace",
+		Title: "Q1 Roadmap", Status: "database",
+	}, "Name: Auth | Status: Done")
+
+	var buf bytes.Buffer
+	err := RunSearch(context.Background(), &buf, "Roadmap", 10, "", false, false, deps)
+	if err != nil {
+		t.Fatalf("RunSearch: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Q1 Roadmap") {
+		t.Errorf("expected title in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "human notion database query db456") {
+		t.Errorf("expected notion database query hint, got:\n%s", out)
+	}
+}
+
+func TestRunSearch_sourceFilter(t *testing.T) {
+	deps, store := testDeps(t)
+	ctx := context.Background()
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN",
+		Title: "Jira issue about auth", Status: "Open",
+	}, "auth flow")
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "page-1", Source: "workspace", Kind: "notion", Project: "workspace",
+		Title: "Notion auth spec", Status: "page",
+	}, "auth specification")
+
+	var buf bytes.Buffer
+	err := RunSearch(context.Background(), &buf, "auth", 10, "notion", false, false, deps)
+	if err != nil {
+		t.Fatalf("RunSearch: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Notion auth spec") {
+		t.Errorf("expected notion result, got:\n%s", out)
+	}
+	if strings.Contains(out, "KAN-1") {
+		t.Errorf("did not expect jira result when filtering by notion, got:\n%s", out)
+	}
+}
+
+func TestRunSearch_mixedResults(t *testing.T) {
+	deps, store := testDeps(t)
+	ctx := context.Background()
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN",
+		Title: "Jira auth issue", Status: "Open",
+	}, "auth")
+	_ = store.UpsertEntry(ctx, index.Entry{
+		Key: "page-1", Source: "workspace", Kind: "notion", Project: "workspace",
+		Title: "Notion auth spec", Status: "page",
+	}, "auth specification")
+
+	var buf bytes.Buffer
+	err := RunSearch(context.Background(), &buf, "auth", 10, "", false, false, deps)
+	if err != nil {
+		t.Fatalf("RunSearch: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "KAN-1") {
+		t.Errorf("expected jira result, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Notion auth spec") {
+		t.Errorf("expected notion result, got:\n%s", out)
+	}
+	// Notion result should use title-first format (no "page-1:" prefix).
+	if strings.Contains(out, "page-1:") {
+		t.Errorf("notion result should not use key:title format, got:\n%s", out)
 	}
 }
 
