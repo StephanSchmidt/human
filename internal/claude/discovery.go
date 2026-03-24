@@ -177,6 +177,8 @@ type HostFinder struct {
 	ContainerChecker ContainerChecker // nil defaults to ProcContainerChecker
 	SessionResolver  SessionResolver  // nil defaults to FileSessionResolver{HomeDir: h.HomeDir}
 	ProcFS           ProcFS           // nil defaults to OSProcFS{}; used for RC-7 comm check
+
+	jsonlProbe *JSONLProbe // shared across calls for debounce state
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
@@ -253,10 +255,14 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 
 		filePath := resolveJSONLPath(sessResolver, pidNum, root)
 
+		if h.jsonlProbe == nil {
+			h.jsonlProbe = &JSONLProbe{}
+		}
+
 		stateReader := &CompositeStateReader{
 			Probes: []Probe{
 				&ProcessLivenessProbe{},
-				&JSONLProbe{},
+				h.jsonlProbe,
 				&ChildTreeProbe{},
 				&CPUProbe{},
 			},

@@ -1,12 +1,17 @@
 package claude
 
+import "time"
+
+// busyDebounce is how long the JSONL probe stays sticky-busy after seeing
+// a Busy signal. This prevents flickering during tool-use loops where the
+// JSONL tail briefly shows "user" or "end_turn" between tool calls.
+const busyDebounce = 5 * time.Second
+
 // JSONLProbe reads state from a JSONL file using the existing DetermineState logic.
-// Improvements over raw file reading:
-//   - RC-10: Adaptive tail buffer (64KB → 256KB if no valid entry found)
-//   - RC-2:  Retry on unparseable last line (may be partial write)
-//   - RC-8:  Skips bad JSON lines (existing DetermineState already does this)
-//   - RC-9:  splitLines discards trailing fragment without \n (fixed in state.go)
-type JSONLProbe struct{}
+// Once Busy is detected, it stays Busy for busyDebounce to avoid flickering.
+type JSONLProbe struct {
+	busyUntil map[string]time.Time // keyed by jsonlPath
+}
 
 func (j *JSONLProbe) Name() string { return "jsonl" }
 
@@ -20,16 +25,33 @@ func (j *JSONLProbe) Check(_ int, jsonlPath string) (*ProbeResult, error) {
 		return nil, err
 	}
 
-	// Only report Busy — abstain on Unknown (no evidence either way).
-	if state != StateBusy {
-		return nil, nil
+	now := time.Now()
+
+	if state == StateBusy {
+		// Refresh the debounce window.
+		if j.busyUntil == nil {
+			j.busyUntil = make(map[string]time.Time)
+		}
+		j.busyUntil[jsonlPath] = now.Add(busyDebounce)
+		return &ProbeResult{
+			State:      StateBusy,
+			Confidence: 0.8,
+			Source:     "jsonl",
+		}, nil
 	}
 
-	return &ProbeResult{
-		State:      StateBusy,
-		Confidence: 0.8,
-		Source:     "jsonl",
-	}, nil
+	// Not busy right now — but stay busy if within debounce window.
+	if j.busyUntil != nil {
+		if until, ok := j.busyUntil[jsonlPath]; ok && now.Before(until) {
+			return &ProbeResult{
+				State:      StateBusy,
+				Confidence: 0.6,
+				Source:     "jsonl",
+			}, nil
+		}
+	}
+
+	return nil, nil // abstain
 }
 
 // OSStateFallbackProbe wraps the OSStateReader logic as a probe.
