@@ -72,12 +72,9 @@ func TestProcessLivenessProbe_Alive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result == nil {
-		t.Fatal("expected result, got nil")
-	}
-	// Alive — not Unknown.
-	if result.State == StateUnknown {
-		t.Errorf("got Unknown, want non-Unknown for alive process")
+	// Alive → abstain (nil), let other probes decide.
+	if result != nil {
+		t.Errorf("expected nil (abstain) for alive process, got %+v", result)
 	}
 }
 

@@ -18,84 +18,41 @@ func (s *stubProbe) Check(_ int, _ string) (*ProbeResult, error) {
 	return s.result, s.err
 }
 
-func TestCompositeStateReader_JSONLOnly(t *testing.T) {
+var errTest = fmt.Errorf("test error")
+
+func TestCompositeStateReader_DefaultReady(t *testing.T) {
+	// No probes → default to Ready.
+	csr := &CompositeStateReader{PID: 123}
+	state, err := csr.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("got %v, want Ready (default)", state)
+	}
+}
+
+func TestCompositeStateReader_AllAbstain(t *testing.T) {
 	csr := &CompositeStateReader{
 		Probes: []Probe{
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Confidence: 0.8, Source: "jsonl"}},
+			&stubProbe{name: "child-tree", result: nil},
+			&stubProbe{name: "cpu", result: nil},
 		},
-		PID:      123,
-		FilePath: "/tmp/test.jsonl",
+		PID: 123,
 	}
 	state, err := csr.ReadState("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state != StateReady {
-		t.Errorf("got %v, want Ready", state)
+		t.Errorf("got %v, want Ready (all abstain)", state)
 	}
 }
 
-func TestCompositeStateReader_LivenessDeadShortCircuits(t *testing.T) {
+func TestCompositeStateReader_JSONLBusy(t *testing.T) {
 	csr := &CompositeStateReader{
 		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateUnknown, Confidence: 1.0, Source: "process-liveness"}},
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Confidence: 0.8, Source: "jsonl"}},
-		},
-		PID: 123,
-	}
-	state, err := csr.ReadState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != StateUnknown {
-		t.Errorf("got %v, want Unknown (dead process)", state)
-	}
-}
-
-func TestCompositeStateReader_ChildTreeOverrides(t *testing.T) {
-	csr := &CompositeStateReader{
-		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateBusy, Confidence: 0.1, Source: "process-liveness"}},
-			&stubProbe{name: "child-tree", result: &ProbeResult{State: StateBusy, Confidence: 0.9, Source: "child-tree"}},
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Confidence: 0.8, Source: "jsonl"}},
-		},
-		PID: 123,
-	}
-	state, err := csr.ReadState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != StateBusy {
-		t.Errorf("got %v, want Busy (child tree override)", state)
-	}
-}
-
-func TestCompositeStateReader_CPUOverridesReadyJSONL(t *testing.T) {
-	csr := &CompositeStateReader{
-		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateBusy, Confidence: 0.1, Source: "process-liveness"}},
-			&stubProbe{name: "child-tree", result: nil}, // no children
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Confidence: 0.8, Source: "jsonl"}},
-			&stubProbe{name: "cpu", result: &ProbeResult{State: StateBusy, Confidence: 0.7, Source: "cpu"}},
-		},
-		PID: 123,
-	}
-	state, err := csr.ReadState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != StateBusy {
-		t.Errorf("got %v, want Busy (CPU override of Ready JSONL)", state)
-	}
-}
-
-func TestCompositeStateReader_CPUDoesNotOverrideBusyJSONL(t *testing.T) {
-	csr := &CompositeStateReader{
-		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateBusy, Confidence: 0.1, Source: "process-liveness"}},
-			&stubProbe{name: "child-tree", result: nil},
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateBusy, Confidence: 0.8, Source: "jsonl"}},
-			&stubProbe{name: "cpu", result: nil}, // low CPU
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateBusy, Source: "jsonl"}},
 		},
 		PID: 123,
 	}
@@ -108,13 +65,10 @@ func TestCompositeStateReader_CPUDoesNotOverrideBusyJSONL(t *testing.T) {
 	}
 }
 
-func TestCompositeStateReader_MtimeFallback(t *testing.T) {
+func TestCompositeStateReader_JSONLReady(t *testing.T) {
 	csr := &CompositeStateReader{
 		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateBusy, Confidence: 0.1, Source: "process-liveness"}},
-			&stubProbe{name: "child-tree", result: nil},
-			&stubProbe{name: "jsonl", result: nil},                                                                   // abstain
-			&stubProbe{name: "mtime", result: &ProbeResult{State: StateReady, Confidence: 0.6, Source: "mtime"}},
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
 		},
 		PID: 123,
 	}
@@ -123,17 +77,33 @@ func TestCompositeStateReader_MtimeFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state != StateReady {
-		t.Errorf("got %v, want Ready (mtime fallback)", state)
+		t.Errorf("got %v, want Ready", state)
 	}
 }
 
-func TestCompositeStateReader_AllAbstain(t *testing.T) {
+func TestCompositeStateReader_AnyBusyWins(t *testing.T) {
+	// JSONL says Ready, but ChildTree says Busy → Busy wins.
 	csr := &CompositeStateReader{
 		Probes: []Probe{
-			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateBusy, Confidence: 0.1, Source: "process-liveness"}},
-			&stubProbe{name: "child-tree", result: nil},
-			&stubProbe{name: "jsonl", result: nil},
-			&stubProbe{name: "cpu", result: nil},
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
+			&stubProbe{name: "child-tree", result: &ProbeResult{State: StateBusy, Source: "child-tree"}},
+		},
+		PID: 123,
+	}
+	state, err := csr.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateBusy {
+		t.Errorf("got %v, want Busy (child-tree overrides)", state)
+	}
+}
+
+func TestCompositeStateReader_LivenessDeadShortCircuits(t *testing.T) {
+	csr := &CompositeStateReader{
+		Probes: []Probe{
+			&stubProbe{name: "process-liveness", result: &ProbeResult{State: StateUnknown, Source: "process-liveness"}},
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
 		},
 		PID: 123,
 	}
@@ -142,15 +112,33 @@ func TestCompositeStateReader_AllAbstain(t *testing.T) {
 		t.Fatal(err)
 	}
 	if state != StateUnknown {
-		t.Errorf("got %v, want Unknown (all abstain)", state)
+		t.Errorf("got %v, want Unknown (dead process)", state)
 	}
 }
 
-func TestCompositeStateReader_ProbeError(t *testing.T) {
+func TestCompositeStateReader_LivenessAliveAbstains(t *testing.T) {
+	// Liveness alive → nil (abstain), so JSONL result is used.
+	csr := &CompositeStateReader{
+		Probes: []Probe{
+			&stubProbe{name: "process-liveness", result: nil}, // alive = abstain
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
+		},
+		PID: 123,
+	}
+	state, err := csr.ReadState("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != StateReady {
+		t.Errorf("got %v, want Ready", state)
+	}
+}
+
+func TestCompositeStateReader_ProbeErrorSkipped(t *testing.T) {
 	csr := &CompositeStateReader{
 		Probes: []Probe{
 			&stubProbe{name: "process-liveness", result: nil, err: errTest},
-			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Confidence: 0.8, Source: "jsonl"}},
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
 		},
 		PID: 123,
 	}
@@ -163,15 +151,19 @@ func TestCompositeStateReader_ProbeError(t *testing.T) {
 	}
 }
 
-func TestCompositeStateReader_NoProbes(t *testing.T) {
-	csr := &CompositeStateReader{PID: 123}
+func TestCompositeStateReader_CPUBusyWins(t *testing.T) {
+	csr := &CompositeStateReader{
+		Probes: []Probe{
+			&stubProbe{name: "jsonl", result: &ProbeResult{State: StateReady, Source: "jsonl"}},
+			&stubProbe{name: "cpu", result: &ProbeResult{State: StateBusy, Source: "cpu"}},
+		},
+		PID: 123,
+	}
 	state, err := csr.ReadState("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != StateUnknown {
-		t.Errorf("got %v, want Unknown", state)
+	if state != StateBusy {
+		t.Errorf("got %v, want Busy (CPU override)", state)
 	}
 }
-
-var errTest = fmt.Errorf("test error")

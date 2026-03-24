@@ -70,12 +70,8 @@ func (p *ProcessLivenessProbe) Check(pid int, _ string) (*ProbeResult, error) {
 		}, nil
 	}
 
-	// Process is alive and is claude — don't determine state, let other probes do that.
-	return &ProbeResult{
-		State:      StateBusy, // placeholder; alive means "keep checking"
-		Confidence: 0.1,
-		Source:     "process-liveness",
-	}, nil
+	// Process is alive and is claude — abstain so other probes determine state.
+	return nil, nil
 }
 
 func (p *ProcessLivenessProbe) fs() ProcFS {

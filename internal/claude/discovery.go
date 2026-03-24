@@ -241,13 +241,15 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
 			if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 — sessionID comes from trusted local file
 				filePath = sessionPath
-				// RC-5: Use CompositeStateReader with full probe pipeline.
+				// RC-5: Use CompositeStateReader with probe pipeline.
+				// Any probe that says Busy wins. Order only matters for
+				// liveness short-circuit (dead → Unknown).
 				stateReader = &CompositeStateReader{
 					Probes: []Probe{
 						&ProcessLivenessProbe{},
+						&JSONLProbe{},
 						&ChildTreeProbe{},
 						&CPUProbe{},
-						&JSONLProbe{},
 					},
 					PID:      pidNum,
 					FilePath: sessionPath,

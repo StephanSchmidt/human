@@ -18,32 +18,20 @@ type Probe interface {
 }
 
 // CompositeStateReader aggregates multiple probes and implements StateReader.
-// Probes are evaluated in order; first decisive result wins.
 //
-// Priority logic:
-//  1. ProcessLivenessProbe → dead → Unknown (short-circuit)
-//  2. ChildTreeProbe → children exist → Busy (override, confidence 0.9)
-//  3. CPUProbe → CPU active + JSONL says Ready → Busy (override)
-//  4. JSONLProbe → primary signal from JSONL parsing
-//  5. MtimeProbe → cached state if mtime unchanged (fallback)
-//  6. All abstain → Unknown
+// Logic:
+//  1. Assume Ready (idle).
+//  2. Run every probe looking for evidence the instance is NOT idle.
+//  3. If any probe says Busy → Busy.
+//  4. If liveness probe says dead → Unknown.
+//  5. Otherwise → Ready.
 type CompositeStateReader struct {
 	Probes   []Probe
 	PID      int
 	FilePath string // resolved JSONL path
 }
 
-// probeOutcome indicates what the caller should do after processing a probe result.
-type probeOutcome int
-
-const (
-	outcomeContinue probeOutcome = iota // keep evaluating probes
-	outcomeReturn                       // return the state immediately
-)
-
 func (c *CompositeStateReader) ReadState(_ string) (InstanceState, error) {
-	var jsonlState *InstanceState
-
 	for _, p := range c.Probes {
 		result, err := p.Check(c.PID, c.FilePath)
 		if err != nil {
@@ -54,45 +42,16 @@ func (c *CompositeStateReader) ReadState(_ string) (InstanceState, error) {
 			continue // probe abstains
 		}
 
-		state, outcome := applyProbeResult(p.Name(), result, jsonlState)
-		if outcome == outcomeReturn {
-			return state, nil
+		// Dead process → Unknown, stop immediately.
+		if p.Name() == "process-liveness" && result.State == StateUnknown {
+			return StateUnknown, nil
 		}
-		if p.Name() == "jsonl" {
-			jsonlState = &result.State
-		}
-	}
 
-	if jsonlState != nil {
-		return *jsonlState, nil
-	}
-	return StateUnknown, nil
-}
-
-// applyProbeResult interprets a single probe's result and returns a state
-// plus whether the caller should return immediately or keep evaluating.
-func applyProbeResult(name string, result *ProbeResult, jsonlState *InstanceState) (InstanceState, probeOutcome) {
-	switch name {
-	case "process-liveness":
-		if result.State == StateUnknown {
-			return StateUnknown, outcomeReturn
-		}
-	case "child-tree":
+		// Any probe that says Busy → instance is busy.
 		if result.State == StateBusy {
-			return StateBusy, outcomeReturn
-		}
-	case "cpu":
-		if result.State == StateBusy && jsonlState != nil && *jsonlState == StateReady {
-			return StateBusy, outcomeReturn
-		}
-	case "jsonl":
-		// Don't return yet — let CPU probe override if needed.
-	case "mtime":
-		return result.State, outcomeReturn
-	default:
-		if result.Confidence >= 0.5 {
-			return result.State, outcomeReturn
+			return StateBusy, nil
 		}
 	}
-	return StateUnknown, outcomeContinue
+
+	return StateReady, nil
 }
