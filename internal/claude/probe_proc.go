@@ -219,10 +219,10 @@ func (c *ChildTreeProbe) procFS() ProcFS {
 // --- CPUProbe (A2) ---
 
 // CPUProbe checks whether a process is actively consuming CPU.
-// Takes two readings 100ms apart and compares the delta.
+// Takes two readings 500ms apart and compares the delta.
 type CPUProbe struct {
 	FS    ProcFS
-	Delay time.Duration // override for testing; zero defaults to 100ms
+	Delay time.Duration // override for testing; zero defaults to 500ms
 }
 
 func (cp *CPUProbe) Name() string { return "cpu" }
@@ -241,7 +241,7 @@ func (cp *CPUProbe) Check(pid int, _ string) (*ProbeResult, error) {
 
 	delay := cp.Delay
 	if delay == 0 {
-		delay = 100 * time.Millisecond
+		delay = 500 * time.Millisecond
 	}
 	time.Sleep(delay)
 
@@ -255,7 +255,7 @@ func (cp *CPUProbe) Check(pid int, _ string) (*ProbeResult, error) {
 	// Assume 100 ticks/sec (standard Linux HZ).
 	cpuPct := (delta / 100.0) / delay.Seconds()
 
-	if cpuPct > 0.05 { // >5% CPU usage
+	if cpuPct > 0.15 { // >15% CPU usage
 		return &ProbeResult{
 			State:      StateBusy,
 			Confidence: 0.7,
