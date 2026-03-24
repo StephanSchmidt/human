@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,35 +21,20 @@ import (
 
 // BuildTuiCmd creates the "tui" command.
 func BuildTuiCmd() *cobra.Command {
-	var debug bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive dashboard for Claude Code usage",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runTUI(debug)
+			return runTUI()
 		},
 	}
-	cmd.Flags().BoolVar(&debug, "debug", false, "Show probe reasoning for state detection")
-	return cmd
 }
 
-func runTUI(debug bool) error {
+func runTUI() error {
 	ensureDaemon()
 	finder := buildFinder()
 	m := newModel(finder)
-	m.debug = debug
 	p := tea.NewProgram(m, tea.WithAltScreen())
-
-	// RC-1: Create fsnotify-based state watcher. On file changes, send
-	// stateChangedMsg to BubbleTea to trigger immediate re-fetch.
-	watcher, wErr := claude.NewStateWatcher(func(_ string) {
-		p.Send(stateChangedMsg{})
-	})
-	if wErr == nil {
-		m.watcher = watcher
-		defer func() { _ = watcher.Close() }()
-	}
-
 	_, err := p.Run()
 	return err
 }
@@ -113,12 +97,10 @@ type usageData struct {
 
 type model struct {
 	finder   claude.InstanceFinder
-	watcher  *claude.StateWatcher
 	data     *usageData
 	width    int
 	height   int
 	quitting bool
-	debug    bool
 }
 
 func newModel(finder claude.InstanceFinder) model {
@@ -129,8 +111,6 @@ func newModel(finder claude.InstanceFinder) model {
 
 type tickMsg time.Time
 
-type stateChangedMsg struct{} // RC-1: fsnotify triggered state change
-
 type usageMsg struct {
 	data *usageData
 }
@@ -138,7 +118,7 @@ type usageMsg struct {
 // --- tea.Model implementation (v1 API) ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchUsage(m.finder, m.watcher), tickCmd())
+	return tea.Batch(fetchUsage(m.finder), tickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -152,10 +132,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case tickMsg:
-		return m, tea.Batch(fetchUsage(m.finder, m.watcher), tickCmd())
-	case stateChangedMsg:
-		// RC-1: fsnotify detected a change — re-fetch immediately.
-		return m, fetchUsage(m.finder, m.watcher)
+		return m, tea.Batch(fetchUsage(m.finder), tickCmd())
 	case usageMsg:
 		m.data = msg.data
 	}
@@ -178,7 +155,7 @@ func (m model) View() string {
 		_, _ = fmt.Fprintln(&b, renderError(m.data.Err))
 		return b.String()
 	}
-	renderUsage(&b, m.data, m.debug)
+	renderUsage(&b, m.data)
 	_, _ = fmt.Fprintln(&b)
 	_, _ = fmt.Fprintln(&b, renderFooter(m.data.FetchedAt, m.data.TelegramStatus))
 	return b.String()
@@ -193,7 +170,7 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func fetchUsage(finder claude.InstanceFinder, watcher *claude.StateWatcher) tea.Cmd {
+func fetchUsage(finder claude.InstanceFinder) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		now := time.Now()
@@ -210,15 +187,6 @@ func fetchUsage(finder claude.InstanceFinder, watcher *claude.StateWatcher) tea.
 			return usageMsg{data: data}
 		}
 
-		// RC-1: Register JSONL file paths with fsnotify watcher.
-		if watcher != nil {
-			for _, inst := range instances {
-				if inst.FilePath != "" {
-					_ = watcher.Watch(inst.FilePath)
-				}
-			}
-		}
-
 		data.Instances = claude.CollectInstanceUsage(instances, now)
 
 		// Tmux panes (best-effort).
@@ -232,69 +200,9 @@ func fetchUsage(finder claude.InstanceFinder, watcher *claude.StateWatcher) tea.
 		tmuxClient := &claude.OSTmuxClient{Runner: runner}
 		procLister := &claude.OSProcessLister{Runner: runner}
 		panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
-
-		// Build state maps from already-resolved instances so panes
-		// show the same state as the instance list (no second disk read).
-		containerState := make(map[string]claude.InstanceState)
-		hostState := make(map[int]claude.InstanceState)
-		for _, iu := range data.Instances {
-			if iu.Instance.Source == "container" && iu.Instance.ContainerID != "" {
-				containerState[iu.Instance.ContainerID] = iu.State
-			}
-			if iu.Instance.PID > 0 {
-				hostState[iu.Instance.PID] = iu.State
-			}
-		}
-
-		resolvePaneStates(panes, containerState, hostState)
 		data.Panes = panes
 
 		return usageMsg{data: data}
-	}
-}
-
-// resolvePaneStates resolves busy/ready state for each tmux pane.
-// It prefers states already resolved for discovered instances (hostState,
-// containerState) so the pane list stays in sync with the instance list.
-func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude.InstanceState, hostState map[int]claude.InstanceState) {
-	home, _ := os.UserHomeDir()
-	for i := range panes {
-		// Devcontainer panes: reuse container instance state.
-		if panes[i].Devcontainer && panes[i].ContainerID != "" {
-			if st, ok := containerState[panes[i].ContainerID]; ok {
-				panes[i].State = st
-				continue
-			}
-		}
-		// Host panes: reuse host instance state when available.
-		if panes[i].ClaudePID > 0 {
-			if st, ok := hostState[panes[i].ClaudePID]; ok {
-				panes[i].State = st
-				continue
-			}
-		}
-		// Fallback: read state from disk for panes not matched to an instance.
-		if home == "" || panes[i].Cwd == "" {
-			continue
-		}
-		projectDir := claude.CwdToProjectDir(panes[i].Cwd)
-		root := filepath.Join(home, ".claude", "projects", projectDir)
-
-		// Try session file first (needed when multiple Claudes share a dir),
-		// fall back to newest JSONL when session is stale or missing.
-		var stateReader claude.StateReader = claude.OSStateReader{}
-		if panes[i].ClaudePID > 0 {
-			sessResolver := claude.FileSessionResolver{HomeDir: home}
-			if sessionID, sErr := sessResolver.ResolveSessionID(panes[i].ClaudePID); sErr == nil {
-				sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
-				if _, fErr := os.Stat(sessionPath); fErr == nil {
-					stateReader = claude.FileStateReader{Path: sessionPath}
-				}
-			}
-		}
-
-		state, _ := stateReader.ReadState(root)
-		panes[i].State = state
 	}
 }
 
@@ -328,7 +236,7 @@ func renderError(err error) string {
 	return errorStyle.Render("  Error: " + err.Error())
 }
 
-func renderUsage(b *strings.Builder, data *usageData, debug bool) {
+func renderUsage(b *strings.Builder, data *usageData) {
 	now := data.FetchedAt
 	ws := claude.WindowStart(now)
 	we := claude.WindowEnd(ws)
@@ -346,35 +254,11 @@ func renderUsage(b *strings.Builder, data *usageData, debug bool) {
 	}
 	_, _ = fmt.Fprint(b, usageBuf.String())
 
-	if debug {
-		writeProbeDebugLog(data.Instances)
-	}
-
 	// Tmux panes.
 	if len(data.Panes) > 0 {
 		var panesBuf strings.Builder
 		_ = claude.FormatTmuxPanes(&panesBuf, data.Panes)
 		_, _ = fmt.Fprint(b, panesBuf.String())
-	}
-}
-
-func writeProbeDebugLog(instances []claude.InstanceUsage) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	path := filepath.Join(home, ".claude", "debug", "probes.log")
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	f, err := os.OpenFile(filepath.Clean(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-	ts := time.Now().Format(time.RFC3339)
-	for _, iu := range instances {
-		if csr, ok := iu.Instance.StateReader.(*claude.CompositeStateReader); ok && csr.LastTrace != nil {
-			_, _ = fmt.Fprintf(f, "%s %s\n", ts, csr.LastTrace)
-		}
 	}
 }
 

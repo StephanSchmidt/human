@@ -30,13 +30,11 @@ type Instance struct {
 	Label       string      // e.g. "Host (PID 7046)" or `Container "dev-myapp" (abc123)`
 	Source      string      // "host" or "container"
 	Walker      DirWalker   // how to read its JSONL data
-	StateReader StateReader // determines busy/ready state
 	Root        string      // JSONL root path (or virtual path for containers)
 	Memory      *MemoryInfo // memory usage (containers only)
 	ContainerID string      // full Docker container ID (containers only)
 	PID         int         // host PID of the claude process (0 for containers)
 	FilePath    string      // resolved JSONL path for fsnotify (host instances only)
-	CachedState *InstanceState // cached state from last read (RC-12)
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -80,7 +78,7 @@ type ProcContainerChecker struct{}
 
 func (ProcContainerChecker) IsContainerized(pid int) bool {
 	// RC-11: If we ourselves are containerized, don't skip sibling processes.
-	if IsSelfContainerized(nil) {
+	if isSelfContainerized() {
 		return false
 	}
 
@@ -169,6 +167,9 @@ func ShortProjectName(cwd string) string {
 	return cwd
 }
 
+// CommChecker verifies a process command name.
+type CommChecker func(pid int) bool
+
 // HostFinder discovers Claude Code instances on the local host via pgrep.
 type HostFinder struct {
 	Runner           CommandRunner
@@ -176,9 +177,7 @@ type HostFinder struct {
 	CwdResolver      CwdResolver      // nil defaults to ProcCwdResolver
 	ContainerChecker ContainerChecker // nil defaults to ProcContainerChecker
 	SessionResolver  SessionResolver  // nil defaults to FileSessionResolver{HomeDir: h.HomeDir}
-	ProcFS           ProcFS           // nil defaults to OSProcFS{}; used for RC-7 comm check
-
-	jsonlProbe *JSONLProbe // shared across calls for debounce state
+	CommChecker      CommChecker      // nil defaults to verifyProcComm
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
@@ -230,8 +229,11 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
-		// RC-7: Verify /proc/<pid>/comm == "claude" after pgrep.
-		if !VerifyProcComm(h.ProcFS, pidNum) {
+		commCheck := h.CommChecker
+		if commCheck == nil {
+			commCheck = verifyProcComm
+		}
+		if !commCheck(pidNum) {
 			log.Debug().Int("pid", pidNum).Msg("proc comm mismatch, skipping")
 			continue
 		}
@@ -255,32 +257,36 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 
 		filePath := resolveJSONLPath(sessResolver, pidNum, root)
 
-		if h.jsonlProbe == nil {
-			h.jsonlProbe = &JSONLProbe{}
-		}
-
-		stateReader := &CompositeStateReader{
-			Probes: []Probe{
-				&ProcessLivenessProbe{},
-				h.jsonlProbe,
-				&ChildTreeProbe{},
-				&CPUProbe{},
-			},
+		instances = append(instances, Instance{
+			Label:    label,
+			Source:   "host",
+			Walker:   OSDirWalker{},
+			Root:     root,
 			PID:      pidNum,
 			FilePath: filePath,
-		}
-
-		instances = append(instances, Instance{
-			Label:       label,
-			Source:      "host",
-			Walker:      OSDirWalker{},
-			StateReader: stateReader,
-			Root:        root,
-			PID:         pidNum,
-			FilePath:    filePath,
 		})
 	}
 	return instances, nil
+}
+
+// verifyProcComm checks that /proc/<pid>/comm matches "claude".
+func verifyProcComm(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) == "claude"
+}
+
+// isSelfContainerized checks if the current process is running inside a container.
+func isSelfContainerized() bool {
+	data, err := os.ReadFile("/proc/1/cgroup")
+	if err != nil {
+		return false
+	}
+	s := string(data)
+	return strings.Contains(s, "docker") || strings.Contains(s, "containerd") ||
+		strings.Contains(s, "/lxc/") || strings.Contains(s, "/kubepods")
 }
 
 // dockerCacheEntry holds cached container JSONL data with a TTL.
@@ -342,7 +348,6 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			Label:       fmt.Sprintf("Container %q (%s)", name, shortID),
 			Source:      "container",
 			Walker:      &ByteWalker{Data: data},
-			StateReader: &ByteStateReader{Data: data},
 			Root:        "/container/" + shortID,
 			Memory:      mem,
 			ContainerID: ctr.ID,

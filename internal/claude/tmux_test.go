@@ -482,8 +482,8 @@ func TestMatchesDockerExec_EmptyIDs(t *testing.T) {
 
 func TestFormatTmuxPanes(t *testing.T) {
 	panes := []TmuxPane{
-		{SessionName: "dev", WindowIndex: 0, PaneIndex: 0, State: StateReady},
-		{SessionName: "ops", WindowIndex: 1, PaneIndex: 2, Devcontainer: true, State: StateBusy},
+		{SessionName: "dev", WindowIndex: 0, PaneIndex: 0},
+		{SessionName: "ops", WindowIndex: 1, PaneIndex: 2, Devcontainer: true},
 	}
 	var buf bytes.Buffer
 	err := FormatTmuxPanes(&buf, panes)
@@ -494,14 +494,8 @@ func TestFormatTmuxPanes(t *testing.T) {
 	if !strings.Contains(got, "Tmux panes running claude:") {
 		t.Errorf("output should contain Tmux header, got: %s", got)
 	}
-	if !strings.Contains(got, "🟢") {
-		t.Errorf("output should contain ready emoji for dev pane, got: %s", got)
-	}
 	if !strings.Contains(got, `"dev" (0:0)`) {
 		t.Errorf("output should contain dev pane, got: %s", got)
-	}
-	if !strings.Contains(got, "🔴") {
-		t.Errorf("output should contain busy emoji for ops pane, got: %s", got)
 	}
 	if !strings.Contains(got, `"ops" (1:2) (devcontainer)`) {
 		t.Errorf("output should contain ops pane with devcontainer suffix, got: %s", got)
@@ -510,7 +504,7 @@ func TestFormatTmuxPanes(t *testing.T) {
 
 func TestFormatTmuxPanes_WithPID(t *testing.T) {
 	panes := []TmuxPane{
-		{SessionName: "dev", WindowIndex: 0, PaneIndex: 1, ClaudePID: 12345, State: StateBusy},
+		{SessionName: "dev", WindowIndex: 0, PaneIndex: 1, ClaudePID: 12345},
 	}
 	var buf bytes.Buffer
 	err := FormatTmuxPanes(&buf, panes)

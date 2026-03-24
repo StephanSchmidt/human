@@ -96,22 +96,8 @@ func (m *mockCwdResolver) ResolveCwd(pid int) (string, error) {
 	return cwd, nil
 }
 
-// --- mock ProcFS for discovery tests ---
-
-// testProcFS always reports "claude" as the comm for any PID, passing RC-7 check.
-type testProcFS struct{}
-
-func (testProcFS) ReadFile(path string) ([]byte, error) {
-	return []byte("claude\n"), nil
-}
-
-func (testProcFS) ReadDir(path string) ([]os.DirEntry, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (testProcFS) Stat(path string) (os.FileInfo, error) {
-	return nil, fmt.Errorf("not implemented")
-}
+// alwaysClaude is a CommChecker that always returns true (for tests).
+func alwaysClaude(_ int) bool { return true }
 
 // --- mock SessionResolver ---
 
@@ -131,7 +117,7 @@ func (m *mockSessionResolver) ResolveSessionID(pid int) (string, error) {
 
 func TestHostFinder_NoProcesses(t *testing.T) {
 	runner := &mockRunner{output: nil, err: errors.New("exit 1")}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", ProcFS: testProcFS{}}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -152,7 +138,7 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 			67890: "/home/testuser/projects/beta",
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -188,7 +174,7 @@ func TestHostFinder_IgnoresNonClaude(t *testing.T) {
 	runner := &mockRunner{
 		output: []byte("111 /usr/bin/human-claude\n222 /usr/bin/claude-helper\n"),
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", ProcFS: testProcFS{}}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -209,7 +195,7 @@ func TestHostFinder_CwdResolutionFails(t *testing.T) {
 			// 67890 not present — resolution will fail
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -233,7 +219,7 @@ func TestHostFinder_SameProject(t *testing.T) {
 			67890: "/home/testuser/projects/alpha",
 		},
 	}
-	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, ProcFS: testProcFS{}}
+	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CwdResolver: resolver, CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
@@ -271,7 +257,7 @@ func TestHostFinder_SkipsContainerizedProcesses(t *testing.T) {
 		HomeDir:          "/home/testuser",
 		CwdResolver:      resolver,
 		ContainerChecker: checker,
-		ProcFS:           testProcFS{},
+		CommChecker:      alwaysClaude,
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -297,8 +283,7 @@ func TestHostFinder_SessionResolvesToJSONL(t *testing.T) {
 
 	sessionID := "abc-session-123"
 	sessionFile := filepath.Join(root, sessionID+".jsonl")
-	entry := makeStateEntry(t, "assistant", strPtr("tool_use"))
-	if err := os.WriteFile(sessionFile, append(entry, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(sessionFile, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -311,7 +296,7 @@ func TestHostFinder_SessionResolvesToJSONL(t *testing.T) {
 		HomeDir:         homeDir,
 		CwdResolver:     resolver,
 		SessionResolver: sessResolver,
-		ProcFS:          testProcFS{},
+		CommChecker:     alwaysClaude,
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -337,8 +322,7 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 
 	// Create a JSONL for a different (newer) session.
 	newestFile := filepath.Join(root, "newest-session.jsonl")
-	entry := makeStateEntry(t, "assistant", nil) // streaming = busy
-	if err := os.WriteFile(newestFile, append(entry, '\n'), 0o600); err != nil {
+	if err := os.WriteFile(newestFile, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -352,7 +336,7 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 		HomeDir:         homeDir,
 		CwdResolver:     resolver,
 		SessionResolver: sessResolver,
-		ProcFS:          testProcFS{},
+		CommChecker:     alwaysClaude,
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -368,7 +352,7 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 }
 
 func TestHostFinder_NoJSONL(t *testing.T) {
-	// When no JSONL exists at all, should still create a CompositeStateReader.
+	// When no JSONL exists at all, instance should still be created.
 	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
 
@@ -376,7 +360,7 @@ func TestHostFinder_NoJSONL(t *testing.T) {
 		Runner:      runner,
 		HomeDir:     t.TempDir(),
 		CwdResolver: resolver,
-		ProcFS:      testProcFS{},
+		CommChecker: alwaysClaude,
 	}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -386,8 +370,8 @@ func TestHostFinder_NoJSONL(t *testing.T) {
 	if len(instances) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
-	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
-		t.Errorf("StateReader type = %T, want *CompositeStateReader", instances[0].StateReader)
+	if instances[0].Source != "host" {
+		t.Errorf("Source = %q, want host", instances[0].Source)
 	}
 }
 
@@ -510,12 +494,8 @@ func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
 
-	state, err := instances[0].StateReader.ReadState("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state != StateBusy {
-		t.Errorf("state = %v, want Busy (newest session is active)", state)
+	if instances[0].Source != "container" {
+		t.Errorf("Source = %q, want container", instances[0].Source)
 	}
 }
 
@@ -579,13 +559,13 @@ func TestCombinedFinder_AggregatesResults(t *testing.T) {
 		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
-		ProcFS:      testProcFS{},
+		CommChecker: alwaysClaude,
 	}
 	f2 := &HostFinder{
 		Runner:      &mockRunner{output: []byte("200 /usr/bin/claude\n")},
 		HomeDir:     "/home/user2",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{200: "/home/user2/project-b"}},
-		ProcFS:      testProcFS{},
+		CommChecker: alwaysClaude,
 	}
 
 	combined := &CombinedFinder{Finders: []InstanceFinder{f1, f2}}
@@ -603,7 +583,7 @@ func TestCombinedFinder_SkipsFailingFinder(t *testing.T) {
 		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
-		ProcFS:      testProcFS{},
+		CommChecker: alwaysClaude,
 	}
 	bad := &DockerFinder{
 		Client: &mockDockerClient{listErr: errors.New("docker down")},

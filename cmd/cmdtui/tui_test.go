@@ -117,7 +117,7 @@ func TestModelView_WithData(t *testing.T) {
 						"opus 4.6": {InputTokens: 1000, OutputTokens: 500},
 					},
 				},
-				State: claude.StateBusy,
+				State: claude.StateUnknown,
 			},
 		},
 	}

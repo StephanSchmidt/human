@@ -267,7 +267,7 @@ func TestFormatMultiUsage(t *testing.T) {
 			Summary: &UsageSummary{Models: map[string]*ModelUsage{
 				"sonnet 4.5": {InputTokens: 1_000_000, OutputTokens: 500_000},
 			}},
-			State: StateBusy,
+			State: StateUnknown,
 		},
 		{
 			Instance: Instance{
@@ -278,7 +278,7 @@ func TestFormatMultiUsage(t *testing.T) {
 			Summary: &UsageSummary{Models: map[string]*ModelUsage{
 				"opus 4.6": {InputTokens: 500_000, OutputTokens: 200_000, CacheCreate: 100_000, CacheRead: 50_000},
 			}},
-			State: StateReady,
+			State: StateUnknown,
 		},
 	}
 
@@ -295,12 +295,12 @@ func TestFormatMultiUsage(t *testing.T) {
 		t.Errorf("should contain window header, got: %s", got)
 	}
 
-	// Check instance labels with state.
-	if !strings.Contains(got, "Host (PID 12345) 🔴") {
-		t.Errorf("should contain host label with state, got: %s", got)
+	// Check instance labels.
+	if !strings.Contains(got, "Host (PID 12345)") {
+		t.Errorf("should contain host label, got: %s", got)
 	}
-	if !strings.Contains(got, `Container "dev-myapp" (abc123) 🟢  mem: 512 MiB / 2.0 GiB`) {
-		t.Errorf("should contain container label with state and memory, got: %s", got)
+	if !strings.Contains(got, `Container "dev-myapp" (abc123)`) {
+		t.Errorf("should contain container label, got: %s", got)
 	}
 
 	// Check Total section.

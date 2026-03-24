@@ -163,8 +163,8 @@ func TestRunUsageMultiInstance(t *testing.T) {
 
 	finder := &stubFinder{
 		instances: []claude.Instance{
-			{Label: "Host (PID 12345)", Source: "host", Walker: hostWalker, StateReader: stubStateReader{state: claude.StateBusy}, Root: "/fake/host"},
-			{Label: `Container "dev-myapp" (abc123)`, Source: "container", Walker: containerWalker, StateReader: stubStateReader{state: claude.StateReady}, Root: "/fake/container"},
+			{Label: "Host (PID 12345)", Source: "host", Walker: hostWalker, Root: "/fake/host"},
+			{Label: `Container "dev-myapp" (abc123)`, Source: "container", Walker: containerWalker, Root: "/fake/container"},
 		},
 	}
 
@@ -179,11 +179,11 @@ func TestRunUsageMultiInstance(t *testing.T) {
 	}
 
 	got := buf.String()
-	if !strings.Contains(got, "Host (PID 12345) 🔴") {
-		t.Errorf("should contain host label with state, got: %s", got)
+	if !strings.Contains(got, "Host (PID 12345)") {
+		t.Errorf("should contain host label, got: %s", got)
 	}
-	if !strings.Contains(got, `Container "dev-myapp" (abc123) 🟢`) {
-		t.Errorf("should contain container label with state, got: %s", got)
+	if !strings.Contains(got, `Container "dev-myapp" (abc123)`) {
+		t.Errorf("should contain container label, got: %s", got)
 	}
 	if !strings.Contains(got, "Total:") {
 		t.Errorf("should contain Total section, got: %s", got)
@@ -203,20 +203,8 @@ func TestBuildUsageCmd(t *testing.T) {
 	}
 }
 
-// stubStateReader returns a fixed state for testing.
-type stubStateReader struct {
-	state claude.InstanceState
-}
-
-func (s stubStateReader) ReadState(_ string) (claude.InstanceState, error) {
-	return s.state, nil
-}
-
 // Ensure claude.DirWalker interface is satisfied by stubWalker.
 var _ claude.DirWalker = stubWalker{}
 
 // Ensure claude.InstanceFinder interface is satisfied by stubFinder.
 var _ claude.InstanceFinder = &stubFinder{}
-
-// Ensure claude.StateReader interface is satisfied by stubStateReader.
-var _ claude.StateReader = stubStateReader{}
