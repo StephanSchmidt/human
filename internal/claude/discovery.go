@@ -133,6 +133,23 @@ func (r FileSessionResolver) ResolveSessionID(pid int) (string, error) {
 	return session.SessionID, nil
 }
 
+// resolveJSONLPath finds the active JSONL for a PID.
+// It tries the session file first (needed when multiple Claudes share a project dir),
+// then falls back to the newest JSONL by mtime when the session is stale or missing —
+// Claude creates new conversations without updating the session file.
+func resolveJSONLPath(sess SessionResolver, pid int, root string) string {
+	if sessionID, err := sess.ResolveSessionID(pid); err == nil {
+		sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
+		if _, fErr := os.Stat(sessionPath); fErr == nil {
+			return sessionPath
+		}
+	}
+	if newest, err := findNewestJSONL(root); err == nil && newest != "" {
+		return newest
+	}
+	return ""
+}
+
 // CwdToProjectDir converts an absolute cwd to the Claude project subdir name.
 // e.g. "/home/user/project" -> "-home-user-project"
 func CwdToProjectDir(cwd string) string {
@@ -234,43 +251,17 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
 		label := fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
 
-		var stateReader StateReader
-		var filePath string
+		filePath := resolveJSONLPath(sessResolver, pidNum, root)
 
-		if sessionID, sErr := sessResolver.ResolveSessionID(pidNum); sErr == nil {
-			sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
-			if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 — sessionID comes from trusted local file
-				filePath = sessionPath
-				// RC-5: Use CompositeStateReader with probe pipeline.
-				// Any probe that says Busy wins. Order only matters for
-				// liveness short-circuit (dead → Unknown).
-				stateReader = &CompositeStateReader{
-					Probes: []Probe{
-						&ProcessLivenessProbe{},
-						&JSONLProbe{},
-						&ChildTreeProbe{},
-						&CPUProbe{},
-					},
-					PID:      pidNum,
-					FilePath: sessionPath,
-				}
-			} else {
-				// Session file exists but JSONL not yet created — idle at prompt.
-				stateReader = ReadyStateReader{}
-			}
-		} else {
-			// RC-6: Failed session resolution — use probe pipeline with OSStateReader
-			// fallback to scan for the newest JSONL. ReadyStateReader would always
-			// report Ready even when the instance is busy.
-			stateReader = &CompositeStateReader{
-				Probes: []Probe{
-					&ProcessLivenessProbe{},
-					&ChildTreeProbe{},
-					&CPUProbe{},
-					&OSStateFallbackProbe{Root: root},
-				},
-				PID: pidNum,
-			}
+		stateReader := &CompositeStateReader{
+			Probes: []Probe{
+				&ProcessLivenessProbe{},
+				&JSONLProbe{},
+				&ChildTreeProbe{},
+				&CPUProbe{},
+			},
+			PID:      pidNum,
+			FilePath: filePath,
 		}
 
 		instances = append(instances, Instance{

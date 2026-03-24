@@ -286,8 +286,8 @@ func TestHostFinder_SkipsContainerizedProcesses(t *testing.T) {
 	}
 }
 
-func TestHostFinder_UsesSessionResolver(t *testing.T) {
-	// Create a temp dir to act as HomeDir with a session JSONL file.
+func TestHostFinder_SessionResolvesToJSONL(t *testing.T) {
+	// When session resolves and the JSONL exists, use it.
 	homeDir := t.TempDir()
 	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
 	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
@@ -297,20 +297,15 @@ func TestHostFinder_UsesSessionResolver(t *testing.T) {
 
 	sessionID := "abc-session-123"
 	sessionFile := filepath.Join(root, sessionID+".jsonl")
-	entry := makeStateEntry(t, "assistant", strPtr("end_turn"))
+	entry := makeStateEntry(t, "assistant", strPtr("tool_use"))
 	if err := os.WriteFile(sessionFile, append(entry, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n"),
-	}
-	resolver := &mockCwdResolver{
-		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
-	}
-	sessResolver := &mockSessionResolver{
-		sessions: map[int]string{12345: sessionID},
-	}
+	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
+	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: sessionID}}
+
 	finder := &HostFinder{
 		Runner:          runner,
 		HomeDir:         homeDir,
@@ -326,54 +321,13 @@ func TestHostFinder_UsesSessionResolver(t *testing.T) {
 	if len(instances) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
-
-	// Should be CompositeStateReader with probe pipeline (RC-5).
-	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
-		t.Errorf("StateReader type = %T, want *CompositeStateReader", instances[0].StateReader)
-	}
-
-	// Verify the FilePath is set.
-	if instances[0].FilePath == "" {
-		t.Error("FilePath should be set for session-resolved instance")
+	if instances[0].FilePath != sessionFile {
+		t.Errorf("FilePath = %q, want %q (session-resolved)", instances[0].FilePath, sessionFile)
 	}
 }
 
-func TestHostFinder_SessionResolverFallback(t *testing.T) {
-	// RC-6: When session resolution fails, CompositeStateReader with OSStateFallbackProbe
-	// should be used so we still scan JSONL files for actual state.
-	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n"),
-	}
-	resolver := &mockCwdResolver{
-		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
-	}
-	// Empty sessions map — resolution will fail.
-	sessResolver := &mockSessionResolver{sessions: map[int]string{}}
-	finder := &HostFinder{
-		Runner:          runner,
-		HomeDir:         "/home/testuser",
-		CwdResolver:     resolver,
-		SessionResolver: sessResolver,
-		ProcFS:          testProcFS{},
-	}
-
-	instances, err := finder.FindInstances(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(instances) != 1 {
-		t.Fatalf("expected 1 instance, got %d", len(instances))
-	}
-
-	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
-		t.Errorf("StateReader type = %T, want *CompositeStateReader (RC-6 fallback)", instances[0].StateReader)
-	}
-}
-
-func TestHostFinder_SessionResolvesButNoJSONL(t *testing.T) {
-	// When session resolves but the JSONL file doesn't exist yet (new session),
-	// ReadyStateReader should be used — NOT OSStateReader which would read
-	// a different session's JSONL and show the wrong state.
+func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
+	// Session resolves to a missing JSONL (stale). Should fall back to newest.
 	homeDir := t.TempDir()
 	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
 	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
@@ -381,22 +335,18 @@ func TestHostFinder_SessionResolvesButNoJSONL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a JSONL for a DIFFERENT session (simulates another active session).
-	otherEntry := makeStateEntry(t, "user", nil) // busy
-	if err := os.WriteFile(filepath.Join(root, "other-session.jsonl"), append(otherEntry, '\n'), 0o600); err != nil {
+	// Create a JSONL for a different (newer) session.
+	newestFile := filepath.Join(root, "newest-session.jsonl")
+	entry := makeStateEntry(t, "assistant", nil) // streaming = busy
+	if err := os.WriteFile(newestFile, append(entry, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n"),
-	}
-	resolver := &mockCwdResolver{
-		cwds: map[int]string{12345: "/home/testuser/projects/alpha"},
-	}
-	// Session resolves to an ID whose JSONL doesn't exist.
-	sessResolver := &mockSessionResolver{
-		sessions: map[int]string{12345: "new-session-no-jsonl"},
-	}
+	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
+	// Session points to a JSONL that doesn't exist.
+	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: "stale-gone-session"}}
+
 	finder := &HostFinder{
 		Runner:          runner,
 		HomeDir:         homeDir,
@@ -412,17 +362,32 @@ func TestHostFinder_SessionResolvesButNoJSONL(t *testing.T) {
 	if len(instances) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
+	if instances[0].FilePath != newestFile {
+		t.Errorf("FilePath = %q, want %q (fallback to newest)", instances[0].FilePath, newestFile)
+	}
+}
 
-	if _, ok := instances[0].StateReader.(ReadyStateReader); !ok {
-		t.Errorf("StateReader type = %T, want ReadyStateReader (session exists, JSONL missing)", instances[0].StateReader)
+func TestHostFinder_NoJSONL(t *testing.T) {
+	// When no JSONL exists at all, should still create a CompositeStateReader.
+	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
+
+	finder := &HostFinder{
+		Runner:      runner,
+		HomeDir:     t.TempDir(),
+		CwdResolver: resolver,
+		ProcFS:      testProcFS{},
 	}
 
-	state, err := instances[0].StateReader.ReadState("")
+	instances, err := finder.FindInstances(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state != StateReady {
-		t.Errorf("state = %v, want Ready (idle new session)", state)
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
+		t.Errorf("StateReader type = %T, want *CompositeStateReader", instances[0].StateReader)
 	}
 }
 
@@ -498,10 +463,9 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 
 func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
 	// Simulate two JSONL sessions: an older completed one (end_turn) and
-	// a newer active one (user message as last entry). The file listing
-	// returns them in arbitrary filesystem order (newer file listed first).
+	// a newer active one (streaming assistant, null stop_reason).
 	// After sorting by mtime, the newer (active) file should be last,
-	// so DetermineState should return Busy, not Ready.
+	// so DetermineState should return Busy.
 
 	endTurn := "end_turn"
 	oldSession, _ := json.Marshal(map[string]interface{}{
@@ -510,8 +474,10 @@ func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
 			"stop_reason": &endTurn,
 		},
 	})
+	// Streaming assistant — null stop_reason means actively generating.
 	newSession, _ := json.Marshal(map[string]interface{}{
-		"type": "user",
+		"type": "assistant",
+		"message": map[string]interface{}{},
 	})
 
 	// File listing: newer file (mtime 2000) and older file (mtime 1000)

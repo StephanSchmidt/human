@@ -253,7 +253,6 @@ func fetchUsage(finder claude.InstanceFinder, watcher *claude.StateWatcher) tea.
 // containerState) so the pane list stays in sync with the instance list.
 func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude.InstanceState, hostState map[int]claude.InstanceState) {
 	home, _ := os.UserHomeDir()
-	sessResolver := claude.FileSessionResolver{HomeDir: home}
 	for i := range panes {
 		// Devcontainer panes: reuse container instance state.
 		if panes[i].Devcontainer && panes[i].ContainerID != "" {
@@ -276,14 +275,15 @@ func resolvePaneStates(panes []claude.TmuxPane, containerState map[string]claude
 		projectDir := claude.CwdToProjectDir(panes[i].Cwd)
 		root := filepath.Join(home, ".claude", "projects", projectDir)
 
+		// Try session file first (needed when multiple Claudes share a dir),
+		// fall back to newest JSONL when session is stale or missing.
 		var stateReader claude.StateReader = claude.OSStateReader{}
 		if panes[i].ClaudePID > 0 {
+			sessResolver := claude.FileSessionResolver{HomeDir: home}
 			if sessionID, sErr := sessResolver.ResolveSessionID(panes[i].ClaudePID); sErr == nil {
 				sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
 				if _, fErr := os.Stat(sessionPath); fErr == nil {
 					stateReader = claude.FileStateReader{Path: sessionPath}
-				} else {
-					stateReader = claude.ReadyStateReader{}
 				}
 			}
 		}
