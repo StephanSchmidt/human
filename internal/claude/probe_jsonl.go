@@ -27,6 +27,28 @@ func (j *JSONLProbe) Check(_ int, jsonlPath string) (*ProbeResult, error) {
 	}, nil
 }
 
+// OSStateFallbackProbe wraps the OSStateReader logic as a probe.
+// Used when session resolution fails and we need to scan for the newest
+// JSONL file in the project root directory.
+type OSStateFallbackProbe struct {
+	Root string
+}
+
+func (o *OSStateFallbackProbe) Name() string { return "jsonl" }
+
+func (o *OSStateFallbackProbe) Check(_ int, _ string) (*ProbeResult, error) {
+	reader := OSStateReader{}
+	state, err := reader.ReadState(o.Root)
+	if err != nil {
+		return nil, err
+	}
+	return &ProbeResult{
+		State:      state,
+		Confidence: 0.7,
+		Source:     "jsonl",
+	}, nil
+}
+
 // readStateAdaptive reads the tail of a JSONL file, trying progressively
 // larger buffers if the initial read yields no valid entries (RC-10).
 func readStateAdaptive(path string) (InstanceState, error) {

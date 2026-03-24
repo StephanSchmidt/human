@@ -257,8 +257,18 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 				stateReader = ReadyStateReader{}
 			}
 		} else {
-			// RC-6: Failed session resolution → ReadyStateReader (not OSStateReader).
-			stateReader = ReadyStateReader{}
+			// RC-6: Failed session resolution — use probe pipeline with OSStateReader
+			// fallback to scan for the newest JSONL. ReadyStateReader would always
+			// report Ready even when the instance is busy.
+			stateReader = &CompositeStateReader{
+				Probes: []Probe{
+					&ProcessLivenessProbe{},
+					&ChildTreeProbe{},
+					&CPUProbe{},
+					&OSStateFallbackProbe{Root: root},
+				},
+				PID: pidNum,
+			}
 		}
 
 		instances = append(instances, Instance{

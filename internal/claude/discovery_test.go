@@ -339,7 +339,8 @@ func TestHostFinder_UsesSessionResolver(t *testing.T) {
 }
 
 func TestHostFinder_SessionResolverFallback(t *testing.T) {
-	// RC-6: When session resolution fails, ReadyStateReader should be used (not OSStateReader).
+	// RC-6: When session resolution fails, CompositeStateReader with OSStateFallbackProbe
+	// should be used so we still scan JSONL files for actual state.
 	runner := &mockRunner{
 		output: []byte("12345 /usr/bin/claude\n"),
 	}
@@ -364,8 +365,8 @@ func TestHostFinder_SessionResolverFallback(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
 
-	if _, ok := instances[0].StateReader.(ReadyStateReader); !ok {
-		t.Errorf("StateReader type = %T, want ReadyStateReader (RC-6 fallback)", instances[0].StateReader)
+	if _, ok := instances[0].StateReader.(*CompositeStateReader); !ok {
+		t.Errorf("StateReader type = %T, want *CompositeStateReader (RC-6 fallback)", instances[0].StateReader)
 	}
 }
 
