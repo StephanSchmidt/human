@@ -172,6 +172,32 @@ func TestAckUpdate_apiError(t *testing.T) {
 	assert.Contains(t, err.Error(), "Unauthorized")
 }
 
+func TestSendMessage_happy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Contains(t, r.URL.Path, "/bottest-token/sendMessage")
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		_, _ = fmt.Fprint(w, `{"ok": true}`)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv.URL, "test-token")
+	err := client.SendMessage(context.Background(), 42, "Hello from daemon")
+	require.NoError(t, err)
+}
+
+func TestSendMessage_apiError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"ok": false, "description": "Bad Request: chat not found"}`)
+	}))
+	defer srv.Close()
+
+	client := newTestClient(srv.URL, "test-token")
+	err := client.SendMessage(context.Background(), 999, "test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "chat not found")
+}
+
 func TestSanitizeTokenInPath(t *testing.T) {
 	assert.Equal(t, "/bot<REDACTED>/getUpdates", sanitizeTokenInPath("/bot123:ABC/getUpdates", "123:ABC"))
 	assert.Equal(t, "/bot/getUpdates", sanitizeTokenInPath("/bot/getUpdates", ""))

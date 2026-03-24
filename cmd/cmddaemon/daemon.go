@@ -17,8 +17,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/chrome"
+	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
 const daemonChildEnv = "_HUMAN_DAEMON_CHILD"
@@ -194,6 +197,10 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	if unmount := fuseMount(cwd, safe, logger); unmount != nil {
 		defer unmount()
 	}
+
+	// Start Telegram dispatch loop (if configured).
+	telegramStatus := startTelegramDispatcher(ctx, logger)
+	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
 
 	return srv.ListenAndServe(ctx)
 }
@@ -446,6 +453,63 @@ func resolveHostIP() string {
 		return "localhost"
 	}
 	return addr.IP.String()
+}
+
+// startTelegramDispatcher starts the Telegram dispatch loop if a Telegram
+// instance is configured. It runs as a background goroutine and returns
+// a human-readable status string for the startup banner.
+func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger) string {
+	configs, cfgErr := telegram.LoadConfigs(".")
+	if cfgErr != nil {
+		logger.Warn().Err(cfgErr).Msg("failed to load Telegram config, dispatch disabled")
+		return "error loading config"
+	}
+	if len(configs) == 0 {
+		return "not configured (add telegrams: to .humanconfig)"
+	}
+
+	instances, err := telegram.LoadInstances(".")
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to build Telegram instances")
+		return "error loading config"
+	}
+	if len(instances) == 0 {
+		names := make([]string, len(configs))
+		for i, c := range configs {
+			names[i] = c.Name
+		}
+		logger.Warn().Strs("instances", names).Msg("Telegram configured but token missing — set TELEGRAM_<NAME>_TOKEN")
+		return fmt.Sprintf("missing token (set TELEGRAM_%s_TOKEN)", strings.ToUpper(configs[0].Name))
+	}
+
+	inst := instances[0]
+	runner := claude.OSCommandRunner{}
+	homeDir, _ := os.UserHomeDir()
+
+	d := &dispatch.Dispatcher{
+		Source: &dispatch.TelegramSource{
+			Client:       inst.Client,
+			AllowedUsers: inst.AllowedUsers,
+		},
+		Finder: &dispatch.TmuxAgentFinder{
+			InstanceFinder: &claude.HostFinder{Runner: runner, HomeDir: homeDir},
+			TmuxClient:     &claude.OSTmuxClient{Runner: runner},
+			ProcessLister:  &claude.OSProcessLister{Runner: runner},
+		},
+		Sender:   &dispatch.TmuxSender{Runner: runner},
+		Notifier: &dispatch.TelegramNotifier{Client: inst.Client},
+		Config:   dispatch.Config{PollInterval: dispatch.DefaultPollInterval},
+		Logger:   logger,
+	}
+
+	go func() {
+		if err := d.Run(ctx); err != nil {
+			logger.Error().Err(err).Msg("telegram dispatcher failed")
+		}
+	}()
+
+	logger.Info().Str("telegram", inst.Name).Msg("telegram dispatch enabled")
+	return fmt.Sprintf("enabled (%s)", inst.Name)
 }
 
 // replaceHost replaces an empty or wildcard host in addr with the given host.

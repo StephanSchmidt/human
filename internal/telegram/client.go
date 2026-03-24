@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -101,6 +102,36 @@ func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
 	if !result.OK {
 		return errors.WithDetails(
 			fmt.Sprintf("Telegram API error: %s", result.Description))
+	}
+	return nil
+}
+
+// SendMessage sends a text message to the given chat via the Telegram Bot API.
+func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
+	path := fmt.Sprintf("/bot%s/sendMessage", c.token)
+	body, err := json.Marshal(struct {
+		ChatID int64  `json:"chat_id"`
+		Text   string `json:"text"`
+	}{ChatID: chatID, Text: text})
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshaling sendMessage request")
+	}
+	resp, err := c.api.Do(ctx, http.MethodPost, path, "", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return errors.WrapWithDetails(err, "decoding sendMessage response")
+	}
+	if !result.OK {
+		return errors.WithDetails(
+			fmt.Sprintf("Telegram sendMessage error: %s", result.Description))
 	}
 	return nil
 }

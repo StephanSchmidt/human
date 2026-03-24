@@ -1,0 +1,359 @@
+package dispatch
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// --- Mocks ---
+
+type mockSource struct {
+	mu       sync.Mutex
+	messages []QueuedMessage
+	acked    []int
+	fetchErr error
+	ackErr   error
+}
+
+func (m *mockSource) FetchMessages(_ context.Context) ([]QueuedMessage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fetchErr != nil {
+		return nil, m.fetchErr
+	}
+	return m.messages, nil
+}
+
+func (m *mockSource) AckMessage(_ context.Context, updateID int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ackErr != nil {
+		return m.ackErr
+	}
+	m.acked = append(m.acked, updateID)
+	return nil
+}
+
+type mockFinder struct {
+	agents  []Agent
+	findErr error
+}
+
+func (m *mockFinder) FindIdleAgents(_ context.Context) ([]Agent, error) {
+	if m.findErr != nil {
+		return nil, m.findErr
+	}
+	return m.agents, nil
+}
+
+type sendCall struct {
+	Agent  Agent
+	Prompt string
+}
+
+type mockSender struct {
+	mu      sync.Mutex
+	calls   []sendCall
+	sendErr error
+}
+
+func (m *mockSender) SendPrompt(_ context.Context, agent Agent, prompt string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.calls = append(m.calls, sendCall{Agent: agent, Prompt: prompt})
+	return nil
+}
+
+type notifyCall struct {
+	ChatID int64
+	Text   string
+}
+
+type mockNotifier struct {
+	mu        sync.Mutex
+	calls     []notifyCall
+	notifyErr error
+}
+
+func (m *mockNotifier) Notify(_ context.Context, chatID int64, text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.notifyErr != nil {
+		return m.notifyErr
+	}
+	m.calls = append(m.calls, notifyCall{ChatID: chatID, Text: text})
+	return nil
+}
+
+func newTestDispatcher(source *mockSource, finder *mockFinder, sender *mockSender, notifier *mockNotifier) *Dispatcher {
+	return &Dispatcher{
+		Source:   source,
+		Finder:   finder,
+		Sender:   sender,
+		Notifier: notifier,
+		Config:   Config{PollInterval: 50 * time.Millisecond},
+		Logger:   zerolog.Nop(),
+	}
+}
+
+// --- Tests ---
+
+func TestDispatcher_DispatchesMessageToIdleAgent(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "fix the login bug"},
+		},
+	}
+	agent := Agent{SessionName: "claude", WindowIndex: 0, PaneIndex: 1, Label: "claude:0.1"}
+	finder := &mockFinder{agents: []Agent{agent}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Run one tick manually.
+	d.seen = make(map[int]bool)
+	d.tick(ctx)
+	cancel()
+
+	require.Len(t, sender.calls, 1)
+	assert.Contains(t, sender.calls[0].Prompt, "fix the login bug")
+	assert.Equal(t, agent, sender.calls[0].Agent)
+
+	require.Len(t, source.acked, 1)
+	assert.Equal(t, 100, source.acked[0])
+
+	require.Len(t, notifier.calls, 1)
+	assert.Equal(t, int64(42), notifier.calls[0].ChatID)
+	assert.Contains(t, notifier.calls[0].Text, "claude:0.1")
+}
+
+func TestDispatcher_FIFO(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "first"},
+			{UpdateID: 101, ChatID: 42, From: "John", Text: "second"},
+			{UpdateID: 102, ChatID: 42, From: "John", Text: "third"},
+		},
+	}
+	finder := &mockFinder{agents: []Agent{
+		{SessionName: "claude", WindowIndex: 0, PaneIndex: 0, Label: "claude:0.0"},
+	}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	// Only one agent available, so only the first message dispatched.
+	require.Len(t, sender.calls, 1)
+	assert.Contains(t, sender.calls[0].Prompt, "first")
+	assert.Len(t, d.queue, 2)
+}
+
+func TestDispatcher_MultipleAgents(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "first"},
+			{UpdateID: 101, ChatID: 42, From: "John", Text: "second"},
+		},
+	}
+	finder := &mockFinder{agents: []Agent{
+		{SessionName: "claude", WindowIndex: 0, PaneIndex: 0, Label: "claude:0.0"},
+		{SessionName: "claude", WindowIndex: 0, PaneIndex: 1, Label: "claude:0.1"},
+	}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	require.Len(t, sender.calls, 2)
+	assert.Contains(t, sender.calls[0].Prompt, "first")
+	assert.Contains(t, sender.calls[1].Prompt, "second")
+	assert.Empty(t, d.queue)
+}
+
+func TestDispatcher_NoIdleAgents(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+	}
+	finder := &mockFinder{agents: nil}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	assert.Empty(t, sender.calls)
+	assert.Len(t, d.queue, 1, "message should remain queued")
+}
+
+func TestDispatcher_NoMessages(t *testing.T) {
+	source := &mockSource{messages: nil}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	assert.Empty(t, sender.calls)
+}
+
+func TestDispatcher_FetchError(t *testing.T) {
+	source := &mockSource{fetchErr: fmt.Errorf("network error")}
+	finder := &mockFinder{}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	// Pre-queue a message to verify it survives the error.
+	d.queue = []QueuedMessage{{UpdateID: 99, ChatID: 1, Text: "existing"}}
+	d.seen[99] = true
+	d.tick(context.Background())
+
+	assert.Len(t, d.queue, 1, "existing queue should be preserved")
+}
+
+func TestDispatcher_SendError(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+	}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{sendErr: fmt.Errorf("tmux error")}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	assert.Len(t, d.queue, 1, "message should remain queued on send error")
+	assert.Empty(t, source.acked, "should not ack on send failure")
+	assert.Empty(t, notifier.calls, "should not notify on send failure")
+}
+
+func TestDispatcher_NotifyError(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+	}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{notifyErr: fmt.Errorf("telegram error")}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	// Dispatch should succeed even if notification fails.
+	require.Len(t, sender.calls, 1)
+	require.Len(t, source.acked, 1)
+	assert.Empty(t, d.queue)
+}
+
+func TestDispatcher_Deduplication(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+	}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+
+	// First tick: dispatches the message.
+	d.tick(context.Background())
+	require.Len(t, sender.calls, 1)
+
+	// Second tick: same message returned by Telegram (not yet acked on server).
+	d.tick(context.Background())
+	assert.Len(t, sender.calls, 1, "should not dispatch same message twice")
+}
+
+func TestDispatcher_ContextCancellation(t *testing.T) {
+	source := &mockSource{}
+	finder := &mockFinder{}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- d.Run(ctx)
+	}()
+
+	cancel()
+	err := <-done
+	assert.NoError(t, err)
+}
+
+func TestBuildPrompt(t *testing.T) {
+	prompt := buildPrompt("  fix the login bug  ")
+	assert.Contains(t, prompt, "fix the login bug")
+	assert.NotContains(t, prompt, "  fix") // trimmed
+}
+
+func TestDispatcher_FinderError(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+	}
+	finder := &mockFinder{findErr: fmt.Errorf("tmux not found")}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	assert.Empty(t, sender.calls)
+	assert.Len(t, d.queue, 1, "message should remain queued")
+}
+
+func TestDispatcher_AckError(t *testing.T) {
+	source := &mockSource{
+		messages: []QueuedMessage{
+			{UpdateID: 100, ChatID: 42, From: "John", Text: "task"},
+		},
+		ackErr: fmt.Errorf("ack failed"),
+	}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+	d.tick(context.Background())
+
+	// Message should still be dispatched and dequeued even if ack fails.
+	require.Len(t, sender.calls, 1)
+	assert.Empty(t, d.queue)
+}
