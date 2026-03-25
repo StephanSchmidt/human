@@ -300,11 +300,6 @@ func renderError(err error) string {
 
 func renderUsage(b *strings.Builder, data *usageData) {
 	now := data.FetchedAt
-	ws := claude.WindowStart(now)
-	we := claude.WindowEnd(ws)
-	_, _ = fmt.Fprintln(b, labelStyle.Render(
-		fmt.Sprintf("  Usage window: %02d:00 – %02d:00 UTC", ws.Hour(), we.Hour())))
-	_, _ = fmt.Fprintln(b)
 
 	// Render usage via existing formatters into a string.
 	var usageBuf strings.Builder
