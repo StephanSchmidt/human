@@ -322,3 +322,58 @@ func TestDo_timeout(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requesting slow")
 }
+
+func TestDecodeJSON_success(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"test","count":42}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+
+	var result struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	require.NoError(t, DecodeJSON(resp, &result))
+	assert.Equal(t, "test", result.Name)
+	assert.Equal(t, 42, result.Count)
+}
+
+func TestDecodeJSON_invalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+
+	var result map[string]string
+	err = DecodeJSON(resp, &result, "endpoint", "/test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "decoding response")
+}
+
+func TestDecodeJSON_closesBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL)
+	resp, err := c.Do(context.Background(), "GET", "/test", "", nil)
+	require.NoError(t, err)
+
+	var result map[string]bool
+	require.NoError(t, DecodeJSON(resp, &result))
+
+	// Body should be closed — reading again should fail or return empty.
+	buf := make([]byte, 1)
+	_, readErr := resp.Body.Read(buf)
+	assert.Error(t, readErr, "body should be closed after DecodeJSON")
+}

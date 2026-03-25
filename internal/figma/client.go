@@ -2,13 +2,11 @@ package figma
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
-	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
@@ -40,11 +38,9 @@ func (c *Client) GetFile(ctx context.Context, fileKey string) (*FileSummary, err
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var f figmaFile
-	if err := json.NewDecoder(resp.Body).Decode(&f); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding file response", "fileKey", fileKey)
+	if err := apiclient.DecodeJSON(resp, &f, "fileKey", fileKey); err != nil {
+		return nil, err
 	}
 
 	var pages []PageSummary
@@ -75,11 +71,9 @@ func (c *Client) GetNodes(ctx context.Context, fileKey string, nodeIDs []string)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var nodesResp figmaNodesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&nodesResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding nodes response", "fileKey", fileKey)
+	if err := apiclient.DecodeJSON(resp, &nodesResp, "fileKey", fileKey); err != nil {
+		return nil, err
 	}
 
 	var summaries []NodeSummary
@@ -99,11 +93,9 @@ func (c *Client) GetFileComponents(ctx context.Context, fileKey string) ([]Compo
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var compResp figmaFileComponentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&compResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding components response", "fileKey", fileKey)
+	if err := apiclient.DecodeJSON(resp, &compResp, "fileKey", fileKey); err != nil {
+		return nil, err
 	}
 
 	var components []Component
@@ -126,11 +118,9 @@ func (c *Client) GetFileComments(ctx context.Context, fileKey string) ([]FileCom
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var commResp figmaCommentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&commResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comments response", "fileKey", fileKey)
+	if err := apiclient.DecodeJSON(resp, &commResp, "fileKey", fileKey); err != nil {
+		return nil, err
 	}
 
 	var comments []FileComment
@@ -164,11 +154,9 @@ func (c *Client) ExportImages(ctx context.Context, fileKey string, nodeIDs []str
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var imgResp figmaImagesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&imgResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding images response", "fileKey", fileKey)
+	if err := apiclient.DecodeJSON(resp, &imgResp, "fileKey", fileKey); err != nil {
+		return nil, err
 	}
 
 	var exports []ImageExport
@@ -186,11 +174,9 @@ func (c *Client) ListProjects(ctx context.Context, teamID string) ([]Project, er
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var projResp figmaProjectsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&projResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding projects response", "teamID", teamID)
+	if err := apiclient.DecodeJSON(resp, &projResp, "teamID", teamID); err != nil {
+		return nil, err
 	}
 
 	var projects []Project
@@ -206,11 +192,9 @@ func (c *Client) ListProjectFiles(ctx context.Context, projectID string) ([]Proj
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var filesResp figmaProjectFilesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&filesResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding project files response", "projectID", projectID)
+	if err := apiclient.DecodeJSON(resp, &filesResp, "projectID", projectID); err != nil {
+		return nil, err
 	}
 
 	var files []ProjectFile

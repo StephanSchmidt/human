@@ -101,11 +101,9 @@ func (c *Client) listGroupStories(ctx context.Context, groupID string) ([]scStor
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var stories []scStory
-	if err := json.NewDecoder(resp.Body).Decode(&stories); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding group stories", "groupID", groupID)
+	if err := apiclient.DecodeJSON(resp, &stories, "groupID", groupID); err != nil {
+		return nil, err
 	}
 	return stories, nil
 }
@@ -125,11 +123,9 @@ func (c *Client) searchStories(ctx context.Context, groupID string, since time.T
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var stories []scStory
-	if err := json.NewDecoder(resp.Body).Decode(&stories); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding search stories")
+	if err := apiclient.DecodeJSON(resp, &stories); err != nil {
+		return nil, err
 	}
 	return stories, nil
 }
@@ -146,11 +142,9 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var story scStory
-	if err := json.NewDecoder(resp.Body).Decode(&story); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding story", "key", key)
+	if err := apiclient.DecodeJSON(resp, &story, "key", key); err != nil {
+		return nil, err
 	}
 
 	issue, err := c.toTrackerIssue(ctx, story, "")
@@ -197,11 +191,9 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var story scStory
-	if err := json.NewDecoder(resp.Body).Decode(&story); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding create response")
+	if err := apiclient.DecodeJSON(resp, &story); err != nil {
+		return nil, err
 	}
 
 	return &tracker.Issue{
@@ -325,11 +317,9 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var info scMemberInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding member-info response")
+	if err := apiclient.DecodeJSON(resp, &info); err != nil {
+		return "", err
 	}
 	return info.ID, nil
 }
@@ -359,11 +349,9 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var story scStory
-	if err := json.NewDecoder(resp.Body).Decode(&story); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	if err := apiclient.DecodeJSON(resp, &story, "key", key); err != nil {
+		return nil, err
 	}
 
 	issue, err := c.toTrackerIssue(ctx, story, "")
@@ -406,11 +394,9 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var sc scComment
-	if err := json.NewDecoder(resp.Body).Decode(&sc); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comment response", "issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &sc, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	return c.toTrackerComment(ctx, sc)
@@ -428,11 +414,9 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var comments []scComment
-	if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comments response", "issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &comments, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	result := make([]tracker.Comment, 0, len(comments))
@@ -478,11 +462,9 @@ func (c *Client) fetchWorkflowsLocked(ctx context.Context) error {
 	if err != nil {
 		return errors.WrapWithDetails(err, "fetching workflows")
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var workflows []scWorkflow
-	if err := json.NewDecoder(resp.Body).Decode(&workflows); err != nil {
-		return errors.WrapWithDetails(err, "decoding workflows")
+	if err := apiclient.DecodeJSON(resp, &workflows); err != nil {
+		return err
 	}
 
 	c.states = make(map[int64]string)
@@ -517,10 +499,8 @@ func (c *Client) resolveMemberName(ctx context.Context, memberID string) (string
 	if err != nil {
 		return "", nil // non-fatal: return empty name on failure
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var member scMember
-	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
+	if err := apiclient.DecodeJSON(resp, &member); err != nil {
 		return "", nil
 	}
 
@@ -550,11 +530,9 @@ func (c *Client) resolveGroupID(ctx context.Context, name string) (string, error
 	if err != nil {
 		return "", errors.WrapWithDetails(err, "fetching groups")
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var groups []scGroup
-	if err := json.NewDecoder(resp.Body).Decode(&groups); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding groups")
+	if err := apiclient.DecodeJSON(resp, &groups); err != nil {
+		return "", err
 	}
 
 	c.groups = make(map[string]string)

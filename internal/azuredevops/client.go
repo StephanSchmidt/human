@@ -70,11 +70,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var wiqlResp adoWIQLResponse
-	if err := json.NewDecoder(resp.Body).Decode(&wiqlResp); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding WIQL response", "project", project)
+	if err := apiclient.DecodeJSON(resp, &wiqlResp, "project", project); err != nil {
+		return nil, err
 	}
 
 	if len(wiqlResp.WorkItems) == 0 {
@@ -95,13 +93,11 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = batchResp.Body.Close() }()
-
 	var batchResult struct {
 		Value []adoWorkItem `json:"value"`
 	}
-	if err := json.NewDecoder(batchResp.Body).Decode(&batchResult); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding batch work items", "project", project)
+	if err := apiclient.DecodeJSON(batchResp, &batchResult, "project", project); err != nil {
+		return nil, err
 	}
 
 	issues := make([]tracker.Issue, 0, len(batchResult.Value))
@@ -123,11 +119,9 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var wi adoWorkItem
-	if err := json.NewDecoder(resp.Body).Decode(&wi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding work item", "key", key)
+	if err := apiclient.DecodeJSON(resp, &wi, "key", key); err != nil {
+		return nil, err
 	}
 
 	issue := toTrackerIssue(wi, project)
@@ -158,11 +152,9 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var wi adoWorkItem
-	if err := json.NewDecoder(resp.Body).Decode(&wi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding create response", "project", project)
+	if err := apiclient.DecodeJSON(resp, &wi, "project", project); err != nil {
+		return nil, err
 	}
 
 	return &tracker.Issue{
@@ -202,11 +194,9 @@ func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = wiResp.Body.Close() }()
-
 	var wi adoWorkItem
-	if err := json.NewDecoder(wiResp.Body).Decode(&wi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding work item for type lookup", "key", key)
+	if err := apiclient.DecodeJSON(wiResp, &wi, "key", key); err != nil {
+		return nil, err
 	}
 
 	wiType := wi.Fields.WorkItemType
@@ -221,11 +211,9 @@ func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = statesResp.Body.Close() }()
-
 	var statesResult adoWorkItemTypeStatesResponse
-	if err := json.NewDecoder(statesResp.Body).Decode(&statesResult); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding work item type states", "key", key, "type", wiType)
+	if err := apiclient.DecodeJSON(statesResp, &statesResult, "key", key, "type", wiType); err != nil {
+		return nil, err
 	}
 
 	statuses := make([]tracker.Status, len(statesResult.Value))
@@ -293,11 +281,9 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result adoConnectionData
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding connection data response")
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return "", err
 	}
 	return result.AuthenticatedUser.UniqueName, nil
 }
@@ -327,11 +313,9 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var wi adoWorkItem
-	if err := json.NewDecoder(resp.Body).Decode(&wi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	if err := apiclient.DecodeJSON(resp, &wi, "key", key); err != nil {
+		return nil, err
 	}
 
 	issue := toTrackerIssue(wi, project)
@@ -380,11 +364,9 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var ac adoComment
-	if err := json.NewDecoder(resp.Body).Decode(&ac); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comment response", "issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &ac, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	return toTrackerComment(ac)
@@ -402,11 +384,9 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var cl adoCommentList
-	if err := json.NewDecoder(resp.Body).Decode(&cl); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comments response", "issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &cl, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	comments := make([]tracker.Comment, 0, len(cl.Comments))

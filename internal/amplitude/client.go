@@ -2,12 +2,10 @@ package amplitude
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 
-	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
@@ -38,11 +36,9 @@ func (c *Client) ListEvents(ctx context.Context) ([]EventType, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r eventsListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding events list response")
+	if err := apiclient.DecodeJSON(resp, &r); err != nil {
+		return nil, err
 	}
 
 	events := make([]EventType, len(r.Data))
@@ -69,12 +65,9 @@ func (c *Client) QuerySegmentation(ctx context.Context, eventType, start, end, m
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r segmentationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding segmentation response",
-			"eventType", eventType)
+	if err := apiclient.DecodeJSON(resp, &r, "eventType", eventType); err != nil {
+		return nil, err
 	}
 
 	result := &SegmentationResult{
@@ -93,11 +86,9 @@ func (c *Client) ListTaxonomyEvents(ctx context.Context) ([]TaxonomyEvent, error
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r taxonomyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding taxonomy events response")
+	if err := apiclient.DecodeJSON(resp, &r); err != nil {
+		return nil, err
 	}
 
 	events := make([]TaxonomyEvent, len(r.Data))
@@ -117,11 +108,9 @@ func (c *Client) ListTaxonomyUserProperties(ctx context.Context) ([]TaxonomyUser
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r taxonomyUserPropResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding taxonomy user properties response")
+	if err := apiclient.DecodeJSON(resp, &r); err != nil {
+		return nil, err
 	}
 
 	props := make([]TaxonomyUserProperty, len(r.Data))
@@ -146,11 +135,9 @@ func (c *Client) QueryFunnel(ctx context.Context, events []string, start, end st
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r funnelResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding funnel response")
+	if err := apiclient.DecodeJSON(resp, &r); err != nil {
+		return nil, err
 	}
 
 	result := &FunnelResult{
@@ -178,12 +165,9 @@ func (c *Client) QueryRetention(ctx context.Context, startEvent, returnEvent, st
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r retentionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding retention response",
-			"startEvent", startEvent, "returnEvent", returnEvent)
+	if err := apiclient.DecodeJSON(resp, &r, "startEvent", startEvent, "returnEvent", returnEvent); err != nil {
+		return nil, err
 	}
 
 	result := &RetentionResult{
@@ -206,12 +190,9 @@ func (c *Client) SearchUsers(ctx context.Context, query string) ([]UserMatch, er
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r userSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding user search response",
-			"query", query)
+	if err := apiclient.DecodeJSON(resp, &r, "query", query); err != nil {
+		return nil, err
 	}
 
 	matches := make([]UserMatch, len(r.Matches))
@@ -230,12 +211,9 @@ func (c *Client) GetUserActivity(ctx context.Context, amplitudeID string) (*User
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r userActivityResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding user activity response",
-			"amplitudeID", amplitudeID)
+	if err := apiclient.DecodeJSON(resp, &r, "amplitudeID", amplitudeID); err != nil {
+		return nil, err
 	}
 
 	activity := &UserActivity{
@@ -258,11 +236,9 @@ func (c *Client) ListCohorts(ctx context.Context) ([]Cohort, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var r cohortsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding cohorts response")
+	if err := apiclient.DecodeJSON(resp, &r); err != nil {
+		return nil, err
 	}
 
 	cohorts := make([]Cohort, len(r.Cohorts))

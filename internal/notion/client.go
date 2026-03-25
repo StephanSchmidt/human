@@ -51,11 +51,9 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var paginated paginatedResponse[json.RawMessage]
-	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding search response")
+	if err := apiclient.DecodeJSON(resp, &paginated); err != nil {
+		return nil, err
 	}
 
 	var results []SearchResult
@@ -89,11 +87,9 @@ func (c *Client) GetPage(ctx context.Context, pageID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var page notionPage
-	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding page response", "pageID", pageID)
+	if err := apiclient.DecodeJSON(resp, &page, "pageID", pageID); err != nil {
+		return "", err
 	}
 
 	title := extractTitle("page", page.Properties, nil)
@@ -123,11 +119,9 @@ func (c *Client) QueryDatabase(ctx context.Context, dbID string) ([]DatabaseRow,
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var paginated paginatedResponse[notionPage]
-	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding database query response", "databaseID", dbID)
+	if err := apiclient.DecodeJSON(resp, &paginated, "databaseID", dbID); err != nil {
+		return nil, err
 	}
 
 	var rows []DatabaseRow
@@ -162,11 +156,9 @@ func (c *Client) ListDatabases(ctx context.Context) ([]DatabaseEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var paginated paginatedResponse[notionDatabase]
-	if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding databases list response")
+	if err := apiclient.DecodeJSON(resp, &paginated); err != nil {
+		return nil, err
 	}
 
 	var entries []DatabaseEntry
@@ -201,11 +193,9 @@ func (c *Client) getBlockChildren(ctx context.Context, blockID string, depth int
 		}
 
 		var paginated paginatedResponse[notionBlock]
-		if err := json.NewDecoder(resp.Body).Decode(&paginated); err != nil {
-			_ = resp.Body.Close()
-			return nil, errors.WrapWithDetails(err, "decoding block children", "blockID", blockID)
+		if err := apiclient.DecodeJSON(resp, &paginated, "blockID", blockID); err != nil {
+			return nil, err
 		}
-		_ = resp.Body.Close()
 
 		for i := range paginated.Results {
 			block := &paginated.Results[i]

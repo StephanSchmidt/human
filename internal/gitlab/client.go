@@ -68,12 +68,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var glIssues []glIssue
-	if err := json.NewDecoder(resp.Body).Decode(&glIssues); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding response",
-			"project", opts.Project)
+	if err := apiclient.DecodeJSON(resp, &glIssues, "project", opts.Project); err != nil {
+		return nil, err
 	}
 
 	issues := make([]tracker.Issue, 0, len(glIssues))
@@ -100,12 +97,9 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var gi glIssue
-	if err := json.NewDecoder(resp.Body).Decode(&gi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding response",
-			"issueKey", key)
+	if err := apiclient.DecodeJSON(resp, &gi, "issueKey", key); err != nil {
+		return nil, err
 	}
 
 	issue := toTrackerIssue(project, gi)
@@ -135,12 +129,9 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result createResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding create response",
-			"project", issue.Project)
+	if err := apiclient.DecodeJSON(resp, &result, "project", issue.Project); err != nil {
+		return nil, err
 	}
 
 	return &tracker.Issue{
@@ -174,12 +165,9 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var gn glNote
-	if err := json.NewDecoder(resp.Body).Decode(&gn); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding note response",
-			"issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &gn, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	return toTrackerComment(gn)
@@ -205,12 +193,9 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var glNotes []glNote
-	if err := json.NewDecoder(resp.Body).Decode(&glNotes); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding notes response",
-			"issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &glNotes, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	comments := make([]tracker.Comment, 0, len(glNotes))
@@ -332,11 +317,9 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var user glCurrentUser
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding current user response")
+	if err := apiclient.DecodeJSON(resp, &user); err != nil {
+		return "", err
 	}
 	return strconv.Itoa(user.ID), nil
 }
@@ -371,11 +354,9 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var gi glIssue
-	if err := json.NewDecoder(resp.Body).Decode(&gi); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding edit response", "key", key)
+	if err := apiclient.DecodeJSON(resp, &gi, "key", key); err != nil {
+		return nil, err
 	}
 
 	issue := toTrackerIssue(project, gi)

@@ -54,11 +54,9 @@ func (c *Client) GetUpdates(ctx context.Context, limit int) ([]Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result getUpdatesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding Telegram response")
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return nil, err
 	}
 	if !result.OK {
 		return nil, errors.WithDetails(
@@ -93,11 +91,9 @@ func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result getUpdatesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return errors.WrapWithDetails(err, "decoding Telegram response")
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return err
 	}
 	if !result.OK {
 		return errors.WithDetails(
@@ -120,14 +116,12 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 	if err != nil {
 		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result struct {
 		OK          bool   `json:"ok"`
 		Description string `json:"description,omitempty"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return errors.WrapWithDetails(err, "decoding sendMessage response")
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return err
 	}
 	if !result.OK {
 		return errors.WithDetails(

@@ -2,6 +2,7 @@ package apiclient
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -192,4 +193,14 @@ func (c *Client) displayName() string {
 		return c.providerName
 	}
 	return "api"
+}
+
+// DecodeJSON reads and decodes a JSON response body into dest, then closes the
+// body. The context args are passed to errors.WrapWithDetails on decode failure.
+func DecodeJSON(resp *http.Response, dest interface{}, contextArgs ...interface{}) error {
+	defer func() { _ = resp.Body.Close() }()
+	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
+		return errors.WrapWithDetails(err, "decoding response", contextArgs...)
+	}
+	return nil
 }

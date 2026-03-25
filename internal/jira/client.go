@@ -60,12 +60,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result searchResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding response",
-			"project", opts.Project)
+	if err := apiclient.DecodeJSON(resp, &result, "project", opts.Project); err != nil {
+		return nil, err
 	}
 
 	issues := make([]tracker.Issue, len(result.Issues))
@@ -93,12 +90,9 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var detail issueDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding response",
-			"issueKey", key)
+	if err := apiclient.DecodeJSON(resp, &detail, "issueKey", key); err != nil {
+		return nil, err
 	}
 
 	f := detail.Fields
@@ -144,12 +138,9 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result createResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding create response",
-			"project", issue.Project)
+	if err := apiclient.DecodeJSON(resp, &result, "project", issue.Project); err != nil {
+		return nil, err
 	}
 
 	return &tracker.Issue{
@@ -176,12 +167,9 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var jc jiraComment
-	if err := json.NewDecoder(resp.Body).Decode(&jc); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comment response",
-			"issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &jc, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	return toTrackerComment(jc)
@@ -194,12 +182,9 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result commentsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding comments response",
-			"issueKey", issueKey)
+	if err := apiclient.DecodeJSON(resp, &result, "issueKey", issueKey); err != nil {
+		return nil, err
 	}
 
 	comments := make([]tracker.Comment, 0, len(result.Comments))
@@ -245,11 +230,9 @@ func (c *Client) fetchTransitions(ctx context.Context, key string) ([]jiraTransi
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result transitionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, errors.WrapWithDetails(err, "decoding transitions response", "issueKey", key)
+	if err := apiclient.DecodeJSON(resp, &result, "issueKey", key); err != nil {
+		return nil, err
 	}
 	return result.Transitions, nil
 }
@@ -328,11 +311,9 @@ func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
 	var result myselfResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", errors.WrapWithDetails(err, "decoding myself response")
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return "", err
 	}
 	return result.AccountID, nil
 }
