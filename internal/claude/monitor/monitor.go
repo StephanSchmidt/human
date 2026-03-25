@@ -12,6 +12,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
@@ -39,6 +40,7 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	pid, alive := cmddaemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
 	snap.Telegram = telegramStatus()
+	snap.Slack = slackStatus()
 
 	instances, err := m.finder.FindInstances(ctx)
 	if err != nil {
@@ -317,4 +319,22 @@ func telegramStatus() string {
 		return "Telegram: missing token"
 	}
 	return "Telegram dispatch"
+}
+
+func slackStatus() string {
+	configs, err := slack.LoadConfigs(".")
+	if err != nil {
+		return "Slack: config error"
+	}
+	if len(configs) == 0 {
+		return ""
+	}
+	instances, err := slack.LoadInstances(".")
+	if err != nil {
+		return "Slack: config error"
+	}
+	if len(instances) == 0 {
+		return "Slack: missing token"
+	}
+	return "Slack connected"
 }

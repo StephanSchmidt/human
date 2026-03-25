@@ -281,7 +281,14 @@ func renderStatusLine(snap *monitor.Snapshot, w int) string {
 		left = "  " + accentStyle.Render("●") + " Daemon stopped"
 	}
 
-	right := subtleStyle.Render(snap.Telegram)
+	var rightParts []string
+	if snap.Telegram != "" {
+		rightParts = append(rightParts, snap.Telegram)
+	}
+	if snap.Slack != "" {
+		rightParts = append(rightParts, snap.Slack)
+	}
+	right := subtleStyle.Render(strings.Join(rightParts, "  "))
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1

@@ -14,6 +14,7 @@ type Snapshot struct {
 	Err        error
 	Daemon     DaemonState
 	Telegram   string
+	Slack      string
 	Instances  []InstanceView
 	Panes      []claude.TmuxPane
 	TotalUsage *claude.UsageSummary

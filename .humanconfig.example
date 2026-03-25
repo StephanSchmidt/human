@@ -42,6 +42,12 @@ figmas:
     # url: https://api.figma.com  # optional, this is the default
     # token comes from env: export FIGMA_DESIGN_TOKEN=figd_xxx
 
+slacks:
+  - name: work
+    channel: C0123456789  # Slack channel ID (not #channel-name)
+    description: "Team notifications for AI agent activity"
+    # token comes from env: export SLACK_WORK_TOKEN=xoxb-xxx
+
 amplitudes:
   - name: product
     url: https://amplitude.com  # US default; https://analytics.eu.amplitude.com for EU

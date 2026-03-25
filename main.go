@@ -20,6 +20,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdtui"
 	"github.com/StephanSchmidt/human/cmd/cmdnotion"
 	"github.com/StephanSchmidt/human/cmd/cmdprovider"
+	"github.com/StephanSchmidt/human/cmd/cmdslack"
 	"github.com/StephanSchmidt/human/cmd/cmdtelegram"
 	"github.com/StephanSchmidt/human/cmd/cmdtracker"
 	"github.com/StephanSchmidt/human/cmd/cmdusage"
@@ -209,6 +210,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	telegramCmd := cmdtelegram.BuildTelegramCommands()
 	telegramCmd.GroupID = "tools"
 	rootCmd.AddCommand(telegramCmd)
+
+	slackCmd := cmdslack.BuildSlackCommands()
+	slackCmd.GroupID = "tools"
+	rootCmd.AddCommand(slackCmd)
 
 	// --- Static commands ---
 	trackerCmd := cmdtracker.BuildTrackerCmd(cmdutil.LoadAllInstances)

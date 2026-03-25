@@ -21,6 +21,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
@@ -198,8 +199,14 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		defer unmount()
 	}
 
+	// Start Slack notifier (if configured).
+	slackNotifier, slackStatus := startSlackNotifier(logger)
+	if slackStatus != "" {
+		_, _ = fmt.Fprintln(out, "Slack notifications:", slackStatus)
+	}
+
 	// Start Telegram dispatch loop (if configured).
-	telegramStatus := startTelegramDispatcher(ctx, logger)
+	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier)
 	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
 
 	return srv.ListenAndServe(ctx)
@@ -458,7 +465,7 @@ func resolveHostIP() string {
 // startTelegramDispatcher starts the Telegram dispatch loop if a Telegram
 // instance is configured. It runs as a background goroutine and returns
 // a human-readable status string for the startup banner.
-func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger) string {
+func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNotifier dispatch.Notifier) string {
 	configs, cfgErr := telegram.LoadConfigs(".")
 	if cfgErr != nil {
 		logger.Warn().Err(cfgErr).Msg("failed to load Telegram config, dispatch disabled")
@@ -497,7 +504,7 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger) string 
 			ProcessLister:  &claude.OSProcessLister{Runner: runner},
 		},
 		Sender:   &dispatch.TmuxSender{Runner: runner},
-		Notifier: &dispatch.TelegramNotifier{Client: inst.Client},
+		Notifier: buildNotifier(&dispatch.TelegramNotifier{Client: inst.Client}, extraNotifier),
 		Config:   dispatch.Config{PollInterval: dispatch.DefaultPollInterval},
 		Logger:   logger,
 	}
@@ -510,6 +517,41 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger) string 
 
 	logger.Info().Str("telegram", inst.Name).Msg("telegram dispatch enabled")
 	return fmt.Sprintf("enabled (%s)", inst.Name)
+}
+
+// startSlackNotifier creates a Slack notifier if configured.
+// Returns (nil, "") when Slack is not configured (no error — it is optional).
+func startSlackNotifier(logger zerolog.Logger) (dispatch.Notifier, string) {
+	configs, cfgErr := slack.LoadConfigs(".")
+	if cfgErr != nil {
+		logger.Warn().Err(cfgErr).Msg("failed to load Slack config, notifications disabled")
+		return nil, "error loading config"
+	}
+	if len(configs) == 0 {
+		return nil, ""
+	}
+
+	instances, err := slack.LoadInstances(".")
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to build Slack instances")
+		return nil, "error loading config"
+	}
+	if len(instances) == 0 {
+		logger.Warn().Str("instance", configs[0].Name).Msg("Slack configured but token missing")
+		return nil, fmt.Sprintf("missing token (set SLACK_%s_TOKEN)", strings.ToUpper(configs[0].Name))
+	}
+
+	inst := instances[0]
+	logger.Info().Str("slack", inst.Name).Msg("slack notifications enabled")
+	return &dispatch.SlackNotifier{Client: inst.Client}, fmt.Sprintf("enabled (%s)", inst.Name)
+}
+
+// buildNotifier wraps a primary notifier with an optional extra notifier.
+func buildNotifier(primary dispatch.Notifier, extra dispatch.Notifier) dispatch.Notifier {
+	if extra == nil {
+		return primary
+	}
+	return &dispatch.CompositeNotifier{Notifiers: []dispatch.Notifier{primary, extra}}
 }
 
 // replaceHost replaces an empty or wildcard host in addr with the given host.
