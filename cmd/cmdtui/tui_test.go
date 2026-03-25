@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/claude/monitor"
 )
 
 // stubFinder returns canned instances.
@@ -22,7 +24,18 @@ func (s *stubFinder) FindInstances(_ context.Context) ([]claude.Instance, error)
 }
 
 func testModel() model {
-	return newModel(&stubFinder{}, nil)
+	return newModel(monitor.New(&stubFinder{}, nil))
+}
+
+func testSnapshot(opts ...func(*monitor.Snapshot)) *monitor.Snapshot {
+	snap := &monitor.Snapshot{
+		FetchedAt:  time.Now(),
+		TotalUsage: &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}},
+	}
+	for _, opt := range opts {
+		opt(snap)
+	}
+	return snap
 }
 
 func TestModelInit(t *testing.T) {
@@ -66,20 +79,18 @@ func TestModelUpdate_WindowSize(t *testing.T) {
 	}
 }
 
-func TestModelUpdate_UsageMsg(t *testing.T) {
+func TestModelUpdate_SnapshotMsg(t *testing.T) {
 	m := testModel()
-	data := &usageData{
-		DaemonUp:  true,
-		DaemonPid: 1234,
-		FetchedAt: time.Now(),
-	}
-	updated, _ := m.Update(usageMsg{data: data})
+	snap := testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 1234, Alive: true}
+	})
+	updated, _ := m.Update(snapshotMsg{snap: snap})
 	um := updated.(model)
-	if um.data == nil {
-		t.Fatal("expected data to be set")
+	if um.snap == nil {
+		t.Fatal("expected snapshot to be set")
 	}
-	if um.data.DaemonPid != 1234 {
-		t.Errorf("expected PID 1234, got %d", um.data.DaemonPid)
+	if um.snap.Daemon.PID != 1234 {
+		t.Errorf("expected PID 1234, got %d", um.snap.Daemon.PID)
 	}
 }
 
@@ -93,10 +104,9 @@ func TestModelView_Loading(t *testing.T) {
 
 func TestModelView_Error(t *testing.T) {
 	m := testModel()
-	m.data = &usageData{
-		Err:       context.DeadlineExceeded,
-		FetchedAt: time.Now(),
-	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Err = context.DeadlineExceeded
+	})
 	view := m.View()
 	if !strings.Contains(view, "Error") {
 		t.Errorf("expected 'Error' in view, got:\n%s", view)
@@ -105,22 +115,27 @@ func TestModelView_Error(t *testing.T) {
 
 func TestModelView_WithData(t *testing.T) {
 	m := testModel()
-	m.data = &usageData{
-		DaemonUp:  true,
-		DaemonPid: 42,
-		FetchedAt: time.Now(),
-		Instances: []claude.InstanceUsage{
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 42, Alive: true}
+		s.Instances = []monitor.InstanceView{
 			{
-				Instance: claude.Instance{Label: "Host (PID 100)", Source: "host"},
-				Summary: &claude.UsageSummary{
-					Models: map[string]*claude.ModelUsage{
-						"opus 4.6": {InputTokens: 1000, OutputTokens: 500},
+				Usage: claude.InstanceUsage{
+					Instance: claude.Instance{Label: "Host (PID 100)", Source: "host"},
+					Summary: &claude.UsageSummary{
+						Models: map[string]*claude.ModelUsage{
+							"opus 4.6": {InputTokens: 1000, OutputTokens: 500},
+						},
 					},
+					State: claude.StateUnknown,
 				},
-				State: claude.StateUnknown,
 			},
-		},
-	}
+		}
+		s.TotalUsage = &claude.UsageSummary{
+			Models: map[string]*claude.ModelUsage{
+				"opus 4.6": {InputTokens: 1000, OutputTokens: 500},
+			},
+		}
+	})
 	view := m.View()
 	if !strings.Contains(view, "opus") {
 		t.Errorf("expected 'opus' in view, got:\n%s", view)
@@ -132,12 +147,9 @@ func TestModelView_WithData(t *testing.T) {
 
 func TestModelView_DaemonRunning(t *testing.T) {
 	m := testModel()
-	m.data = &usageData{
-		DaemonUp:  true,
-		DaemonPid: 42,
-		FetchedAt: time.Now(),
-		Instances: []claude.InstanceUsage{},
-	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 42, Alive: true}
+	})
 	view := m.View()
 	if !strings.Contains(view, "running") {
 		t.Errorf("expected 'running' in view, got:\n%s", view)
@@ -146,11 +158,7 @@ func TestModelView_DaemonRunning(t *testing.T) {
 
 func TestModelView_DaemonStopped(t *testing.T) {
 	m := testModel()
-	m.data = &usageData{
-		DaemonUp:  false,
-		FetchedAt: time.Now(),
-		Instances: []claude.InstanceUsage{},
-	}
+	m.snap = testSnapshot()
 	view := m.View()
 	if !strings.Contains(view, "stopped") {
 		t.Errorf("expected 'stopped' in view, got:\n%s", view)
@@ -174,7 +182,6 @@ func TestRenderHeader_ContainsHostname(t *testing.T) {
 	if !strings.Contains(header, "Claude Code Dashboard") {
 		t.Errorf("expected 'Claude Code Dashboard' in header, got: %s", header)
 	}
-	// os.Hostname should succeed in test environments, so we expect a parenthesized host.
 	if !strings.Contains(header, "(") {
 		t.Errorf("expected hostname in parentheses in header, got: %s", header)
 	}
@@ -186,5 +193,89 @@ func TestModelView_Quitting(t *testing.T) {
 	view := m.View()
 	if view != "" {
 		t.Errorf("expected empty view when quitting, got: %s", view)
+	}
+}
+
+// --- render helper tests ---
+
+func TestSessionIcon(t *testing.T) {
+	tests := []struct {
+		name string
+		sess *logparser.SessionState
+		want string
+	}{
+		{"nil session", nil, "⚪"},
+		{"working", &logparser.SessionState{IsWorking: true}, "🔴"},
+		{"idle with activity", &logparser.SessionState{IsWorking: false, LastActivity: time.Now()}, "🟢"},
+		{"no activity", &logparser.SessionState{IsWorking: false}, "⚪"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionIcon(tt.sess); got != tt.want {
+				t.Errorf("sessionIcon() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatElapsed(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{5 * time.Second, "5s"},
+		{90 * time.Second, "1m 30s"},
+		{3661 * time.Second, "1h 1m"},
+		{0, "0s"},
+	}
+	for _, tt := range tests {
+		if got := formatElapsed(tt.d); got != tt.want {
+			t.Errorf("formatElapsed(%v) = %q, want %q", tt.d, got, tt.want)
+		}
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	tests := []struct {
+		s      string
+		maxLen int
+		want   string
+	}{
+		{"short", 10, "short"},
+		{"exactly10!", 10, "exactly10!"},
+		{"this is too long", 10, "this is..."},
+	}
+	for _, tt := range tests {
+		if got := truncate(tt.s, tt.maxLen); got != tt.want {
+			t.Errorf("truncate(%q, %d) = %q, want %q", tt.s, tt.maxLen, got, tt.want)
+		}
+	}
+}
+
+func TestRenderTaskSummary(t *testing.T) {
+	var b strings.Builder
+	renderTaskSummary(&b, []logparser.Task{
+		{Status: "pending"},
+		{Status: "in_progress"},
+		{Status: "completed"},
+		{Status: "completed"},
+	})
+	out := b.String()
+	if !strings.Contains(out, "1 pending") {
+		t.Errorf("expected '1 pending', got: %s", out)
+	}
+	if !strings.Contains(out, "1 in progress") {
+		t.Errorf("expected '1 in progress', got: %s", out)
+	}
+	if !strings.Contains(out, "2 completed") {
+		t.Errorf("expected '2 completed', got: %s", out)
+	}
+}
+
+func TestRenderTaskSummary_Empty(t *testing.T) {
+	var b strings.Builder
+	renderTaskSummary(&b, nil)
+	if b.Len() != 0 {
+		t.Errorf("expected empty output for nil tasks, got: %s", b.String())
 	}
 }
