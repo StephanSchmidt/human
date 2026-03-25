@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
@@ -37,6 +38,11 @@ func BuildTuiCmd() *cobra.Command {
 }
 
 func runTUI() error {
+	// Suppress log output while the TUI owns the terminal.
+	prev := zerolog.GlobalLevel()
+	zerolog.SetGlobalLevel(zerolog.Disabled)
+	defer zerolog.SetGlobalLevel(prev)
+
 	ensureDaemon()
 	finder, dc := buildFinder()
 	mon := monitor.New(finder, dc)
@@ -99,12 +105,14 @@ type model struct {
 	width    int
 	height   int
 	quitting bool
+	fetchGen uint64 // monotonic counter; assigned when dispatching a fetch
+	fetching bool   // true while a fetch command is in flight
 }
 
 func newModel(mon *monitor.Monitor) model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(humanRed)
-	return model{mon: mon, spinner: sp, width: defaultWidth}
+	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true}
 }
 
 // --- messages ---
@@ -114,12 +122,13 @@ type fullTickMsg time.Time
 
 type snapshotMsg struct {
 	snap *monitor.Snapshot
+	gen  uint64
 }
 
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon), m.spinner.Tick, fastTickCmd(), fullTickCmd())
+	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -133,11 +142,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 	case fastTickMsg:
-		return m, tea.Batch(fetchQuick(m.mon, m.snap), fastTickCmd())
+		if m.fetching {
+			return m, fastTickCmd()
+		}
+		m.fetching = true
+		m.fetchGen++
+		return m, tea.Batch(fetchQuick(m.mon, m.snap, m.fetchGen), fastTickCmd())
 	case fullTickMsg:
-		return m, tea.Batch(fetchFull(m.mon), fullTickCmd())
+		if m.fetching {
+			return m, fullTickCmd()
+		}
+		m.fetching = true
+		m.fetchGen++
+		return m, tea.Batch(fetchFull(m.mon, m.fetchGen), fullTickCmd())
 	case snapshotMsg:
+		if msg.gen != m.fetchGen {
+			return m, nil // stale result, discard
+		}
 		m.snap = msg.snap
+		m.fetching = false
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -212,17 +235,19 @@ func fullTickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return fullTickMsg(t) })
 }
 
-func fetchFull(mon *monitor.Monitor) tea.Cmd {
-	return func() tea.Msg { return snapshotMsg{snap: mon.FetchFull(context.Background())} }
+func fetchFull(mon *monitor.Monitor, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return snapshotMsg{snap: mon.FetchFull(context.Background()), gen: gen}
+	}
 }
 
-func fetchQuick(mon *monitor.Monitor, prev *monitor.Snapshot) tea.Cmd {
+func fetchQuick(mon *monitor.Monitor, prev *monitor.Snapshot, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		snap := mon.FetchQuick(context.Background(), prev)
 		if snap == nil {
-			return nil
+			snap = prev // carry forward to avoid blank flash
 		}
-		return snapshotMsg{snap: snap}
+		return snapshotMsg{snap: snap, gen: gen}
 	}
 }
 
@@ -251,8 +276,7 @@ func (m model) renderHeader(w int) string {
 func renderStatusLine(snap *monitor.Snapshot, w int) string {
 	var left string
 	if snap.Daemon.Alive {
-		left = "  " + specialStyle.Render("●") + " Daemon running" +
-			subtleStyle.Render(fmt.Sprintf(" (%d)", snap.Daemon.PID))
+		left = "  " + specialStyle.Render("●") + " Daemon running"
 	} else {
 		left = "  " + accentStyle.Render("●") + " Daemon stopped"
 	}
@@ -480,9 +504,6 @@ func renderPanes(panes []claude.TmuxPane) string {
 			icon = "○"
 		}
 		label := fmt.Sprintf("%q (%d:%d)", p.SessionName, p.WindowIndex, p.PaneIndex)
-		if p.ClaudePID > 0 {
-			label += fmt.Sprintf(" PID %d", p.ClaudePID)
-		}
 		if p.Devcontainer {
 			label += " (devcontainer)"
 		}
@@ -494,7 +515,7 @@ func renderPanes(panes []claude.TmuxPane) string {
 // --- render: footer ---
 
 func renderFooter(w int) string {
-	left := subtleStyle.Render("  ↻ 500ms")
+	left := subtleStyle.Render("  ↻ live")
 	right := subtleStyle.Render("q quit")
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {

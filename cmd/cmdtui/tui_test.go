@@ -83,13 +83,79 @@ func TestModelUpdate_SnapshotMsg(t *testing.T) {
 	snap := testSnapshot(func(s *monitor.Snapshot) {
 		s.Daemon = monitor.DaemonState{PID: 1234, Alive: true}
 	})
-	updated, _ := m.Update(snapshotMsg{snap: snap})
+	updated, _ := m.Update(snapshotMsg{snap: snap, gen: m.fetchGen})
 	um := updated.(model)
 	if um.snap == nil {
 		t.Fatal("expected snapshot to be set")
 	}
 	if um.snap.Daemon.PID != 1234 {
 		t.Errorf("expected PID 1234, got %d", um.snap.Daemon.PID)
+	}
+	if um.fetching {
+		t.Error("expected fetching to be false after applying snapshot")
+	}
+}
+
+func TestModelUpdate_StaleSnapshot(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 42, Alive: true}
+	})
+	// Send a snapshot with a stale generation — must be discarded.
+	staleSnap := testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 9999, Alive: false}
+	})
+	updated, _ := m.Update(snapshotMsg{snap: staleSnap, gen: 0})
+	um := updated.(model)
+	if um.snap.Daemon.PID != 42 {
+		t.Errorf("stale snapshot should be discarded, PID is %d", um.snap.Daemon.PID)
+	}
+}
+
+func TestModelUpdate_FastTickWhileFetching(t *testing.T) {
+	m := testModel()
+	// m.fetching is true from newModel — fastTick should be skipped.
+	updated, cmd := m.Update(fastTickMsg(time.Now()))
+	um := updated.(model)
+	if !um.fetching {
+		t.Error("fetching should remain true")
+	}
+	if um.fetchGen != 1 {
+		t.Errorf("fetchGen should remain 1, got %d", um.fetchGen)
+	}
+	if cmd == nil {
+		t.Error("expected reschedule tick command")
+	}
+}
+
+func TestModelUpdate_FullTickWhileFetching(t *testing.T) {
+	m := testModel()
+	updated, cmd := m.Update(fullTickMsg(time.Now()))
+	um := updated.(model)
+	if !um.fetching {
+		t.Error("fetching should remain true")
+	}
+	if um.fetchGen != 1 {
+		t.Errorf("fetchGen should remain 1, got %d", um.fetchGen)
+	}
+	if cmd == nil {
+		t.Error("expected reschedule tick command")
+	}
+}
+
+func TestModelUpdate_FastTickDispatchesFetch(t *testing.T) {
+	m := testModel()
+	m.fetching = false // simulate idle
+	updated, cmd := m.Update(fastTickMsg(time.Now()))
+	um := updated.(model)
+	if !um.fetching {
+		t.Error("fetching should be true after dispatching")
+	}
+	if um.fetchGen != 2 {
+		t.Errorf("fetchGen should be 2, got %d", um.fetchGen)
+	}
+	if cmd == nil {
+		t.Error("expected fetch command")
 	}
 }
 
