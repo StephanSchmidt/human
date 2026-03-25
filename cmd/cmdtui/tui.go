@@ -6,9 +6,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog/log"
@@ -19,6 +22,8 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 )
+
+const defaultWidth = 80
 
 // BuildTuiCmd creates the "tui" command.
 func BuildTuiCmd() *cobra.Command {
@@ -42,7 +47,6 @@ func runTUI() error {
 }
 
 // ensureDaemon starts the daemon if it is not already running.
-// Best-effort: if it fails, the TUI still works.
 func ensureDaemon() {
 	if _, alive := cmddaemon.ReadAlivePid(); alive {
 		return
@@ -58,7 +62,6 @@ func ensureDaemon() {
 	if child.Process != nil {
 		_ = child.Process.Release()
 	}
-	// Poll for readiness (up to 3s).
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, dialErr := net.DialTimeout("tcp", "localhost:19285", 200*time.Millisecond)
@@ -92,28 +95,31 @@ func buildFinder() (claude.InstanceFinder, claude.DockerClient) {
 type model struct {
 	mon      *monitor.Monitor
 	snap     *monitor.Snapshot
+	spinner  spinner.Model
 	width    int
 	height   int
 	quitting bool
 }
 
 func newModel(mon *monitor.Monitor) model {
-	return model{mon: mon}
+	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	return model{mon: mon, spinner: sp, width: defaultWidth}
 }
 
 // --- messages ---
 
-type fastTickMsg time.Time // 500ms — cheap socket/daemon/pane checks
-type fullTickMsg time.Time // 2s   — full fetch including JSONL parsing
+type fastTickMsg time.Time
+type fullTickMsg time.Time
 
 type snapshotMsg struct {
 	snap *monitor.Snapshot
 }
 
-// --- tea.Model implementation (v1 API) ---
+// --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon), fastTickCmd(), fullTickCmd())
+	return tea.Batch(fetchFull(m.mon), m.spinner.Tick, fastTickCmd(), fullTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -132,6 +138,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetchFull(m.mon), fullTickCmd())
 	case snapshotMsg:
 		m.snap = msg.snap
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -140,42 +150,70 @@ func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
+	w := m.width
+	if w < 40 {
+		w = defaultWidth
+	}
+
 	var b strings.Builder
-	_, _ = fmt.Fprintln(&b, renderHeader())
+
+	// Header line: title left, usage window right.
+	b.WriteString(m.renderHeader(w))
+	b.WriteByte('\n')
+
 	if m.snap == nil {
-		_, _ = fmt.Fprintln(&b, "  Loading...")
+		b.WriteString("  " + m.spinner.View() + " Loading...\n")
 		return b.String()
 	}
-	_, _ = fmt.Fprintln(&b, renderDaemonStatus(m.snap.Daemon.PID, m.snap.Daemon.Alive))
-	_, _ = fmt.Fprintln(&b)
+
+	// Status line: daemon left, telegram right.
+	b.WriteString(renderStatusLine(m.snap, w))
+	b.WriteByte('\n')
+	b.WriteByte('\n')
+
 	if m.snap.Err != nil {
-		_, _ = fmt.Fprintln(&b, renderError(m.snap.Err))
+		b.WriteString(errorStyle.Render("  Error: " + m.snap.Err.Error()))
+		b.WriteByte('\n')
 		return b.String()
 	}
-	renderUsage(&b, m.snap)
-	_, _ = fmt.Fprintln(&b)
-	_, _ = fmt.Fprintln(&b, renderFooter(m.snap.FetchedAt, m.snap.Telegram))
+
+	// Instances.
+	if len(m.snap.Instances) == 0 {
+		b.WriteString(subtleStyle.Render("  No active instances"))
+		b.WriteByte('\n')
+	} else {
+		for _, iv := range m.snap.Instances {
+			m.renderInstance(&b, iv, w)
+		}
+		renderTotalLine(&b, m.snap.TotalUsage, w)
+	}
+
+	// Tmux panes.
+	if len(m.snap.Panes) > 0 {
+		b.WriteByte('\n')
+		b.WriteString(renderPanes(m.snap.Panes))
+	}
+
+	// Footer.
+	b.WriteByte('\n')
+	b.WriteString(renderFooter(w))
+	b.WriteByte('\n')
+
 	return b.String()
 }
 
 // --- commands ---
 
 func fastTickCmd() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
-		return fastTickMsg(t)
-	})
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return fastTickMsg(t) })
 }
 
 func fullTickCmd() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-		return fullTickMsg(t)
-	})
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return fullTickMsg(t) })
 }
 
 func fetchFull(mon *monitor.Monitor) tea.Cmd {
-	return func() tea.Msg {
-		return snapshotMsg{snap: mon.FetchFull(context.Background())}
-	}
+	return func() tea.Msg { return snapshotMsg{snap: mon.FetchFull(context.Background())} }
 }
 
 func fetchQuick(mon *monitor.Monitor, prev *monitor.Snapshot) tea.Cmd {
@@ -188,122 +226,136 @@ func fetchQuick(mon *monitor.Monitor, prev *monitor.Snapshot) tea.Cmd {
 	}
 }
 
-// --- render helpers ---
+// --- render: header + status ---
 
-var (
-	headerStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	footerStyle  = lipgloss.NewStyle().Faint(true)
-	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	redStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	sessionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
-)
-
-func renderHeader() string {
-	title := "human tui — Claude Code Dashboard"
+func (m model) renderHeader(w int) string {
+	title := titleStyle.Render("human tui")
 	if host, err := os.Hostname(); err == nil && host != "" {
-		title = fmt.Sprintf("human tui — Claude Code Dashboard (%s)", host)
+		title = titleStyle.Render("human tui") + subtleStyle.Render(" — "+host)
 	}
-	return headerStyle.Render(title)
-}
 
-func renderDaemonStatus(pid int, alive bool) string {
-	if alive {
-		return fmt.Sprintf("Daemon: %s (PID %d)", greenStyle.Render("running"), pid)
+	right := ""
+	if m.snap != nil {
+		ws := claude.WindowStart(m.snap.FetchedAt)
+		we := claude.WindowEnd(ws)
+		right = subtleStyle.Render(fmt.Sprintf("%02d:00 – %02d:00 UTC", ws.Hour(), we.Hour()))
 	}
-	return fmt.Sprintf("Daemon: %s", redStyle.Render("stopped"))
+
+	gap := w - lipgloss.Width(title) - lipgloss.Width(right) - 4
+	if gap < 1 {
+		gap = 1
+	}
+	return "  " + title + strings.Repeat(" ", gap) + right
 }
 
-func renderError(err error) string {
-	return errorStyle.Render("  Error: " + err.Error())
-}
-
-func renderUsage(b *strings.Builder, snap *monitor.Snapshot) {
-	now := snap.FetchedAt
-	ws := claude.WindowStart(now)
-	we := claude.WindowEnd(ws)
-
-	_, _ = fmt.Fprintf(b, "Claude usage [%02d:00 – %02d:00 UTC]\n", ws.Hour(), we.Hour())
-
-	if len(snap.Instances) == 0 {
-		_, _ = fmt.Fprintln(b, "  (no instances)")
+func renderStatusLine(snap *monitor.Snapshot, w int) string {
+	var left string
+	if snap.Daemon.Alive {
+		left = "  " + specialStyle.Render("●") + " Daemon running" +
+			subtleStyle.Render(fmt.Sprintf(" (%d)", snap.Daemon.PID))
 	} else {
-		renderInstances(b, snap)
+		left = "  " + accentStyle.Render("●") + " Daemon stopped"
 	}
 
-	// Tmux panes.
-	if len(snap.Panes) > 0 {
-		var panesBuf strings.Builder
-		_ = claude.FormatTmuxPanes(&panesBuf, snap.Panes)
-		_, _ = fmt.Fprint(b, panesBuf.String())
+	right := subtleStyle.Render(snap.Telegram)
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	if gap < 1 {
+		gap = 1
 	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
-func renderInstances(b *strings.Builder, snap *monitor.Snapshot) {
-	for _, iv := range snap.Instances {
-		renderInstance(b, iv)
-	}
-	renderTotal(b, snap.TotalUsage)
-}
+// --- render: instances with progress bars ---
 
-func renderInstance(b *strings.Builder, iv monitor.InstanceView) {
-	icon := sessionIcon(iv.Session)
-	header := fmt.Sprintf("\n%s %s", icon, iv.Usage.Instance.Label)
+func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int) {
+	b.WriteByte('\n')
+
+	// Instance header: icon + label + elapsed + slug
+	icon := m.sessionIcon(iv.Session)
+	header := "  " + icon + " " + instanceStyle.Render(iv.Usage.Instance.Label)
 	if mem := claude.FormatMemory(iv.Usage.Instance.Memory); mem != "" {
-		header += "  " + mem
+		header += "  " + subtleStyle.Render(mem)
 	}
 	if iv.Session != nil && !iv.Session.StartedAt.IsZero() {
-		header += fmt.Sprintf("  [%s]", formatElapsed(time.Since(iv.Session.StartedAt)))
+		header += "  " + subtleStyle.Render(formatElapsed(time.Since(iv.Session.StartedAt)))
 	}
 	if iv.Session != nil && iv.Session.Slug != "" {
-		header += fmt.Sprintf("  %s", sessionStyle.Render(iv.Session.Slug))
+		header += "  " + slugStyle.Render(iv.Session.Slug)
 	}
-	_, _ = fmt.Fprintln(b, header)
+	b.WriteString(header)
+	b.WriteByte('\n')
 
-	var instanceTotal int
-	for _, mu := range iv.Usage.Summary.Models {
-		if mu != nil {
-			instanceTotal += mu.Total()
-		}
-	}
-	_ = claude.FormatModelRows(b, iv.Usage.Summary, instanceTotal)
+	// Progress bars per model.
+	renderModelBars(b, iv.Usage.Summary, w)
 
+	// Subagents + tasks.
 	if iv.Session != nil {
-		renderSubagents(b, iv.Session.Subagents, iv.Session.IsWorking, iv.Session.LastActivity)
+		m.renderSubagents(b, iv.Session.Subagents, iv.Session.IsWorking, iv.Session.LastActivity)
 		renderTaskSummary(b, iv.Session.Tasks)
 	}
 }
 
-func sessionIcon(sess *logparser.SessionState) string {
-	if sess == nil {
-		return "⚪"
+func renderModelBars(b *strings.Builder, summary *claude.UsageSummary, w int) {
+	if summary == nil {
+		return
 	}
-	if sess.IsWorking {
-		return "🔴"
-	}
-	if !sess.LastActivity.IsZero() {
-		return "🟢"
-	}
-	return "⚪"
-}
 
-func renderTotal(b *strings.Builder, total *claude.UsageSummary) {
 	var grandTotal int
-	for _, mu := range total.Models {
+	for _, mu := range summary.Models {
 		if mu != nil {
 			grandTotal += mu.Total()
 		}
 	}
-	_, _ = fmt.Fprintf(b, "\nTotal:\n")
-	_ = claude.FormatModelRows(b, total, grandTotal)
+	if grandTotal == 0 {
+		return
+	}
+
+	// Sort model names for stable output.
+	models := make([]string, 0, len(summary.Models))
+	for name, mu := range summary.Models {
+		if mu != nil && mu.Total() > 0 {
+			models = append(models, name)
+		}
+	}
+	sort.Strings(models)
+
+	// Bar width: total width - indent(4) - label(12) - stats(~30) - padding(4)
+	barWidth := w - 50
+	if barWidth < 10 {
+		barWidth = 10
+	}
+	if barWidth > 50 {
+		barWidth = 50
+	}
+
+	for _, name := range models {
+		mu := summary.Models[name]
+		if mu == nil {
+			continue
+		}
+		pct := float64(mu.Total()) / float64(grandTotal)
+
+		bar := progress.New(
+			progress.WithSolidFill(modelColor(name)),
+			progress.WithoutPercentage(),
+		)
+		bar.Width = barWidth
+
+		stats := fmt.Sprintf("  %3.0f%%  %s in  %s out",
+			pct*100, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens))
+
+		_, _ = fmt.Fprintf(b, "    %-12s %s%s\n", name, bar.ViewAs(pct), subtleStyle.Render(stats))
+	}
 }
 
-func renderSubagents(b *strings.Builder, subagents []logparser.Subagent, isWorking bool, lastActivity time.Time) {
+// --- render: subagents ---
+
+func (m model) renderSubagents(b *strings.Builder, subagents []logparser.Subagent, isWorking bool, lastActivity time.Time) {
 	if len(subagents) == 0 {
 		return
 	}
 
-	// Hide completed agents once the session has been idle for 5s.
+	// Hide completed agents once idle for 5s.
 	if !isWorking && time.Since(lastActivity) > 5*time.Second {
 		hasRunning := false
 		for _, sa := range subagents {
@@ -317,33 +369,45 @@ func renderSubagents(b *strings.Builder, subagents []logparser.Subagent, isWorki
 		}
 	}
 
-	// Show only recent/active subagents (last 5).
 	start := 0
 	if len(subagents) > 5 {
 		start = len(subagents) - 5
 	}
 	for i := start; i < len(subagents); i++ {
 		sa := subagents[i]
-		status := greenStyle.Render("running")
-		elapsed := formatElapsed(time.Since(sa.StartedAt))
-		if sa.CompletedAt != nil {
-			status = footerStyle.Render("done")
-			if sa.DurationMs > 0 {
-				elapsed = formatElapsed(time.Duration(sa.DurationMs) * time.Millisecond)
-			} else {
-				elapsed = formatElapsed(sa.CompletedAt.Sub(sa.StartedAt))
-			}
-		}
-
-		desc := truncate(sa.Description, 45)
 		agentType := sa.SubagentType
 		if agentType == "" {
 			agentType = "agent"
 		}
+		desc := truncate(sa.Description, 40)
 
-		_, _ = fmt.Fprintf(b, "    Agent: %s (%s, %s, %s)\n", desc, agentType, status, elapsed)
+		if sa.CompletedAt != nil {
+			elapsed := formatAgentDuration(sa)
+			_, _ = fmt.Fprintf(b, "      %s %s %s\n",
+				subtleStyle.Render("✓"),
+				subtleStyle.Render(desc),
+				subtleStyle.Render(fmt.Sprintf("(%s, %s)", agentType, elapsed)))
+		} else {
+			elapsed := formatElapsed(time.Since(sa.StartedAt))
+			_, _ = fmt.Fprintf(b, "      %s %s %s\n",
+				m.spinner.View(),
+				desc,
+				subtleStyle.Render(fmt.Sprintf("(%s, %s)", agentType, elapsed)))
+		}
 	}
 }
+
+func formatAgentDuration(sa logparser.Subagent) string {
+	if sa.DurationMs > 0 {
+		return formatElapsed(time.Duration(sa.DurationMs) * time.Millisecond)
+	}
+	if sa.CompletedAt != nil {
+		return formatElapsed(sa.CompletedAt.Sub(sa.StartedAt))
+	}
+	return "0s"
+}
+
+// --- render: tasks ---
 
 func renderTaskSummary(b *strings.Builder, tasks []logparser.Task) {
 	if len(tasks) == 0 {
@@ -370,11 +434,87 @@ func renderTaskSummary(b *strings.Builder, tasks []logparser.Task) {
 		parts = append(parts, fmt.Sprintf("%d in progress", inProgress))
 	}
 	if completed > 0 {
-		parts = append(parts, fmt.Sprintf("%d completed", completed))
+		parts = append(parts, fmt.Sprintf("%d done", completed))
 	}
 
-	_, _ = fmt.Fprintf(b, "    Tasks: %s\n", strings.Join(parts, ", "))
+	_, _ = fmt.Fprintf(b, "      Tasks: %s\n", subtleStyle.Render(strings.Join(parts, " · ")))
 }
+
+// --- render: totals ---
+
+func renderTotalLine(b *strings.Builder, total *claude.UsageSummary, w int) {
+	b.WriteByte('\n')
+	rule := ruleStyle.Render(strings.Repeat("─", w-4))
+	b.WriteString("  " + rule + "\n")
+
+	var parts []string
+	for name, mu := range total.Models {
+		if mu != nil && mu.Total() > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %s in · %s out",
+				name, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens)))
+		}
+	}
+	sort.Strings(parts)
+
+	if len(parts) > 0 {
+		b.WriteString("  " + subtleStyle.Render("Total  "+strings.Join(parts, "  ")) + "\n")
+	}
+}
+
+// --- render: tmux panes ---
+
+func renderPanes(panes []claude.TmuxPane) string {
+	var parts []string
+	for _, p := range panes {
+		var icon string
+		switch p.State {
+		case claude.StateBusy:
+			icon = accentStyle.Render("●")
+		case claude.StateReady:
+			icon = specialStyle.Render("●")
+		default:
+			icon = "○"
+		}
+		label := fmt.Sprintf("%q (%d:%d)", p.SessionName, p.WindowIndex, p.PaneIndex)
+		if p.ClaudePID > 0 {
+			label += fmt.Sprintf(" PID %d", p.ClaudePID)
+		}
+		if p.Devcontainer {
+			label += " (devcontainer)"
+		}
+		parts = append(parts, icon+" "+label)
+	}
+	return "  " + subtleStyle.Render("Tmux") + "  " + strings.Join(parts, "   ")
+}
+
+// --- render: footer ---
+
+func renderFooter(w int) string {
+	left := subtleStyle.Render("  ↻ 500ms")
+	right := subtleStyle.Render("q quit")
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// --- render: icon ---
+
+func (m model) sessionIcon(sess *logparser.SessionState) string {
+	if sess == nil {
+		return subtleStyle.Render("○")
+	}
+	if sess.IsWorking {
+		return m.spinner.View()
+	}
+	if !sess.LastActivity.IsZero() {
+		return specialStyle.Render("●")
+	}
+	return subtleStyle.Render("○")
+}
+
+// --- utilities ---
 
 func formatElapsed(d time.Duration) string {
 	d = d.Truncate(time.Second)
@@ -394,8 +534,13 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-func renderFooter(fetchedAt time.Time, tgStatus string) string {
-	return footerStyle.Render(fmt.Sprintf(
-		"  Last updated: %s  |  %s  |  Refreshes every 500ms  |  Press q to quit",
-		fetchedAt.Format("15:04:05"), tgStatus))
+func formatTokens(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1e3)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }

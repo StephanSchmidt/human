@@ -13,7 +13,6 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 )
 
-// stubFinder returns canned instances.
 type stubFinder struct {
 	instances []claude.Instance
 	err       error
@@ -140,8 +139,8 @@ func TestModelView_WithData(t *testing.T) {
 	if !strings.Contains(view, "opus") {
 		t.Errorf("expected 'opus' in view, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Claude usage") {
-		t.Errorf("expected 'Claude usage' in view, got:\n%s", view)
+	if !strings.Contains(view, "Host") {
+		t.Errorf("expected 'Host' in view, got:\n%s", view)
 	}
 }
 
@@ -165,28 +164,6 @@ func TestModelView_DaemonStopped(t *testing.T) {
 	}
 }
 
-func TestRenderDaemonStatus(t *testing.T) {
-	running := renderDaemonStatus(1234, true)
-	if !strings.Contains(running, "1234") || !strings.Contains(running, "running") {
-		t.Errorf("expected PID and 'running', got: %s", running)
-	}
-
-	stopped := renderDaemonStatus(0, false)
-	if !strings.Contains(stopped, "stopped") {
-		t.Errorf("expected 'stopped', got: %s", stopped)
-	}
-}
-
-func TestRenderHeader_ContainsHostname(t *testing.T) {
-	header := renderHeader()
-	if !strings.Contains(header, "Claude Code Dashboard") {
-		t.Errorf("expected 'Claude Code Dashboard' in header, got: %s", header)
-	}
-	if !strings.Contains(header, "(") {
-		t.Errorf("expected hostname in parentheses in header, got: %s", header)
-	}
-}
-
 func TestModelView_Quitting(t *testing.T) {
 	m := testModel()
 	m.quitting = true
@@ -196,23 +173,32 @@ func TestModelView_Quitting(t *testing.T) {
 	}
 }
 
+func TestRenderHeader_ContainsTitle(t *testing.T) {
+	m := testModel()
+	header := m.renderHeader(80)
+	if !strings.Contains(header, "human tui") {
+		t.Errorf("expected 'human tui' in header, got: %s", header)
+	}
+}
+
 // --- render helper tests ---
 
 func TestSessionIcon(t *testing.T) {
+	m := testModel()
 	tests := []struct {
-		name string
-		sess *logparser.SessionState
-		want string
+		name     string
+		sess     *logparser.SessionState
+		contains string
 	}{
-		{"nil session", nil, "⚪"},
-		{"working", &logparser.SessionState{IsWorking: true}, "🔴"},
-		{"idle with activity", &logparser.SessionState{IsWorking: false, LastActivity: time.Now()}, "🟢"},
-		{"no activity", &logparser.SessionState{IsWorking: false}, "⚪"},
+		{"nil session", nil, "○"},
+		{"idle with activity", &logparser.SessionState{IsWorking: false, LastActivity: time.Now()}, "●"},
+		{"no activity", &logparser.SessionState{IsWorking: false}, "○"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sessionIcon(tt.sess); got != tt.want {
-				t.Errorf("sessionIcon() = %q, want %q", got, tt.want)
+			got := m.sessionIcon(tt.sess)
+			if !strings.Contains(got, tt.contains) {
+				t.Errorf("sessionIcon() = %q, want to contain %q", got, tt.contains)
 			}
 		})
 	}
@@ -267,8 +253,8 @@ func TestRenderTaskSummary(t *testing.T) {
 	if !strings.Contains(out, "1 in progress") {
 		t.Errorf("expected '1 in progress', got: %s", out)
 	}
-	if !strings.Contains(out, "2 completed") {
-		t.Errorf("expected '2 completed', got: %s", out)
+	if !strings.Contains(out, "2 done") {
+		t.Errorf("expected '2 done', got: %s", out)
 	}
 }
 
@@ -277,5 +263,35 @@ func TestRenderTaskSummary_Empty(t *testing.T) {
 	renderTaskSummary(&b, nil)
 	if b.Len() != 0 {
 		t.Errorf("expected empty output for nil tasks, got: %s", b.String())
+	}
+}
+
+func TestFormatTokens(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{500, "500"},
+		{1500, "1.5K"},
+		{1500000, "1.5M"},
+	}
+	for _, tt := range tests {
+		if got := formatTokens(tt.n); got != tt.want {
+			t.Errorf("formatTokens(%d) = %q, want %q", tt.n, got, tt.want)
+		}
+	}
+}
+
+func TestRenderStatusLine(t *testing.T) {
+	snap := testSnapshot(func(s *monitor.Snapshot) {
+		s.Daemon = monitor.DaemonState{PID: 42, Alive: true}
+		s.Telegram = "Telegram dispatch"
+	})
+	line := renderStatusLine(snap, 80)
+	if !strings.Contains(line, "running") {
+		t.Errorf("expected 'running' in status line, got: %s", line)
+	}
+	if !strings.Contains(line, "Telegram") {
+		t.Errorf("expected 'Telegram' in status line, got: %s", line)
 	}
 }
