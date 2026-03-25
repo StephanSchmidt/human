@@ -23,7 +23,7 @@ var modelColors = map[string]string{
 var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
 	subtleStyle   = lipgloss.NewStyle().Foreground(humanPurple)
-	instanceStyle = lipgloss.NewStyle().Bold(true).Foreground(humanYellow)
+	instanceStyle = lipgloss.NewStyle().Bold(true).Foreground(humanPink)
 	slugStyle     = lipgloss.NewStyle().Foreground(humanPurple).Italic(true)
 	accentStyle   = lipgloss.NewStyle().Foreground(humanRed)
 	specialStyle  = lipgloss.NewStyle().Foreground(humanTeal)
