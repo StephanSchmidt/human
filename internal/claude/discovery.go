@@ -138,7 +138,7 @@ func (r FileSessionResolver) ResolveSessionID(pid int) (string, error) {
 func resolveJSONLPath(sess SessionResolver, pid int, root string) string {
 	if sessionID, err := sess.ResolveSessionID(pid); err == nil {
 		sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
-		if _, fErr := os.Stat(sessionPath); fErr == nil {
+		if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 -- root is the Claude config dir, sessionID from local session file
 			return sessionPath
 		}
 	}
@@ -271,7 +271,7 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 
 // verifyProcComm checks that /proc/<pid>/comm matches "claude".
 func verifyProcComm(pid int) bool {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid)) // #nosec G703 -- pid is an integer from os process listing
 	if err != nil {
 		return false
 	}
@@ -513,7 +513,7 @@ func findNewestJSONL(root string) (string, error) {
 
 	const mtimeTolerance = int64(time.Second)
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error { // #nosec G703 -- root is the Claude config dir
 		if err != nil {
 			return nil // skip inaccessible
 		}

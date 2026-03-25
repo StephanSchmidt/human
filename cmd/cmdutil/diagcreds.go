@@ -26,7 +26,7 @@ type configuredEntry struct {
 	Key    string `mapstructure:"key"`
 	User   string `mapstructure:"user"`
 	Token  string `mapstructure:"token"`
-	Secret string `mapstructure:"secret"`
+	Secret string `mapstructure:"secret"` // #nosec G117 -- config field name, not an actual secret value
 }
 
 // fieldValue returns the config value for a credential suffix.
