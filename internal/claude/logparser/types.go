@@ -1,6 +1,39 @@
 package logparser
 
-import "time"
+import (
+	"io"
+	"os"
+	"time"
+)
+
+// FileReader abstracts reading bytes from a file at a given offset.
+type FileReader interface {
+	ReadFrom(path string, offset int64) ([]byte, int64, error)
+}
+
+// OSFileReader implements FileReader using the real filesystem.
+type OSFileReader struct{}
+
+// ReadFrom reads bytes from path starting at offset, returning data and new offset.
+func (OSFileReader) ReadFrom(path string, offset int64) ([]byte, int64, error) {
+	f, err := os.Open(path) // #nosec G304 — path from trusted discovery
+	if err != nil {
+		return nil, offset, err
+	}
+	defer func() { _ = f.Close() }()
+
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil, offset, err
+		}
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset, err
+	}
+	return data, offset + int64(len(data)), nil
+}
 
 // Subagent represents a spawned Agent tool_use and its lifecycle.
 type Subagent struct {
