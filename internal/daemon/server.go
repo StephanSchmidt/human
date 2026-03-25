@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -97,6 +98,11 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
+	// Apply client environment variables (e.g. NO_COLOR, TERM, COLUMNS)
+	// for the duration of this request, then restore the originals.
+	origEnv := applyEnv(req.Env)
+	defer restoreEnv(origEnv)
+
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd := s.CmdFactory()
 	cmd.SetArgs(req.Args)
@@ -124,4 +130,33 @@ func (s *Server) writeError(conn net.Conn, msg string, code int) {
 	resp := Response{Stderr: msg + "\n", ExitCode: code}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
+}
+
+// envEntry records an env var's previous state so it can be restored.
+type envEntry struct {
+	key   string
+	value string
+	set   bool // whether the var was set before
+}
+
+// applyEnv sets the given env vars and returns their previous values.
+func applyEnv(env map[string]string) []envEntry {
+	orig := make([]envEntry, 0, len(env))
+	for k, v := range env {
+		prev, wasSet := os.LookupEnv(k)
+		orig = append(orig, envEntry{key: k, value: prev, set: wasSet})
+		_ = os.Setenv(k, v)
+	}
+	return orig
+}
+
+// restoreEnv restores env vars to their state before applyEnv.
+func restoreEnv(orig []envEntry) {
+	for _, e := range orig {
+		if e.set {
+			_ = os.Setenv(e.key, e.value)
+		} else {
+			_ = os.Unsetenv(e.key)
+		}
+	}
 }

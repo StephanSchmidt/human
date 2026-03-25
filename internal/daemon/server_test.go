@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -283,4 +284,67 @@ func TestServer_SafeModeDisabled(t *testing.T) {
 
 	assert.Equal(t, 0, resp.ExitCode)
 	assert.Contains(t, resp.Stdout, "safe-mode-inactive")
+}
+
+func envCmdFactory() *cobra.Command {
+	root := &cobra.Command{
+		Use:          "test",
+		SilenceUsage: true,
+	}
+	root.AddCommand(&cobra.Command{
+		Use: "env",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if v, ok := os.LookupEnv("NO_COLOR"); ok {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "NO_COLOR=%s\n", v)
+			} else {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "NO_COLOR=<unset>")
+			}
+			return nil
+		},
+	})
+	return root
+}
+
+func TestServer_EnvApplied(t *testing.T) {
+	t.Setenv("NO_COLOR", "original")
+
+	token := "test-token-env"
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &Server{
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		CmdFactory: envCmdFactory,
+		Logger:     zerolog.Nop(),
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Cleanup(func() { cancel() })
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"env"},
+		Env:   map[string]string{"NO_COLOR": "from-client"},
+	})
+
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Contains(t, resp.Stdout, "NO_COLOR=from-client")
+
+	// Verify the original value is restored after the request.
+	assert.Equal(t, "original", os.Getenv("NO_COLOR"))
 }
