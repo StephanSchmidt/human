@@ -1,50 +1,15 @@
 package claude
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
 )
-
-// DirWalker abstracts walking JSONL files for testability.
-type DirWalker interface {
-	WalkJSONL(root string, fn func(line []byte) error) error
-}
-
-// OSDirWalker implements DirWalker using the real filesystem.
-type OSDirWalker struct{}
-
-func (OSDirWalker) WalkJSONL(root string, fn func(line []byte) error) error {
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip inaccessible dirs
-		}
-		if info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
-			return nil
-		}
-		f, err := os.Open(filepath.Clean(path))
-		if err != nil {
-			return nil // skip unreadable files
-		}
-		defer func() { _ = f.Close() }()
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-		for scanner.Scan() {
-			if err := fn(scanner.Bytes()); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
 
 // WindowStart returns the start of the current 5-hour usage window in UTC.
 func WindowStart(now time.Time) time.Time {
@@ -204,7 +169,8 @@ func formatTokens(n int) string {
 	}
 }
 
-func TotalTokens(mu *ModelUsage) int {
+// Total returns the sum of all token fields.
+func (mu *ModelUsage) Total() int {
 	return mu.InputTokens + mu.OutputTokens + mu.CacheCreate + mu.CacheRead
 }
 
@@ -222,7 +188,7 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 	var grandTotal int
 	for _, mu := range summary.Models {
 		if mu != nil {
-			grandTotal += TotalTokens(mu)
+			grandTotal += mu.Total()
 		}
 	}
 
@@ -240,7 +206,7 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 		}
 		pct := 0.0
 		if grandTotal > 0 {
-			pct = float64(TotalTokens(mu)) / float64(grandTotal) * 100
+			pct = float64(mu.Total()) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
 			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
@@ -299,12 +265,12 @@ func FormatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
 
 	for _, model := range models {
 		mu, ok := summary.Models[model]
-		if !ok || mu == nil {
+		if !ok || mu == nil || mu.Total() == 0 {
 			continue
 		}
 		pct := 0.0
 		if grandTotal > 0 {
-			pct = float64(TotalTokens(mu)) / float64(grandTotal) * 100
+			pct = float64(mu.Total()) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
 			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
@@ -333,7 +299,7 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 	var grandTotal int
 	for _, mu := range total.Models {
 		if mu != nil {
-			grandTotal += TotalTokens(mu)
+			grandTotal += mu.Total()
 		}
 	}
 
@@ -349,7 +315,7 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 		var instanceTotal int
 		for _, mu := range iu.Summary.Models {
 			if mu != nil {
-				instanceTotal += TotalTokens(mu)
+				instanceTotal += mu.Total()
 			}
 		}
 		if err := FormatModelRows(w, iu.Summary, instanceTotal); err != nil {

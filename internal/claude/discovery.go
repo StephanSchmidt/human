@@ -472,6 +472,60 @@ func (c *CombinedFinder) FindInstances(ctx context.Context) ([]Instance, error) 
 	return all, nil
 }
 
+// DirWalker abstracts walking JSONL files for testability.
+type DirWalker interface {
+	WalkJSONL(root string, fn func(line []byte) error) error
+}
+
+// OSDirWalker implements DirWalker using the real filesystem.
+type OSDirWalker struct{}
+
+func (OSDirWalker) WalkJSONL(root string, fn func(line []byte) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip inaccessible dirs
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		f, err := os.Open(filepath.Clean(path))
+		if err != nil {
+			return nil // skip unreadable files
+		}
+		defer func() { _ = f.Close() }()
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			if err := fn(scanner.Bytes()); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// findNewestJSONL finds the most recently modified .jsonl file under root.
+func findNewestJSONL(root string) (string, error) {
+	var newest string
+	var newestMod int64
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip inaccessible
+		}
+		if info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		mod := info.ModTime().UnixNano()
+		if mod > newestMod {
+			newestMod = mod
+			newest = path
+		}
+		return nil
+	})
+	return newest, err
+}
+
 // ByteWalker implements DirWalker over in-memory bytes (one JSONL line per text line).
 type ByteWalker struct {
 	Data []byte
