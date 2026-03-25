@@ -96,12 +96,25 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	daemonAddr := replaceHost(addr, hostIP)
 	chromeFullAddr := replaceHost(chromeAddr, hostIP)
 
+	proxyFullAddr := replaceHost(proxyAddr, hostIP)
+
+	info := daemon.DaemonInfo{
+		Addr:       daemonAddr,
+		ChromeAddr: chromeFullAddr,
+		ProxyAddr:  proxyFullAddr,
+		Token:      token,
+		PID:        os.Getpid(),
+	}
+	if err := daemon.WriteInfo(info); err != nil {
+		return fmt.Errorf("failed to write daemon info: %w", err)
+	}
+	defer daemon.RemoveInfo()
+
 	_, _ = fmt.Fprintln(out, "Token:", token)
 	_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
 	_, _ = fmt.Fprintln(out, "Listening on:", addr)
 	_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
 	_, _ = fmt.Fprintln(out, "HTTPS proxy on:", proxyAddr)
-	proxyFullAddr := replaceHost(proxyAddr, hostIP)
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Run in the container:")
 	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
@@ -328,6 +341,12 @@ func buildDaemonStatusCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			pid, pidAlive := ReadAlivePid()
 
+			if !cmd.Flags().Changed("addr") {
+				if info, err := daemon.ReadInfo(); err == nil {
+					addr = info.Addr
+				}
+			}
+
 			conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 			if err != nil {
 				if pidAlive {
@@ -363,6 +382,7 @@ func buildDaemonStopCmd() *cobra.Command {
 			if !alive {
 				_, _ = fmt.Fprintln(out, "Daemon is not running")
 				RemovePidFile()
+				daemon.RemoveInfo()
 				return nil
 			}
 
@@ -389,6 +409,7 @@ func buildDaemonStopCmd() *cobra.Command {
 			}
 
 			RemovePidFile()
+			daemon.RemoveInfo()
 			_, _ = fmt.Fprintln(out, "Daemon stopped")
 			return nil
 		},

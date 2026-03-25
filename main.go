@@ -332,8 +332,26 @@ func main() {
 
 	// Client mode: forward to daemon if configured.
 	// Skip forwarding for "daemon" subcommands — they must run locally.
-	if addr := os.Getenv("HUMAN_DAEMON_ADDR"); addr != "" && !isLocalSubcommand(args) {
-		token := os.Getenv("HUMAN_DAEMON_TOKEN")
+	addr := os.Getenv("HUMAN_DAEMON_ADDR")
+	token := os.Getenv("HUMAN_DAEMON_TOKEN")
+
+	// Auto-discover from daemon info file when env vars are not set.
+	if addr == "" {
+		if info, err := daemon.ReadInfo(); err == nil && info.IsAlive() {
+			addr = info.Addr
+			if token == "" {
+				token = info.Token
+			}
+			if os.Getenv("HUMAN_CHROME_ADDR") == "" && info.ChromeAddr != "" {
+				_ = os.Setenv("HUMAN_CHROME_ADDR", info.ChromeAddr)
+			}
+			if os.Getenv("HUMAN_PROXY_ADDR") == "" && info.ProxyAddr != "" {
+				_ = os.Setenv("HUMAN_PROXY_ADDR", info.ProxyAddr)
+			}
+		}
+	}
+
+	if addr != "" && !isLocalSubcommand(args) {
 		exitCode, err := daemon.RunRemote(addr, token, args, version)
 		if err != nil {
 			errors.LogError(err).Msg("remote execution failed")

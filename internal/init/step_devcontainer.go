@@ -99,10 +99,11 @@ type devcontainerConfig struct {
 	Name             string                 `json:"name"`
 	Image            string                 `json:"image"`
 	Features         map[string]interface{} `json:"features"`
+	Mounts           []string               `json:"mounts,omitempty"`
 	RunArgs          []string               `json:"runArgs,omitempty"`
 	CapAdd           []string               `json:"capAdd,omitempty"`
 	ForwardPorts     []int                  `json:"forwardPorts"`
-	RemoteEnv        map[string]string      `json:"remoteEnv"`
+	RemoteEnv        map[string]string      `json:"remoteEnv,omitempty"`
 	PostStartCommand string                 `json:"postStartCommand,omitempty"`
 }
 
@@ -182,22 +183,19 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	}
 
 	cfg := devcontainerConfig{
-		Name:         "human secure container",
-		Image:        "mcr.microsoft.com/devcontainers/base:ubuntu",
-		Features:     features,
-		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
+		Name:     "human secure container",
+		Image:    "mcr.microsoft.com/devcontainers/base:ubuntu",
+		Features: features,
+		Mounts:   []string{"source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"},
+		RunArgs:  []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
-		RemoteEnv: map[string]string{ // #nosec G101 -- template reference, not a credential
-			"HUMAN_DAEMON_ADDR":  "host.docker.internal:19285",
-			"HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}",
-			"HUMAN_CHROME_ADDR":  "host.docker.internal:19286",
-			"BROWSER":            "human-browser",
+		RemoteEnv: map[string]string{
+			"BROWSER": "human-browser",
 		},
 	}
 
 	if proxy {
 		cfg.CapAdd = []string{"NET_ADMIN"}
-		cfg.RemoteEnv["HUMAN_PROXY_ADDR"] = "host.docker.internal:19287"
 		cfg.PostStartCommand = "sudo human-proxy-setup && human install --agent claude && human chrome-bridge"
 	} else {
 		cfg.PostStartCommand = "human install --agent claude && human chrome-bridge"
