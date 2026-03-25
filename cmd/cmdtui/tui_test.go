@@ -22,7 +22,7 @@ func (s *stubFinder) FindInstances(_ context.Context) ([]claude.Instance, error)
 }
 
 func testModel() model {
-	return newModel(&stubFinder{})
+	return newModel(&stubFinder{}, nil)
 }
 
 func TestModelInit(t *testing.T) {
@@ -125,8 +125,8 @@ func TestModelView_WithData(t *testing.T) {
 	if !strings.Contains(view, "opus") {
 		t.Errorf("expected 'opus' in view, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Usage window") {
-		t.Errorf("expected 'Usage window' in view, got:\n%s", view)
+	if !strings.Contains(view, "Claude usage") {
+		t.Errorf("expected 'Claude usage' in view, got:\n%s", view)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
@@ -33,8 +35,8 @@ func BuildTuiCmd() *cobra.Command {
 
 func runTUI() error {
 	ensureDaemon()
-	finder := buildFinder()
-	m := newModel(finder)
+	finder, dc := buildFinder()
+	m := newModel(finder, dc)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
@@ -69,7 +71,7 @@ func ensureDaemon() {
 	}
 }
 
-func buildFinder() claude.InstanceFinder {
+func buildFinder() (claude.InstanceFinder, claude.DockerClient) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Debug().Err(err).Msg("cannot resolve home dir for host finder")
@@ -78,10 +80,12 @@ func buildFinder() claude.InstanceFinder {
 	finders := []claude.InstanceFinder{
 		&claude.HostFinder{Runner: claude.OSCommandRunner{}, HomeDir: home},
 	}
-	if dc, dcErr := claude.NewEngineDockerClient(); dcErr == nil {
+	var dc claude.DockerClient
+	if client, dcErr := claude.NewEngineDockerClient(); dcErr == nil {
+		dc = client
 		finders = append(finders, &claude.DockerFinder{Client: dc})
 	}
-	return &claude.CombinedFinder{Finders: finders}
+	return &claude.CombinedFinder{Finders: finders}, dc
 }
 
 // --- bubbletea model ---
@@ -95,27 +99,33 @@ type usageData struct {
 	FetchedAt      time.Time
 	Err            error
 	Sessions       []logparser.SessionState
+	SessionByPath  map[string]logparser.SessionState    // filePath → session for PID matching
+	HookSnapshots  map[string]hookevents.SessionSnapshot // sessionID → hook state
+	hookReaders    []hookevents.EventReader              // carried forward for fetchQuick
 }
 
 type model struct {
-	finder   claude.InstanceFinder
-	data     *usageData
-	parsers  map[string]*logparser.FileParser
-	width    int
-	height   int
-	quitting bool
+	finder       claude.InstanceFinder
+	dockerClient claude.DockerClient // may be nil when Docker is unavailable
+	data         *usageData
+	parsers      map[string]*logparser.FileParser
+	width        int
+	height       int
+	quitting     bool
 }
 
-func newModel(finder claude.InstanceFinder) model {
+func newModel(finder claude.InstanceFinder, dc claude.DockerClient) model {
 	return model{
-		finder:  finder,
-		parsers: make(map[string]*logparser.FileParser),
+		finder:       finder,
+		dockerClient: dc,
+		parsers:      make(map[string]*logparser.FileParser),
 	}
 }
 
 // --- messages ---
 
-type tickMsg time.Time
+type fastTickMsg time.Time // 500ms — cheap socket/daemon/pane checks
+type fullTickMsg time.Time // 2s   — full fetch including JSONL parsing
 
 type usageMsg struct {
 	data *usageData
@@ -124,7 +134,7 @@ type usageMsg struct {
 // --- tea.Model implementation (v1 API) ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchUsage(m.finder, m.parsers), tickCmd())
+	return tea.Batch(fetchFull(m.finder, m.parsers, m.dockerClient), fastTickCmd(), fullTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -137,8 +147,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-	case tickMsg:
-		return m, tea.Batch(fetchUsage(m.finder, m.parsers), tickCmd())
+	case fastTickMsg:
+		return m, tea.Batch(fetchQuick(m.finder, m.data), fastTickCmd())
+	case fullTickMsg:
+		return m, tea.Batch(fetchFull(m.finder, m.parsers, m.dockerClient), fullTickCmd())
 	case usageMsg:
 		m.data = msg.data
 	}
@@ -169,14 +181,65 @@ func (m model) View() string {
 
 // --- commands ---
 
-func tickCmd() tea.Cmd {
-	// RC-1: Reduced from 5s to 2s as fallback for containers and pane discovery.
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-		return tickMsg(t)
+func fastTickCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return fastTickMsg(t)
 	})
 }
 
-func fetchUsage(finder claude.InstanceFinder, parsers map[string]*logparser.FileParser) tea.Cmd {
+func fullTickCmd() tea.Cmd {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return fullTickMsg(t)
+	})
+}
+
+// fetchQuick updates daemon status, pane states, and hook-based working/idle
+// on the existing data. Everything else (instances, sessions, agents, tasks)
+// is kept from the last full fetch to avoid flicker.
+func fetchQuick(finder claude.InstanceFinder, prev *usageData) tea.Cmd {
+	return func() tea.Msg {
+		if prev == nil {
+			return nil // nothing to update yet; wait for first full fetch
+		}
+
+		// Shallow copy so we don't mutate the previous pointer in-place.
+		data := *prev
+		data.FetchedAt = time.Now()
+
+		// Cheap: daemon liveness check.
+		pid, alive := cmddaemon.ReadAlivePid()
+		data.DaemonPid = pid
+		data.DaemonUp = alive
+
+		// Cheap: re-read hook events for sub-second state transitions.
+		ctx := context.Background()
+		if len(data.hookReaders) > 0 {
+			quickCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+			data.HookSnapshots = readHookSnapshots(quickCtx, data.hookReaders)
+			cancel()
+			overlayHookState(&data)
+		}
+
+		// Cheap: update pane states from carried-forward sessions.
+		instances, err := finder.FindInstances(ctx)
+		if err == nil {
+			containerIDs := collectContainerIDs(instances)
+			runner := claude.OSCommandRunner{}
+			tmuxClient := &claude.OSTmuxClient{Runner: runner}
+			procLister := &claude.OSProcessLister{Runner: runner}
+			panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
+
+			sessionByPID := buildSessionPIDMap(data.SessionByPath, instances)
+			matchPaneStates(panes, sessionByPID, data.Sessions)
+			data.Panes = panes
+		}
+
+		return usageMsg{data: &data}
+	}
+}
+
+// fetchFull performs the complete fetch including JSONL log parsing and hook events.
+func fetchFull(finder claude.InstanceFinder, parsers map[string]*logparser.FileParser, dc claude.DockerClient) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		now := time.Now()
@@ -196,20 +259,14 @@ func fetchUsage(finder claude.InstanceFinder, parsers map[string]*logparser.File
 		data.Instances = claude.CollectInstanceUsage(instances, now)
 
 		// Tmux panes (best-effort).
-		var containerIDs []string
-		for _, inst := range instances {
-			if inst.Source == "container" && inst.ContainerID != "" {
-				containerIDs = append(containerIDs, inst.ContainerID)
-			}
-		}
+		containerIDs := collectContainerIDs(instances)
 		runner := claude.OSCommandRunner{}
 		tmuxClient := &claude.OSTmuxClient{Runner: runner}
 		procLister := &claude.OSProcessLister{Runner: runner}
 		panes, _ := claude.FindClaudePanes(ctx, tmuxClient, procLister, containerIDs)
 
 		// Session monitoring via JSONL log parsing.
-		// Build PID → SessionState map for tmux pane matching.
-		sessionByPID := make(map[int]logparser.SessionState)
+		data.SessionByPath = make(map[string]logparser.SessionState)
 		reader := logparser.OSFileReader{}
 		for _, inst := range instances {
 			if inst.FilePath == "" {
@@ -227,17 +284,120 @@ func fetchUsage(finder claude.InstanceFinder, parsers map[string]*logparser.File
 			}
 			if state.SessionID != "" {
 				data.Sessions = append(data.Sessions, state)
-				if inst.PID > 0 {
-					sessionByPID[inst.PID] = state
-				}
+				data.SessionByPath[inst.FilePath] = state
 			}
 		}
 
+		// Hook events: build readers and read current state.
+		data.hookReaders = buildHookReaders(instances, dc)
+		data.HookSnapshots = readHookSnapshots(ctx, data.hookReaders)
+		overlayHookState(data)
+
+		sessionByPID := buildSessionPIDMap(data.SessionByPath, instances)
 		matchPaneStates(panes, sessionByPID, data.Sessions)
 		data.Panes = panes
 
 		return usageMsg{data: data}
 	}
+}
+
+func collectContainerIDs(instances []claude.Instance) []string {
+	var ids []string
+	for _, inst := range instances {
+		if inst.Source == "container" && inst.ContainerID != "" {
+			ids = append(ids, inst.ContainerID)
+		}
+	}
+	return ids
+}
+
+// buildHookReaders creates EventReaders for host and container event files.
+func buildHookReaders(instances []claude.Instance, dc claude.DockerClient) []hookevents.EventReader {
+	var readers []hookevents.EventReader
+
+	// Host reader (always present).
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		readers = append(readers, &hookevents.FileEventReader{
+			Path: filepath.Join(home, ".claude", "human-events", "events.jsonl"),
+		})
+	}
+
+	// Container readers.
+	if dc != nil {
+		seen := make(map[string]bool)
+		for _, inst := range instances {
+			if inst.Source == "container" && inst.ContainerID != "" && !seen[inst.ContainerID] {
+				seen[inst.ContainerID] = true
+				readers = append(readers, &hookevents.DockerEventReader{
+					Client:      dc,
+					ContainerID: inst.ContainerID,
+				})
+			}
+		}
+	}
+
+	return readers
+}
+
+// readHookSnapshots reads and parses hook events from all readers.
+func readHookSnapshots(ctx context.Context, readers []hookevents.EventReader) map[string]hookevents.SessionSnapshot {
+	all := make(map[string]hookevents.SessionSnapshot)
+	for _, r := range readers {
+		evtData, err := r.ReadEvents(ctx)
+		if err != nil || len(evtData) == 0 {
+			continue
+		}
+		for sid, snap := range hookevents.Parse(evtData) {
+			all[sid] = snap
+		}
+	}
+	return all
+}
+
+// overlayHookState updates Sessions' IsWorking from hook snapshots when the
+// hook event is more recent than the JSONL-parsed LastActivity.
+func overlayHookState(data *usageData) {
+	if len(data.HookSnapshots) == 0 {
+		return
+	}
+
+	updated := make([]logparser.SessionState, len(data.Sessions))
+	copy(updated, data.Sessions)
+	for i := range updated {
+		snap, ok := data.HookSnapshots[updated[i].SessionID]
+		if !ok {
+			continue
+		}
+		if snap.LastEventAt.After(updated[i].LastActivity) {
+			updated[i].IsWorking = snap.IsWorking
+			updated[i].LastActivity = snap.LastEventAt
+		}
+	}
+	data.Sessions = updated
+
+	updatedByPath := make(map[string]logparser.SessionState, len(data.SessionByPath))
+	for path, sess := range data.SessionByPath {
+		if snap, ok := data.HookSnapshots[sess.SessionID]; ok {
+			if snap.LastEventAt.After(sess.LastActivity) {
+				sess.IsWorking = snap.IsWorking
+				sess.LastActivity = snap.LastEventAt
+			}
+		}
+		updatedByPath[path] = sess
+	}
+	data.SessionByPath = updatedByPath
+}
+
+func buildSessionPIDMap(sessionByPath map[string]logparser.SessionState, instances []claude.Instance) map[int]logparser.SessionState {
+	byPID := make(map[int]logparser.SessionState)
+	for _, inst := range instances {
+		if inst.PID > 0 && inst.FilePath != "" {
+			if s, ok := sessionByPath[inst.FilePath]; ok {
+				byPID[inst.PID] = s
+			}
+		}
+	}
+	return byPID
 }
 
 // matchPaneStates sets each pane's State by matching it to a parsed session.
@@ -275,7 +435,6 @@ var (
 	errorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	redStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-	labelStyle   = lipgloss.NewStyle().Bold(true)
 	sessionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
 )
 
@@ -300,16 +459,16 @@ func renderError(err error) string {
 
 func renderUsage(b *strings.Builder, data *usageData) {
 	now := data.FetchedAt
+	ws := claude.WindowStart(now)
+	we := claude.WindowEnd(ws)
 
-	// Render usage via existing formatters into a string.
-	var usageBuf strings.Builder
-	switch {
-	case len(data.Instances) == 0:
-		_ = claude.FormatUsage(&usageBuf, &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}}, now)
-	default:
-		_ = claude.FormatMultiUsage(&usageBuf, data.Instances, now)
+	_, _ = fmt.Fprintf(b, "Claude usage [%02d:00 – %02d:00 UTC]\n", ws.Hour(), we.Hour())
+
+	if len(data.Instances) == 0 {
+		_, _ = fmt.Fprintln(b, "  (no instances)")
+	} else {
+		renderInstances(b, data)
 	}
-	_, _ = fmt.Fprint(b, usageBuf.String())
 
 	// Tmux panes.
 	if len(data.Panes) > 0 {
@@ -317,47 +476,89 @@ func renderUsage(b *strings.Builder, data *usageData) {
 		_ = claude.FormatTmuxPanes(&panesBuf, data.Panes)
 		_, _ = fmt.Fprint(b, panesBuf.String())
 	}
-
-	// Active sessions.
-	renderSessions(b, data.Sessions)
 }
 
-func renderSessions(b *strings.Builder, sessions []logparser.SessionState) {
-	if len(sessions) == 0 {
+func renderInstances(b *strings.Builder, data *usageData) {
+	total := &claude.UsageSummary{Models: make(map[string]*claude.ModelUsage)}
+	for _, iu := range data.Instances {
+		claude.MergeUsage(total, iu.Summary)
+		sess, hasSess := data.SessionByPath[iu.Instance.FilePath]
+		renderInstance(b, iu, sess, hasSess)
+	}
+	renderTotal(b, total)
+}
+
+func renderInstance(b *strings.Builder, iu claude.InstanceUsage, sess logparser.SessionState, hasSess bool) {
+	icon := sessionIcon(sess, hasSess)
+	header := fmt.Sprintf("\n%s %s", icon, iu.Instance.Label)
+	if mem := claude.FormatMemory(iu.Instance.Memory); mem != "" {
+		header += "  " + mem
+	}
+	if hasSess && !sess.StartedAt.IsZero() {
+		header += fmt.Sprintf("  [%s]", formatElapsed(time.Since(sess.StartedAt)))
+	}
+	if hasSess && sess.Slug != "" {
+		header += fmt.Sprintf("  %s", sessionStyle.Render(sess.Slug))
+	}
+	_, _ = fmt.Fprintln(b, header)
+
+	var instanceTotal int
+	for _, mu := range iu.Summary.Models {
+		if mu != nil {
+			instanceTotal += claude.TotalTokens(mu)
+		}
+	}
+	_ = claude.FormatModelRows(b, iu.Summary, instanceTotal)
+
+	if hasSess {
+		renderSubagents(b, sess.Subagents, sess.IsWorking, sess.LastActivity)
+		renderTaskSummary(b, sess.Tasks)
+	}
+}
+
+func sessionIcon(sess logparser.SessionState, hasSess bool) string {
+	if !hasSess {
+		return "⚪"
+	}
+	if sess.IsWorking {
+		return "🔴"
+	}
+	if !sess.LastActivity.IsZero() {
+		return "🟢"
+	}
+	return "⚪"
+}
+
+func renderTotal(b *strings.Builder, total *claude.UsageSummary) {
+	var grandTotal int
+	for _, mu := range total.Models {
+		if mu != nil {
+			grandTotal += claude.TotalTokens(mu)
+		}
+	}
+	_, _ = fmt.Fprintf(b, "\nTotal:\n")
+	_ = claude.FormatModelRows(b, total, grandTotal)
+}
+
+func renderSubagents(b *strings.Builder, subagents []logparser.Subagent, isWorking bool, lastActivity time.Time) {
+	if len(subagents) == 0 {
 		return
 	}
 
-	_, _ = fmt.Fprintln(b)
-	_, _ = fmt.Fprintln(b, labelStyle.Render("  Active Sessions:"))
-	_, _ = fmt.Fprintln(b)
-
-	for _, s := range sessions {
-		icon := "⚪"
-		if s.IsWorking {
-			icon = "🔴"
-		} else if !s.LastActivity.IsZero() {
-			icon = "🟢"
+	// Hide completed agents once the session has been idle for 5s.
+	if !isWorking && time.Since(lastActivity) > 5*time.Second {
+		hasRunning := false
+		for _, sa := range subagents {
+			if sa.CompletedAt == nil {
+				hasRunning = true
+				break
+			}
 		}
-
-		elapsed := formatElapsed(time.Since(s.StartedAt))
-		project := claude.ShortProjectName(s.Cwd)
-
-		slugPart := ""
-		if s.Slug != "" {
-			slugPart = fmt.Sprintf("  %s", sessionStyle.Render(s.Slug))
+		if !hasRunning {
+			return
 		}
-
-		_, _ = fmt.Fprintf(b, "  %s %s  [%s]%s\n", icon, project, elapsed, slugPart)
-
-		// Subagents.
-		renderSubagents(b, s.Subagents)
-
-		// Tasks summary.
-		renderTaskSummary(b, s.Tasks)
 	}
-}
 
-func renderSubagents(b *strings.Builder, subagents []logparser.Subagent) {
 	// Show only recent/active subagents (last 5).
 	start := 0
 	if len(subagents) > 5 {
@@ -437,7 +638,7 @@ func truncate(s string, maxLen int) string {
 
 func renderFooter(fetchedAt time.Time, tgStatus string) string {
 	return footerStyle.Render(fmt.Sprintf(
-		"  Last updated: %s  |  %s  |  Refreshes every 2s  |  Press q to quit",
+		"  Last updated: %s  |  %s  |  Refreshes every 500ms  |  Press q to quit",
 		fetchedAt.Format("15:04:05"), tgStatus))
 }
 
