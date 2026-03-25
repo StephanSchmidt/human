@@ -103,7 +103,7 @@ type model struct {
 
 func newModel(mon *monitor.Monitor) model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
-	sp.Style = lipgloss.NewStyle().Foreground(colorAccent)
+	sp.Style = lipgloss.NewStyle().Foreground(humanRed)
 	return model{mon: mon, spinner: sp, width: defaultWidth}
 }
 

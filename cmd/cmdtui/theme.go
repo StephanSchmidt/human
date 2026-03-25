@@ -2,37 +2,38 @@ package cmdtui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Semantic color palette — adaptive for dark and light terminals.
-var (
-	colorSubtle    = lipgloss.AdaptiveColor{Light: "#9B9B9B", Dark: "#5C5C5C"}
-	colorHighlight = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
-	colorSpecial   = lipgloss.AdaptiveColor{Light: "#43BF6D", Dark: "#73F59F"}
-	colorAccent    = lipgloss.AdaptiveColor{Light: "#F25D94", Dark: "#FF6B9D"}
-	colorWhite     = lipgloss.AdaptiveColor{Light: "#1A1A1A", Dark: "#FAFAFA"}
+// Human brand colors.
+const (
+	humanGold   = lipgloss.Color("#fac86a") // warm gold — titles, highlights
+	humanYellow = lipgloss.Color("#ffee97") // light yellow — instance labels
+	humanPink   = lipgloss.Color("#d73d73") // pink — errors
+	humanTeal   = lipgloss.Color("#4ee8c4") // teal — success, ready, running
+	humanPurple = lipgloss.Color("#555598") // muted purple — subtle, secondary
+	humanRed    = lipgloss.Color("#e05050") // red — busy, working, accent
 )
 
 // Model-specific progress bar colors.
 var modelColors = map[string]string{
-	"opus 4.6":   "#7D56F4", // purple
-	"sonnet 4.6": "#5B9CF5", // blue
-	"haiku 4.5":  "#43BF6D", // green
+	"opus 4.6":   "#fac86a", // gold
+	"sonnet 4.6": "#4ee8c4", // teal
+	"haiku 4.5":  "#555598", // purple
 }
 
 // Styles used across the TUI.
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(colorHighlight)
-	subtleStyle   = lipgloss.NewStyle().Foreground(colorSubtle)
-	instanceStyle = lipgloss.NewStyle().Bold(true).Foreground(colorWhite)
-	slugStyle     = lipgloss.NewStyle().Foreground(colorSubtle).Italic(true)
-	accentStyle   = lipgloss.NewStyle().Foreground(colorAccent)
-	specialStyle  = lipgloss.NewStyle().Foreground(colorSpecial)
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444"))
-	ruleStyle     = lipgloss.NewStyle().Foreground(colorSubtle)
+	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
+	subtleStyle   = lipgloss.NewStyle().Foreground(humanPurple)
+	instanceStyle = lipgloss.NewStyle().Bold(true).Foreground(humanYellow)
+	slugStyle     = lipgloss.NewStyle().Foreground(humanPurple).Italic(true)
+	accentStyle   = lipgloss.NewStyle().Foreground(humanRed)
+	specialStyle  = lipgloss.NewStyle().Foreground(humanTeal)
+	errorStyle    = lipgloss.NewStyle().Foreground(humanPink)
+	ruleStyle     = lipgloss.NewStyle().Foreground(humanPurple)
 )
 
 func modelColor(name string) string {
 	if c, ok := modelColors[name]; ok {
 		return c
 	}
-	return "#7571F9" // default purple
+	return "#fac86a" // default gold
 }
