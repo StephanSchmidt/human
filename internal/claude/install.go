@@ -201,5 +201,13 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		_, _ = fmt.Fprintf(w, "  %s %s\n", action, dest)
 	}
 
+	// Install hooks (only in personal mode — hooks are global).
+	if personal {
+		_, _ = fmt.Fprintln(w, "\nInstalling Claude Code hooks...")
+		if err := InstallHooks(w, fw); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

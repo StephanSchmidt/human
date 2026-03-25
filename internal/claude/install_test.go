@@ -278,6 +278,36 @@ func TestInstall_PersonalMode(t *testing.T) {
 		assert.Contains(t, path, ".claude")
 		assert.NotEqual(t, ".claude", path[:6], "personal mode should use absolute home path")
 	}
+
+	// Verify hooks were installed in personal mode.
+	assert.Contains(t, buf.String(), "Installing Claude Code hooks")
+
+	var hasHookScript, hasSettings bool
+	for path := range fw.files {
+		if filepath.Base(path) == "human-status-hook.sh" {
+			hasHookScript = true
+		}
+		if filepath.Base(path) == "settings.json" {
+			hasSettings = true
+		}
+	}
+	assert.True(t, hasHookScript, "hook script should be installed in personal mode")
+	assert.True(t, hasSettings, "settings.json should be updated in personal mode")
+}
+
+func TestInstall_NonPersonalMode_NoHooks(t *testing.T) {
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	err := Install(&buf, fw, false)
+
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "Installing Claude Code hooks")
+
+	for path := range fw.files {
+		assert.NotEqual(t, "human-status-hook.sh", filepath.Base(path),
+			"hook script should NOT be installed in non-personal mode")
+	}
 }
 
 func TestInstall_WrapsWriteError(t *testing.T) {
