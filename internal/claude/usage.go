@@ -182,7 +182,7 @@ func formatBytes(b uint64) string {
 	}
 }
 
-func formatMemory(mem *MemoryInfo) string {
+func FormatMemory(mem *MemoryInfo) string {
 	if mem == nil {
 		return ""
 	}
@@ -204,7 +204,7 @@ func formatTokens(n int) string {
 	}
 }
 
-func totalTokens(mu *ModelUsage) int {
+func TotalTokens(mu *ModelUsage) int {
 	return mu.InputTokens + mu.OutputTokens + mu.CacheCreate + mu.CacheRead
 }
 
@@ -222,7 +222,7 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 	var grandTotal int
 	for _, mu := range summary.Models {
 		if mu != nil {
-			grandTotal += totalTokens(mu)
+			grandTotal += TotalTokens(mu)
 		}
 	}
 
@@ -240,7 +240,7 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 		}
 		pct := 0.0
 		if grandTotal > 0 {
-			pct = float64(totalTokens(mu)) / float64(grandTotal) * 100
+			pct = float64(TotalTokens(mu)) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
 			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
@@ -290,7 +290,7 @@ func MergeUsage(dst, src *UsageSummary) {
 	}
 }
 
-func formatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
+func FormatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
 	models := make([]string, 0, len(summary.Models))
 	for m := range summary.Models {
 		models = append(models, m)
@@ -304,7 +304,7 @@ func formatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
 		}
 		pct := 0.0
 		if grandTotal > 0 {
-			pct = float64(totalTokens(mu)) / float64(grandTotal) * 100
+			pct = float64(TotalTokens(mu)) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
 			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
@@ -333,14 +333,14 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 	var grandTotal int
 	for _, mu := range total.Models {
 		if mu != nil {
-			grandTotal += totalTokens(mu)
+			grandTotal += TotalTokens(mu)
 		}
 	}
 
 	// Print each instance with per-instance percentages.
 	for _, iu := range instances {
 		header := fmt.Sprintf("\n%s", iu.Instance.Label)
-		if mem := formatMemory(iu.Instance.Memory); mem != "" {
+		if mem := FormatMemory(iu.Instance.Memory); mem != "" {
 			header += "  " + mem
 		}
 		if _, err := fmt.Fprintf(w, "%s\n", header); err != nil {
@@ -349,10 +349,10 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 		var instanceTotal int
 		for _, mu := range iu.Summary.Models {
 			if mu != nil {
-				instanceTotal += totalTokens(mu)
+				instanceTotal += TotalTokens(mu)
 			}
 		}
-		if err := formatModelRows(w, iu.Summary, instanceTotal); err != nil {
+		if err := FormatModelRows(w, iu.Summary, instanceTotal); err != nil {
 			return err
 		}
 	}
@@ -361,5 +361,5 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 	if _, err := fmt.Fprintf(w, "\nTotal:\n"); err != nil {
 		return err
 	}
-	return formatModelRows(w, total, grandTotal)
+	return FormatModelRows(w, total, grandTotal)
 }

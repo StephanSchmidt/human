@@ -352,9 +352,9 @@ func TestFormatMemory(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatMemory(tt.mem)
+			got := FormatMemory(tt.mem)
 			if got != tt.want {
-				t.Errorf("formatMemory() = %q, want %q", got, tt.want)
+				t.Errorf("FormatMemory() = %q, want %q", got, tt.want)
 			}
 		})
 	}
