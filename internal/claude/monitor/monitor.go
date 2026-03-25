@@ -108,11 +108,11 @@ func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
 		snap.Instances = matchInstances(extractUsages(prev.Instances), byPath)
 	}
 
-	// Update pane states.
-	instances, err := m.finder.FindInstances(ctx)
-	if err == nil {
-		panes := m.findPanes(ctx, instances)
-		matchPaneStates(panes, snap.sessionByPath, instances)
+	// Carry forward panes from prev, updating only their states from hook data.
+	if len(prev.Panes) > 0 {
+		panes := make([]claude.TmuxPane, len(prev.Panes))
+		copy(panes, prev.Panes)
+		matchPaneStates(panes, snap.sessionByPath, extractInstances(prev.Instances))
 		snap.Panes = panes
 	}
 
@@ -242,6 +242,15 @@ func extractUsages(views []InstanceView) []claude.InstanceUsage {
 		usages[i] = v.Usage
 	}
 	return usages
+}
+
+// extractInstances returns the Instance slice from InstanceViews.
+func extractInstances(views []InstanceView) []claude.Instance {
+	instances := make([]claude.Instance, len(views))
+	for i, v := range views {
+		instances[i] = v.Usage.Instance
+	}
+	return instances
 }
 
 // matchPaneStates sets each pane's State by matching to a parsed session.

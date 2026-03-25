@@ -239,3 +239,34 @@ func TestFetchQuick_UpdatesDaemon(t *testing.T) {
 	require.NotNil(t, snap)
 	assert.True(t, snap.FetchedAt.After(prev.FetchedAt))
 }
+
+func TestFetchQuick_CarriesForwardPanes(t *testing.T) {
+	mon := New(&stubFinder{}, nil)
+	prev := &Snapshot{
+		FetchedAt:  time.Now().Add(-time.Second),
+		TotalUsage: &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}},
+		Panes: []claude.TmuxPane{
+			{SessionName: "main", WindowIndex: 0, PaneIndex: 0, ClaudePID: 100},
+		},
+		Instances: []InstanceView{
+			{Usage: claude.InstanceUsage{Instance: claude.Instance{PID: 100, FilePath: "/a.jsonl"}}},
+		},
+	}
+	snap := mon.FetchQuick(context.Background(), prev)
+	require.NotNil(t, snap)
+	require.Len(t, snap.Panes, 1, "panes should be carried forward")
+	assert.Equal(t, "main", snap.Panes[0].SessionName)
+}
+
+// --- extractInstances tests ---
+
+func TestExtractInstances(t *testing.T) {
+	views := []InstanceView{
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "a", PID: 1}}},
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "b", PID: 2}}},
+	}
+	instances := extractInstances(views)
+	require.Len(t, instances, 2)
+	assert.Equal(t, "a", instances[0].Label)
+	assert.Equal(t, 2, instances[1].PID)
+}
