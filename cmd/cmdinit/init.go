@@ -221,6 +221,52 @@ func (h huhPrompter) ConfirmProxy() (bool, error) {
 	return proxy, err
 }
 
+func (h huhPrompter) ConfirmLspSetup() (bool, error) {
+	setup := true
+	err := huh.NewConfirm().
+		Title("Set up LSP servers for Claude Code?").
+		Description("Enables language intelligence (go-to-definition, references, diagnostics)").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&setup).
+		Run()
+	return setup, err
+}
+
+func (h huhPrompter) SelectLspPlugins(available []initpkg.LspPlugin) ([]initpkg.LspPlugin, error) {
+	options := make([]huh.Option[int], len(available))
+	for i, lsp := range available {
+		options[i] = huh.NewOption(lsp.Label, i)
+	}
+
+	theme := huh.ThemeCharm()
+	theme.Focused.SelectedPrefix = lipgloss.NewStyle().SetString("[x] ")
+	theme.Focused.UnselectedPrefix = lipgloss.NewStyle().SetString("[ ] ")
+	theme.Blurred.SelectedPrefix = theme.Focused.SelectedPrefix
+	theme.Blurred.UnselectedPrefix = theme.Focused.UnselectedPrefix
+
+	var indices []int
+	ms := huh.NewMultiSelect[int]().
+		Title("Select LSP servers to enable").
+		Description("space/x to toggle, enter to confirm").
+		Options(options...).
+		Filterable(false).
+		Value(&indices)
+
+	err := huh.NewForm(huh.NewGroup(ms)).
+		WithTheme(theme).
+		Run()
+	if err != nil {
+		return nil, err
+	}
+
+	selected := make([]initpkg.LspPlugin, len(indices))
+	for i, idx := range indices {
+		selected[i] = available[idx]
+	}
+	return selected, nil
+}
+
 func (h huhPrompter) ConfirmAgentInstall() (bool, error) {
 	install := true
 	err := huh.NewConfirm().
@@ -246,6 +292,7 @@ the environment variables you need to set.`,
 			steps := []initpkg.WizardStep{
 				initpkg.NewServicesStep(huhPrompter{}),
 				initpkg.NewDevcontainerStep(huhPrompter{}),
+				initpkg.NewLspSetupStep(huhPrompter{}, initpkg.OSLspInstaller{}),
 				initpkg.NewAgentInstallStep(huhPrompter{}),
 			}
 			return initpkg.RunInit(cmd.OutOrStdout(), steps, claude.OSFileWriter{})

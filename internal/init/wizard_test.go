@@ -36,6 +36,10 @@ type mockPrompter struct {
 	confirmProxyErr         error
 	selectedStacks          []StackType
 	selectStacksErr         error
+	confirmLspSetup         bool
+	confirmLspSetupErr      error
+	selectedLsps            []LspPlugin
+	selectLspsErr           error
 }
 
 func (m *mockPrompter) ConfirmOverwrite() (bool, error) {
@@ -80,6 +84,14 @@ func (m *mockPrompter) ConfirmProxy() (bool, error) {
 
 func (m *mockPrompter) SelectStacks(_ []StackType) ([]StackType, error) {
 	return m.selectedStacks, m.selectStacksErr
+}
+
+func (m *mockPrompter) ConfirmLspSetup() (bool, error) {
+	return m.confirmLspSetup, m.confirmLspSetupErr
+}
+
+func (m *mockPrompter) SelectLspPlugins(_ []LspPlugin) ([]LspPlugin, error) {
+	return m.selectedLsps, m.selectLspsErr
 }
 
 // mockFileWriter implements claude.FileWriter for testing.
@@ -898,6 +910,36 @@ func TestCheckDevcontainerPrereqs_ReturnsSlice(t *testing.T) {
 	}
 }
 
+// mockLspInstaller implements LspInstaller for testing.
+type mockLspInstaller struct {
+	installed          map[string]bool
+	binaryInstallErr   error
+	binaryInstallCalls []string
+	pluginInstallErr   error
+	pluginInstallCalls []string
+	marketplaceErr     error
+	marketplaceCalls   []string
+}
+
+func (m *mockLspInstaller) IsInstalled(binary string) bool {
+	return m.installed[binary]
+}
+
+func (m *mockLspInstaller) Install(cmd string) error {
+	m.binaryInstallCalls = append(m.binaryInstallCalls, cmd)
+	return m.binaryInstallErr
+}
+
+func (m *mockLspInstaller) InstallPlugin(pluginID string) error {
+	m.pluginInstallCalls = append(m.pluginInstallCalls, pluginID)
+	return m.pluginInstallErr
+}
+
+func (m *mockLspInstaller) EnsureMarketplace(repo string) error {
+	m.marketplaceCalls = append(m.marketplaceCalls, repo)
+	return m.marketplaceErr
+}
+
 // --- Integration: full wizard with real steps ---
 
 func TestRunInit_FullWizardFlow(t *testing.T) {
@@ -919,12 +961,15 @@ func TestRunInit_FullWizardFlow(t *testing.T) {
 		},
 		confirmDevcontainer: true,
 		confirmProxy:        false,
+		confirmLspSetup:     false,
 		installAgents:       false,
 	}
 
+	installer := &mockLspInstaller{installed: map[string]bool{}}
 	steps := []WizardStep{
 		NewServicesStep(prompter),
 		NewDevcontainerStep(prompter),
+		NewLspSetupStep(prompter, installer),
 		NewAgentInstallStep(prompter),
 	}
 	fw := newMockFileWriter()
@@ -959,12 +1004,15 @@ func TestRunInit_FullWizardWithAgentInstall(t *testing.T) {
 		selected:            []ServiceType{registry[1]}, // GitHub
 		instanceValues:      []map[string]string{{"name": "oss"}},
 		confirmDevcontainer: false,
+		confirmLspSetup:     false,
 		installAgents:       true,
 	}
 
+	installer := &mockLspInstaller{installed: map[string]bool{}}
 	steps := []WizardStep{
 		NewServicesStep(prompter),
 		NewDevcontainerStep(prompter),
+		NewLspSetupStep(prompter, installer),
 		NewAgentInstallStep(prompter),
 	}
 	fw := newMockFileWriter()
