@@ -272,7 +272,11 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 
 	// Instance header: icon + label + elapsed + slug
 	icon := m.sessionIcon(iv.Session)
-	header := "  " + icon + " " + instanceStyle.Render(iv.Usage.Instance.Label)
+	labelStyle := idleInstanceStyle
+	if iv.Session != nil && iv.Session.IsWorking {
+		labelStyle = busyInstanceStyle
+	}
+	header := "  " + icon + " " + labelStyle.Render(iv.Usage.Instance.Label)
 	if mem := claude.FormatMemory(iv.Usage.Instance.Memory); mem != "" {
 		header += "  " + subtleStyle.Render(mem)
 	}
