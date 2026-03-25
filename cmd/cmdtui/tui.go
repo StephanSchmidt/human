@@ -263,7 +263,9 @@ func (m model) renderHeader(w int) string {
 	if m.snap != nil {
 		ws := claude.WindowStart(m.snap.FetchedAt)
 		we := claude.WindowEnd(ws)
-		right = subtleStyle.Render(fmt.Sprintf("%02d:00 – %02d:00 UTC", ws.Hour(), we.Hour()))
+		localStart := ws.Local()
+		localEnd := we.Local()
+		right = subtleStyle.Render(fmt.Sprintf("%02d:00 – %02d:00", localStart.Hour(), localEnd.Hour()))
 	}
 
 	gap := w - lipgloss.Width(title) - lipgloss.Width(right) - 4
