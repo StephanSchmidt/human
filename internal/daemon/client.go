@@ -36,7 +36,11 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 		return 1, fmt.Errorf("failed to send request: %w", err)
 	}
 
-	line, err := readLine(conn)
+	// Single buffered reader for the connection — creating a new
+	// bufio.Reader per read would lose data buffered by the first reader.
+	reader := bufio.NewReader(conn)
+
+	line, err := reader.ReadBytes('\n')
 	if err != nil {
 		return 1, fmt.Errorf("failed to read response: %w", err)
 	}
@@ -57,7 +61,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	// Claude Code awaits the BROWSER process exit (10-min timeout via execa),
 	// so we stay alive, read line 2 (callback URL), deliver it, then exit 0.
 	if resp.AwaitCallback {
-		line2, err := readLine(conn)
+		line2, err := reader.ReadBytes('\n')
 		if err != nil {
 			return 1, fmt.Errorf("failed to read callback response: %w", err)
 		}
@@ -95,12 +99,6 @@ func deliverCallback(callbackURL string) error {
 		return fmt.Errorf("OAuth callback delivery failed with status %d", httpResp.StatusCode)
 	}
 	return nil
-}
-
-// readLine reads a single newline-terminated line from a net.Conn.
-func readLine(conn net.Conn) ([]byte, error) {
-	reader := bufio.NewReader(conn)
-	return reader.ReadBytes('\n')
 }
 
 // selectedEnv returns a small set of display-related env vars to forward.

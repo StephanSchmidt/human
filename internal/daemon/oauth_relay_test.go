@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -121,9 +122,9 @@ type twoLineClientResult struct {
 	err   error
 }
 
-// readResponse reads and unmarshals a single JSON line from the connection.
-func readResponse(conn net.Conn) (Response, error) {
-	raw, err := readLine(conn)
+// readResponseFrom reads and unmarshals a single JSON line from a buffered reader.
+func readResponseFrom(r *bufio.Reader) (Response, error) {
+	raw, err := r.ReadBytes('\n')
 	if err != nil {
 		return Response{}, err
 	}
@@ -169,7 +170,9 @@ func TestOAuthRelayEndToEnd(t *testing.T) {
 			return
 		}
 
-		resp1, readErr := readResponse(conn)
+		reader := bufio.NewReader(conn)
+
+		resp1, readErr := readResponseFrom(reader)
 		if readErr != nil {
 			resultCh <- twoLineClientResult{err: readErr}
 			return
@@ -181,7 +184,7 @@ func TestOAuthRelayEndToEnd(t *testing.T) {
 			return
 		}
 
-		resp2, readErr := readResponse(conn)
+		resp2, readErr := readResponseFrom(reader)
 		if readErr != nil {
 			resultCh <- twoLineClientResult{resp1: resp1, err: readErr}
 			return
