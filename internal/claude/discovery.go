@@ -240,7 +240,7 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 
 		// Skip processes running inside containers — DockerFinder handles those.
 		if ctrChecker.IsContainerized(pidNum) {
-			log.Debug().Int("pid", pidNum).Msg("skipping containerized process")
+			log.Trace().Int("pid", pidNum).Msg("skipping containerized process")
 			continue
 		}
 
@@ -505,9 +505,13 @@ func (OSDirWalker) WalkJSONL(root string, fn func(line []byte) error) error {
 }
 
 // findNewestJSONL finds the most recently modified .jsonl file under root.
+// When two files have mtimes within 1 second, the lexicographically later path
+// wins as a stable tiebreaker (session IDs sort chronologically).
 func findNewestJSONL(root string) (string, error) {
 	var newest string
 	var newestMod int64
+
+	const mtimeTolerance = int64(time.Second)
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -517,9 +521,20 @@ func findNewestJSONL(root string) (string, error) {
 			return nil
 		}
 		mod := info.ModTime().UnixNano()
-		if mod > newestMod {
+		switch {
+		case newestMod == 0:
 			newestMod = mod
 			newest = path
+		case mod > newestMod+mtimeTolerance:
+			// Clearly newer — pick it.
+			newestMod = mod
+			newest = path
+		case mod >= newestMod-mtimeTolerance:
+			// Within tolerance window — use lexicographic tiebreaker for stability.
+			if path > newest {
+				newestMod = mod
+				newest = path
+			}
 		}
 		return nil
 	})

@@ -735,3 +735,36 @@ func TestFindNewestJSONL_EmptyDir(t *testing.T) {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
+
+func TestFindNewestJSONL_SameMtime(t *testing.T) {
+	dir := t.TempDir()
+
+	fileA := filepath.Join(dir, "aaa.jsonl")
+	fileB := filepath.Join(dir, "zzz.jsonl")
+	if err := os.WriteFile(fileA, []byte("a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileB, []byte("b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force identical mtime on both files.
+	now := time.Now()
+	if err := os.Chtimes(fileA, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(fileB, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run multiple times to verify stability.
+	for i := 0; i < 10; i++ {
+		got, err := findNewestJSONL(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != fileB {
+			t.Errorf("iteration %d: expected %q (lexicographically later), got %q", i, fileB, got)
+		}
+	}
+}
