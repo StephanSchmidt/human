@@ -22,12 +22,15 @@ type Snapshot struct {
 	// internal — carried forward between fetches, not used by renderers.
 	hookReaders   []hookevents.EventReader
 	sessionByPath map[string]logparser.SessionState
+	connectedPIDs map[int]bool // PIDs of Claude instances connected to the daemon
 }
 
 // DaemonState holds the daemon liveness info.
 type DaemonState struct {
-	PID   int
-	Alive bool
+	PID              int
+	Alive            bool
+	ProxyAddr        string // proxy listen address from daemon.json
+	ProxyActiveConns int64  // number of currently active proxy connections
 }
 
 // InstanceView pairs a discovered instance with its matched session (if any).

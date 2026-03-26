@@ -131,12 +131,15 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger().Level(level)
 
+	connTracker := daemon.NewConnectedTracker()
+
 	srv := &daemon.Server{
-		Addr:       addr,
-		Token:      token,
-		SafeMode:   safe,
-		CmdFactory: cmdFactory,
-		Logger:     logger,
+		Addr:          addr,
+		Token:         token,
+		SafeMode:      safe,
+		CmdFactory:    cmdFactory,
+		Logger:        logger,
+		ConnectedPIDs: connTracker,
 	}
 
 	// Start socket relay to accept Chrome native messaging
@@ -205,6 +208,13 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 			logger.Error().Err(err).Msg("https proxy failed")
 		}
 	}()
+
+	// Periodically write daemon stats (proxy connections + connected PIDs) for the TUI.
+	statsPath := proxy.StatsPath()
+	connectedPath := daemon.ConnectedPath()
+	go writeDaemonStats(ctx, proxySrv, connTracker, statsPath, connectedPath)
+	defer proxy.RemoveStats(statsPath)
+	defer daemon.RemoveConnected(connectedPath)
 
 	// Start FUSE .env filter (Linux only; no-op on other platforms)
 	cwd, _ := os.Getwd()
@@ -573,6 +583,23 @@ func buildNotifier(primary dispatch.Notifier, extra dispatch.Notifier) dispatch.
 		return primary
 	}
 	return &dispatch.CompositeNotifier{Notifiers: []dispatch.Notifier{primary, extra}}
+}
+
+// writeDaemonStats periodically writes proxy stats and connected PIDs to disk for the TUI.
+func writeDaemonStats(ctx context.Context, proxySrv *proxy.Server, tracker *daemon.ConnectedTracker, proxyPath, connectedPath string) {
+	const connectedTTL = 30 * time.Second
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = proxy.WriteStats(proxyPath, proxy.Stats{ActiveConns: proxySrv.ActiveConns()})
+			tracker.Prune(connectedTTL)
+			_ = daemon.WriteConnected(connectedPath, tracker.PIDs())
+		}
+	}
 }
 
 // replaceHost replaces an empty or wildcard host in addr with the given host.

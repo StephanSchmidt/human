@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog"
 
@@ -18,6 +19,13 @@ type Server struct {
 	Logger zerolog.Logger
 	// Dialer connects to upstream servers. Injected for testing.
 	Dialer func(ctx context.Context, network, address string) (net.Conn, error)
+
+	activeConns atomic.Int64 // number of currently-active forwarded connections
+}
+
+// ActiveConns returns the number of currently active forwarded connections.
+func (s *Server) ActiveConns() int64 {
+	return s.activeConns.Load()
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
@@ -80,6 +88,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		s.Logger.Warn().Err(err).Str("host", serverName).Msg("upstream dial failed")
 		return
 	}
+
+	s.activeConns.Add(1)
+	defer s.activeConns.Add(-1)
 
 	s.Logger.Info().Str("host", serverName).Msg("forwarding")
 	Forward(ctx, conn, upstream, peeked, s.Logger)

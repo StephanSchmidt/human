@@ -12,6 +12,8 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
@@ -39,6 +41,10 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 
 	pid, alive := cmddaemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
+	if info, err := daemon.ReadInfo(); err == nil {
+		snap.Daemon.ProxyAddr = info.ProxyAddr
+	}
+	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.Telegram = telegramStatus()
 	snap.Slack = slackStatus()
 
@@ -47,6 +53,9 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 		snap.Err = err
 		return snap
 	}
+
+	// Read daemon-connected PIDs for later matching.
+	snap.connectedPIDs = readConnectedPIDs()
 
 	usages := claude.CollectInstanceUsage(instances, now)
 
@@ -61,8 +70,9 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	hookSnaps := readHookSnapshots(ctx, snap.hookReaders)
 	overlayHookState(sessionByPath, hookSnaps)
 
-	// Match sessions to instances.
+	// Match sessions to instances, then mark daemon-connected ones.
 	snap.Instances = matchInstances(usages, sessionByPath)
+	applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
 
 	// Match pane states from sessions.
 	matchPaneStates(panes, sessionByPath, instances)
@@ -91,6 +101,11 @@ func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
 
 	pid, alive := cmddaemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
+	if info, err := daemon.ReadInfo(); err == nil {
+		snap.Daemon.ProxyAddr = info.ProxyAddr
+	}
+	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
+	snap.connectedPIDs = readConnectedPIDs()
 
 	// Re-read hook events for sub-second state transitions.
 	if len(snap.hookReaders) > 0 {
@@ -108,6 +123,12 @@ func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
 
 		// Rebuild instance views with updated sessions.
 		snap.Instances = matchInstances(extractUsages(prev.Instances), byPath)
+		applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
+	}
+
+	// Update daemon-connected status even when instances aren't rebuilt.
+	if len(snap.hookReaders) == 0 {
+		applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
 	}
 
 	// Carry forward panes from prev, updating only their states from hook data.
@@ -337,4 +358,25 @@ func slackStatus() string {
 		return "Slack: missing token"
 	}
 	return "Slack connected"
+}
+
+// readConnectedPIDs reads the set of daemon-connected PIDs from disk.
+func readConnectedPIDs() map[int]bool {
+	pids := daemon.ReadConnected(daemon.ConnectedPath())
+	if len(pids) == 0 {
+		return nil
+	}
+	m := make(map[int]bool, len(pids))
+	for _, pid := range pids {
+		m[pid] = true
+	}
+	return m
+}
+
+// applyDaemonConnectedViews sets DaemonConnected on instance views whose PID is in the connected set.
+func applyDaemonConnectedViews(views []InstanceView, connected map[int]bool) {
+	for i := range views {
+		pid := views[i].Usage.Instance.PID
+		views[i].Usage.Instance.DaemonConnected = pid > 0 && connected[pid]
+	}
 }

@@ -408,9 +408,10 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 			{ID: "abc123def456", Name: "dev-myapp"},
 		},
 		execResults: map[string]mockExecResult{
-			"abc123def456|pgrep": {exitCode: 0, data: []byte("1\n")},
-			"abc123def456|sh":    {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"abc123def456|cat":   {exitCode: 0, data: jsonlData},
+			"abc123def456|pgrep":   {exitCode: 0, data: []byte("1\n")},
+			"abc123def456|sh":      {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"abc123def456|cat":     {exitCode: 0, data: jsonlData},
+			"abc123def456|printenv": {exitCode: 0, data: []byte("192.168.1.5:19287\n")},
 		},
 		statsResults: map[string]mockStatsResult{
 			"abc123def456": {mem: &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024}},
@@ -442,6 +443,9 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 	}
 	if instances[0].Memory.Limit != 2*1024*1024*1024 {
 		t.Errorf("memory limit = %d, want %d", instances[0].Memory.Limit, 2*1024*1024*1024)
+	}
+	if !instances[0].ProxyConfigured {
+		t.Error("expected ProxyConfigured = true when HUMAN_PROXY_ADDR is set")
 	}
 }
 
@@ -537,6 +541,35 @@ func TestDockerFinder_SkipsContainerWithoutClaude(t *testing.T) {
 	}
 	if len(instances) != 0 {
 		t.Errorf("expected 0 instances, got %d", len(instances))
+	}
+}
+
+func TestDockerFinder_ProxyNotConfigured(t *testing.T) {
+	inWindow := time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC)
+	jsonlData := makeJSONLLine(t, "claude-opus-4-6", inWindow, 100_000, 50_000)
+
+	dc := &mockDockerClient{
+		containers: []ContainerInfo{
+			{ID: "noproxy123456", Name: "no-proxy"},
+		},
+		execResults: map[string]mockExecResult{
+			"noproxy123456|pgrep":   {exitCode: 0, data: []byte("1\n")},
+			"noproxy123456|sh":      {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"noproxy123456|cat":     {exitCode: 0, data: jsonlData},
+			"noproxy123456|printenv": {exitCode: 1, data: nil},
+		},
+	}
+
+	finder := &DockerFinder{Client: dc}
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if instances[0].ProxyConfigured {
+		t.Error("expected ProxyConfigured = false when HUMAN_PROXY_ADDR is not set")
 	}
 }
 

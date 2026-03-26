@@ -27,14 +27,16 @@ type MemoryInfo struct {
 
 // Instance represents a discovered Claude Code instance.
 type Instance struct {
-	Label       string      // e.g. "Host (PID 7046)" or `Container "dev-myapp" (abc123)`
-	Source      string      // "host" or "container"
-	Walker      DirWalker   // how to read its JSONL data
-	Root        string      // JSONL root path (or virtual path for containers)
-	Memory      *MemoryInfo // memory usage (containers only)
-	ContainerID string      // full Docker container ID (containers only)
-	PID         int         // host PID of the claude process (0 for containers)
-	FilePath    string      // resolved JSONL path for fsnotify (host instances only)
+	Label           string      // e.g. "Host (PID 7046)" or `Container "dev-myapp" (abc123)`
+	Source          string      // "host" or "container"
+	Walker          DirWalker   // how to read its JSONL data
+	Root            string      // JSONL root path (or virtual path for containers)
+	Memory          *MemoryInfo // memory usage (containers only)
+	ContainerID     string      // full Docker container ID (containers only)
+	PID             int         // host PID of the claude process (0 for containers)
+	FilePath        string      // resolved JSONL path for fsnotify (host instances only)
+	ProxyConfigured bool        // true if the instance is configured to use the daemon's HTTPS proxy
+	DaemonConnected bool        // true if the instance has recently communicated with the daemon
 }
 
 // InstanceFinder discovers running Claude Code instances.
@@ -344,13 +346,18 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 
 		mem, _ := d.Client.ContainerStats(ctx, ctr.ID)
 
+		// Check if the container has the HTTPS proxy configured.
+		proxyExit, _, _ := d.Client.Exec(ctx, ctr.ID, []string{"printenv", "HUMAN_PROXY_ADDR"})
+		proxyConfigured := proxyExit == 0
+
 		instances = append(instances, Instance{
-			Label:       fmt.Sprintf("Container %q (%s)", name, shortID),
-			Source:      "container",
-			Walker:      &ByteWalker{Data: data},
-			Root:        "/container/" + shortID,
-			Memory:      mem,
-			ContainerID: ctr.ID,
+			Label:           fmt.Sprintf("Container %q (%s)", name, shortID),
+			Source:          "container",
+			Walker:          &ByteWalker{Data: data},
+			Root:            "/container/" + shortID,
+			Memory:          mem,
+			ContainerID:     ctr.ID,
+			ProxyConfigured: proxyConfigured,
 		})
 	}
 	return instances, nil

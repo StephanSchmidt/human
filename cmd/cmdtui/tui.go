@@ -279,6 +279,13 @@ func renderStatusLine(snap *monitor.Snapshot, w int) string {
 	var left string
 	if snap.Daemon.Alive {
 		left = "  " + specialStyle.Render("●") + " Daemon running"
+		if snap.Daemon.ProxyAddr != "" {
+			if snap.Daemon.ProxyActiveConns > 0 {
+				left += "  " + specialStyle.Render(fmt.Sprintf("Proxy: %d active", snap.Daemon.ProxyActiveConns))
+			} else {
+				left += "  " + subtleStyle.Render("Proxy: idle")
+			}
+		}
 	} else {
 		left = "  " + accentStyle.Render("●") + " Daemon stopped"
 	}
@@ -310,6 +317,15 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 		labelStyle = busyInstanceStyle
 	}
 	header := "  " + icon + " " + labelStyle.Render(iv.Usage.Instance.Label)
+	if iv.Usage.Instance.DaemonConnected {
+		if iv.Usage.Instance.ProxyConfigured {
+			header += "  " + specialStyle.Render("daemon+proxy")
+		} else {
+			header += "  " + specialStyle.Render("daemon")
+		}
+	} else if iv.Usage.Instance.ProxyConfigured {
+		header += "  " + specialStyle.Render("proxy")
+	}
 	if mem := claude.FormatMemory(iv.Usage.Instance.Memory); mem != "" {
 		header += "  " + subtleStyle.Render(mem)
 	}
