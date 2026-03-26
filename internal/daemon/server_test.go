@@ -348,3 +348,80 @@ func TestServer_EnvApplied(t *testing.T) {
 	// Verify the original value is restored after the request.
 	assert.Equal(t, "original", os.Getenv("NO_COLOR"))
 }
+
+func TestServer_TracksClientPID(t *testing.T) {
+	token := "test-token"
+	tracker := NewConnectedTracker()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:          "127.0.0.1:0",
+		Token:         token,
+		CmdFactory:    echoCmd,
+		Logger:        zerolog.Nop(),
+		ConnectedPIDs: tracker,
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	assert.Empty(t, tracker.PIDs())
+
+	resp := sendRequest(t, addr, Request{
+		Token:     token,
+		Args:      []string{"echo", "hi"},
+		ClientPID: 12345,
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, []int{12345}, tracker.PIDs())
+
+	// Second request with different PID.
+	resp = sendRequest(t, addr, Request{
+		Token:     token,
+		Args:      []string{"echo", "hi"},
+		ClientPID: 67890,
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, []int{12345, 67890}, tracker.PIDs())
+}
+
+func TestServer_IgnoresZeroClientPID(t *testing.T) {
+	token := "test-token"
+	tracker := NewConnectedTracker()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:          "127.0.0.1:0",
+		Token:         token,
+		CmdFactory:    echoCmd,
+		Logger:        zerolog.Nop(),
+		ConnectedPIDs: tracker,
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	resp := sendRequest(t, addr, Request{
+		Token:     token,
+		Args:      []string{"echo", "hi"},
+		ClientPID: 0,
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Empty(t, tracker.PIDs())
+}

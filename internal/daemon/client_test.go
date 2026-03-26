@@ -105,6 +105,17 @@ func TestRunRemote_EnvForwarded(t *testing.T) {
 	assert.Equal(t, 0, exitCode)
 }
 
+func TestRunRemote_ClientPIDForwarded(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Greater(t, req.ClientPID, 0, "ClientPID should be set to parent PID")
+		return Response{ExitCode: 0}
+	})
+
+	exitCode, err := RunRemote(addr, "tok", []string{}, "dev")
+	require.NoError(t, err)
+	assert.Equal(t, 0, exitCode)
+}
+
 func TestRunRemote_DaemonClosesImmediately(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

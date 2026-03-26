@@ -25,10 +25,11 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	env := selectedEnv()
 
 	req := Request{
-		Version: version,
-		Token:   token,
-		Args:    args,
-		Env:     env,
+		Version:   version,
+		Token:     token,
+		Args:      args,
+		Env:       env,
+		ClientPID: os.Getppid(),
 	}
 
 	enc := json.NewEncoder(conn)

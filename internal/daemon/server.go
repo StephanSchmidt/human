@@ -23,12 +23,13 @@ func (defaultBrowserOpener) Open(url string) error {
 
 // Server listens for incoming client connections and executes CLI commands.
 type Server struct {
-	Addr       string
-	Token      string
-	SafeMode   bool
-	CmdFactory func() *cobra.Command
-	Opener     BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
-	Logger     zerolog.Logger
+	Addr          string
+	Token         string
+	SafeMode      bool
+	CmdFactory    func() *cobra.Command
+	Opener        BrowserOpener    // used for OAuth relay; defaults to browser.DefaultOpener
+	Logger        zerolog.Logger
+	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
@@ -79,6 +80,10 @@ func (s *Server) handleConn(conn net.Conn) {
 	if req.Token != s.Token {
 		s.writeError(conn, "authentication failed: invalid token", 1)
 		return
+	}
+
+	if req.ClientPID > 0 && s.ConnectedPIDs != nil {
+		s.ConnectedPIDs.Touch(req.ClientPID)
 	}
 
 	if s.SafeMode {

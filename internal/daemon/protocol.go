@@ -2,10 +2,11 @@ package daemon
 
 // Request is sent from the client to the daemon (one JSON line per connection).
 type Request struct {
-	Version string            `json:"version"`
-	Token   string            `json:"token"`
-	Args    []string          `json:"args"`
-	Env     map[string]string `json:"env,omitempty"`
+	Version   string            `json:"version"`
+	Token     string            `json:"token"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env,omitempty"`
+	ClientPID int               `json:"client_pid,omitempty"` // parent PID (Claude process) for connection tracking
 }
 
 // Response is sent from the daemon back to the client (one or more JSON lines per connection).
