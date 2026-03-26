@@ -129,25 +129,33 @@ func TestSync_prunesStaleEntries(t *testing.T) {
 	}
 }
 
-func TestSync_skipsInstanceWithoutProjects(t *testing.T) {
+func TestSync_allProjectsWhenNoneConfigured(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	var buf bytes.Buffer
 
 	provider := &mockProvider{
-		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
-			t.Fatal("ListIssues should not be called for instance without projects")
-			return nil, nil
+		listFn: func(_ context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
+			if opts.Project != "" {
+				t.Errorf("expected empty project for all-projects sync, got %q", opts.Project)
+			}
+			return []tracker.Issue{{Key: "KAN-1", Project: "KAN"}}, nil
+		},
+		getFn: func(_ context.Context, key string) (*tracker.Issue, error) {
+			return &tracker.Issue{Key: key, Title: "Cross-project", Project: "KAN"}, nil
 		},
 	}
 
 	instances := []tracker.Instance{
-		{Name: "empty", Kind: "jira", Provider: provider},
+		{Name: "work", Kind: "jira", Provider: provider},
 	}
 
-	result, _ := Sync(ctx, s, instances, false, &buf)
-	if result.Indexed != 0 {
-		t.Errorf("expected 0 indexed, got %d", result.Indexed)
+	result, err := Sync(ctx, s, instances, false, &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Indexed != 1 {
+		t.Errorf("expected 1 indexed, got %d", result.Indexed)
 	}
 }
 

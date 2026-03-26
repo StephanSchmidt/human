@@ -24,10 +24,6 @@ func Sync(ctx context.Context, store Store, instances []tracker.Instance, fullSy
 
 	for i := range instances {
 		inst := &instances[i]
-		if len(inst.Projects) == 0 {
-			_, _ = fmt.Fprintf(logger, "Skipping %s (%s): no projects configured\n", inst.Name, inst.Kind)
-			continue
-		}
 		if err := syncInstance(ctx, store, inst, fullSync, logger, result); err != nil {
 			_, _ = fmt.Fprintf(logger, "Error syncing %s (%s): %v\n", inst.Name, inst.Kind, err)
 			result.Errors++
@@ -55,7 +51,13 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, full
 		_, _ = fmt.Fprintf(logger, "Full sync for %s (%s)\n", inst.Name, inst.Kind)
 	}
 
-	for _, project := range inst.Projects {
+	// When projects are configured, sync each one; otherwise sync all projects at once.
+	projects := inst.Projects
+	if len(projects) == 0 {
+		projects = []string{""}
+	}
+
+	for _, project := range projects {
 		opts := tracker.ListOptions{
 			Project:    project,
 			MaxResults: 100,
@@ -72,7 +74,11 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, full
 			continue
 		}
 
-		_, _ = fmt.Fprintf(logger, "Indexing %s (%s): %s (%d issues)...\n", inst.Name, inst.Kind, project, len(issues))
+		label := project
+		if label == "" {
+			label = "(all projects)"
+		}
+		_, _ = fmt.Fprintf(logger, "Indexing %s (%s): %s (%d issues)...\n", inst.Name, inst.Kind, label, len(issues))
 
 		for _, issue := range issues {
 			full, err := inst.Provider.GetIssue(ctx, issue.Key)
@@ -82,11 +88,15 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, full
 				continue
 			}
 
+			p := project
+			if p == "" {
+				p = full.Project
+			}
 			entry := Entry{
 				Key:      issue.Key,
 				Source:   inst.Name,
 				Kind:     inst.Kind,
-				Project:  project,
+				Project:  p,
 				Title:    full.Title,
 				Status:   full.Status,
 				Assignee: full.Assignee,
