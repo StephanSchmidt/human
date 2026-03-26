@@ -75,17 +75,16 @@ func (r *SocketRelay) ListenAndServe(ctx context.Context) error {
 			continue
 		}
 		if conn == nil {
-			continue
+			continue // satisfy nilaway; Accept never returns nil without error
 		}
-
 		r.Logger.Debug().Msg("chrome native host connected to relay")
 
 		select {
-		case r.pending <- conn:
 		case <-ctx.Done():
 			_ = conn.Close()
 			r.drainPending()
 			return nil
+		case r.pending <- conn:
 		}
 	}
 }
