@@ -559,6 +559,11 @@ func (c *Client) resolveMemberName(ctx context.Context, memberID string) (string
 	}
 
 	c.membersMu.Lock()
+	// Double-check: another goroutine may have cached this member while we fetched.
+	if cached, ok := c.members[memberID]; ok {
+		c.membersMu.Unlock()
+		return cached, nil
+	}
 	c.members[memberID] = name
 	c.membersMu.Unlock()
 
