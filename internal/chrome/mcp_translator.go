@@ -33,6 +33,9 @@ type McpTranslator struct {
 // performs the JSON-RPC init handshake, then runs the bidirectional
 // translation loop until conn closes or the subprocess exits.
 func (t *McpTranslator) Serve(ctx context.Context, conn net.Conn) error {
+	if conn == nil {
+		return errors.WithDetails("nil connection")
+	}
 	if t.ClaudePath == "" {
 		return errors.WithDetails("claude binary path not configured")
 	}
@@ -92,9 +95,7 @@ func (t *McpTranslator) Serve(ctx context.Context, conn net.Conn) error {
 	<-errCh
 	cancel()
 	// Close conn so the other goroutine unblocks if stuck on I/O.
-	if conn != nil {
-		_ = conn.Close()
-	}
+	_ = conn.Close()
 	// Drain the second goroutine's error so it doesn't leak.
 	<-errCh
 
@@ -123,6 +124,9 @@ func (t *McpTranslator) initHandshake(stdin io.Writer, scanner *bufio.Scanner) e
 	}
 
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return errors.WrapWithDetails(err, "reading MCP initialize response")
+		}
 		return errors.WithDetails("no response to initialize request")
 	}
 
