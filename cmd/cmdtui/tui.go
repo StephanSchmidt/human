@@ -319,9 +319,9 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 	header := "  " + icon + " " + labelStyle.Render(iv.Usage.Instance.Label)
 	if iv.Usage.Instance.DaemonConnected {
 		if iv.Usage.Instance.ProxyConfigured {
-			header += "  " + specialStyle.Render("daemon+proxy")
+			header += "  " + specialStyle.Render("⚡+proxy")
 		} else {
-			header += "  " + specialStyle.Render("daemon")
+			header += "  " + specialStyle.Render("⚡")
 		}
 	} else if iv.Usage.Instance.ProxyConfigured {
 		header += "  " + specialStyle.Render("proxy")
