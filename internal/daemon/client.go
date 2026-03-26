@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,7 +31,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 		Token:     token,
 		Args:      args,
 		Env:       env,
-		ClientPID: os.Getppid(),
+		ClientPID: findAncestorClaude(),
 	}
 
 	enc := json.NewEncoder(conn)
@@ -100,6 +102,39 @@ func deliverCallback(callbackURL string) error {
 		return fmt.Errorf("OAuth callback delivery failed with status %d", httpResp.StatusCode)
 	}
 	return nil
+}
+
+// findAncestorClaude walks the process tree from the current process upward,
+// looking for an ancestor whose /proc/<pid>/comm is "claude". Returns the
+// first matching PID, or falls back to os.Getppid() if none is found.
+func findAncestorClaude() int {
+	pid := os.Getppid()
+	for pid > 1 {
+		comm, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+		if err != nil {
+			break
+		}
+		if strings.TrimSpace(string(comm)) == "claude" {
+			return pid
+		}
+		// Read the parent PID from /proc/<pid>/status.
+		status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+		if err != nil {
+			break
+		}
+		ppid := 0
+		for _, line := range strings.Split(string(status), "\n") {
+			if strings.HasPrefix(line, "PPid:") {
+				ppid, _ = strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+				break
+			}
+		}
+		if ppid <= 1 || ppid == pid {
+			break
+		}
+		pid = ppid
+	}
+	return os.Getppid()
 }
 
 // selectedEnv returns a small set of display-related env vars to forward.
