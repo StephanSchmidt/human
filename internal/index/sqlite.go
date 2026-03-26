@@ -124,7 +124,10 @@ func (s *SQLiteStore) UpsertEntry(ctx context.Context, entry Entry, description 
 		if err != nil {
 			return errors.WrapWithDetails(err, "insert entry", "key", entry.Key)
 		}
-		newID, _ := res.LastInsertId()
+		newID, err := res.LastInsertId()
+		if err != nil {
+			return errors.WrapWithDetails(err, "getting last insert ID", "key", entry.Key)
+		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO entries_fts(rowid, key, title, description) VALUES (?, ?, ?, ?)",
 			newID, entry.Key, entry.Title, description,
