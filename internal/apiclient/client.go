@@ -36,6 +36,8 @@ type ErrorFormatter func(providerName, method, path string, statusCode int, body
 
 // Client is a shared HTTP API client that handles URL construction,
 // authentication, headers, and error handling.
+// Client is not safe for concurrent modification. All configuration (including
+// SetHTTPDoer) must be done before the first call to Do.
 type Client struct {
 	baseURL        string
 	auth           AuthFunc
