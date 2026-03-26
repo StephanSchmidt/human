@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -67,6 +68,7 @@ type Dispatcher struct {
 	Config  Config
 	Logger  zerolog.Logger
 
+	mu    sync.Mutex
 	queue []QueuedMessage
 	seen  map[int]bool
 }
@@ -96,6 +98,9 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 func (d *Dispatcher) tick(ctx context.Context) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	d.fetchMessages(ctx)
 	if len(d.queue) == 0 {
 		return
