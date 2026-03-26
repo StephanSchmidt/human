@@ -33,6 +33,9 @@ func sendProxyRequest(w io.Writer, token, version string) error {
 func readProxyAck(r io.Reader) (ProxyAck, error) {
 	scanner := bufio.NewScanner(r)
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return ProxyAck{}, errors.WrapWithDetails(err, "reading from chrome proxy")
+		}
 		return ProxyAck{}, errors.WithDetails("no response from chrome proxy")
 	}
 	var ack ProxyAck
