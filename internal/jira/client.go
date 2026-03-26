@@ -42,14 +42,22 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
-	jql := fmt.Sprintf("project=%s", opts.Project)
+	var clauses []string
+	if opts.Project != "" {
+		clauses = append(clauses, fmt.Sprintf("project=%s", opts.Project))
+	}
 	if !opts.IncludeAll {
-		jql += " AND statusCategory != Done"
+		clauses = append(clauses, "statusCategory != Done")
 	}
 	if !opts.UpdatedSince.IsZero() {
-		jql += fmt.Sprintf(` AND updated >= "%s"`, opts.UpdatedSince.Format("2006-01-02 15:04"))
+		clauses = append(clauses, fmt.Sprintf(`updated >= "%s"`, opts.UpdatedSince.Format("2006-01-02 15:04")))
 	}
-	jql += " order by created DESC"
+	jql := strings.Join(clauses, " AND ")
+	if jql == "" {
+		jql = "order by created DESC"
+	} else {
+		jql += " order by created DESC"
+	}
 	query := url.Values{
 		"jql":        {jql},
 		"maxResults": {fmt.Sprintf("%d", opts.MaxResults)},
@@ -68,9 +76,10 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	issues := make([]tracker.Issue, len(result.Issues))
 	for i, iss := range result.Issues {
 		issues[i] = tracker.Issue{
-			Key:    iss.Key,
-			Title:  iss.Fields.Summary,
-			Status: iss.Fields.Status.Name,
+			Key:     iss.Key,
+			Project: projectFromKey(iss.Key),
+			Title:   iss.Fields.Summary,
+			Status:  iss.Fields.Status.Name,
 		}
 		if iss.Fields.Updated != "" {
 			issues[i].UpdatedAt, _ = time.Parse("2006-01-02T15:04:05.000-0700", iss.Fields.Updated)
@@ -370,4 +379,12 @@ func nameOrEmpty(f *nameField) string {
 		return f.DisplayName
 	}
 	return f.Name
+}
+
+// projectFromKey extracts the project key from an issue key like "KAN-123".
+func projectFromKey(key string) string {
+	if idx := strings.LastIndex(key, "-"); idx > 0 {
+		return key[:idx]
+	}
+	return ""
 }

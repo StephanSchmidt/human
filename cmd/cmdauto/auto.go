@@ -58,8 +58,7 @@ func BuildAutoListCmd(deps cmdutil.Deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&project, "project", "", "Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)")
-	_ = cmd.MarkFlagRequired("project")
+	cmd.Flags().StringVar(&project, "project", "", "Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG). Omit to list across all projects.")
 	cmd.Flags().BoolVar(&all, "all", false, "Include all issues (default: open only)")
 	cmd.Flags().BoolVar(&table, "table", false, "Output as human-readable table instead of JSON")
 	return cmd

@@ -12,6 +12,7 @@ type scStory struct {
 	RequestedByID   string   `json:"requested_by_id"`
 	Archived        bool     `json:"archived"`
 	ProjectID       *int64   `json:"project_id"`
+	GroupID         string   `json:"group_id"` // UUID of the group (team)
 	UpdatedAt       string   `json:"updated_at"`
 }
 

@@ -183,16 +183,6 @@ func TestListIssues_groupNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "group not found")
 }
 
-func TestListIssues_missingProject(t *testing.T) {
-	client := New("http://localhost", "tok-test")
-	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
-		MaxResults: 10,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "project is required")
-}
-
 func TestGetIssue_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

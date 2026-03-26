@@ -43,6 +43,10 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
+	if opts.Project == "" {
+		return c.listAllIssues(ctx, opts)
+	}
+
 	owner, repo, err := splitProject(opts.Project)
 	if err != nil {
 		return nil, err
@@ -76,6 +80,40 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 			continue
 		}
 		issues = append(issues, toTrackerIssue(owner, repo, gi))
+	}
+	return issues, nil
+}
+
+// listAllIssues uses GET /search/issues to list issues across all repos.
+func (c *Client) listAllIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
+	q := "is:issue"
+	if !opts.IncludeAll {
+		q += " is:open"
+	}
+
+	query := url.Values{
+		"q":        {q},
+		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
+		"sort":     {"created"},
+		"order":    {"desc"},
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, "/search/issues", query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	var result ghSearchResult
+	if err := apiclient.DecodeJSON(resp, &result); err != nil {
+		return nil, err
+	}
+
+	var issues []tracker.Issue
+	for _, item := range result.Items {
+		if item.PullRequest != nil {
+			continue
+		}
+		owner, repo := parseRepoURL(item.RepositoryURL)
+		issues = append(issues, toTrackerIssue(owner, repo, item.ghIssue))
 	}
 	return issues, nil
 }
@@ -381,6 +419,7 @@ func parseIssueKey(key string) (string, string, int, error) {
 func toTrackerIssue(owner, repo string, gi ghIssue) tracker.Issue {
 	issue := tracker.Issue{
 		Key:         fmt.Sprintf("%s/%s#%d", owner, repo, gi.Number),
+		Project:     fmt.Sprintf("%s/%s", owner, repo),
 		Title:       gi.Title,
 		Status:      gi.State,
 		Description: gi.Body,
@@ -400,4 +439,20 @@ func toTrackerIssue(owner, repo string, gi ghIssue) tracker.Issue {
 	}
 
 	return issue
+}
+
+// parseRepoURL extracts owner and repo from a GitHub API repository URL.
+// e.g. "https://api.github.com/repos/owner/repo" → ("owner", "repo").
+func parseRepoURL(repoURL string) (string, string) {
+	// Find "/repos/" and split what follows.
+	const prefix = "/repos/"
+	idx := strings.Index(repoURL, prefix)
+	if idx < 0 {
+		return "", ""
+	}
+	parts := strings.SplitN(repoURL[idx+len(prefix):], "/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }

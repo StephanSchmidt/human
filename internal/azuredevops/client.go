@@ -45,19 +45,21 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 // ListIssues implements tracker.Lister using WIQL to query work items.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	project := opts.Project
-	if project == "" {
-		return nil, errors.WithDetails("project is required for Azure DevOps")
-	}
 
-	query := fmt.Sprintf(
-		"SELECT [System.Id] FROM workitems WHERE [System.TeamProject] = '%s'",
-		project,
-	)
+	var clauses []string
+	if project != "" {
+		clauses = append(clauses, fmt.Sprintf("[System.TeamProject] = '%s'", project))
+	}
 	if !opts.IncludeAll {
-		query += " AND [System.State] <> 'Done' AND [System.State] <> 'Removed'"
+		clauses = append(clauses, "[System.State] <> 'Done' AND [System.State] <> 'Removed'")
 	}
 	if !opts.UpdatedSince.IsZero() {
-		query += fmt.Sprintf(" AND [System.ChangedDate] > '%s'", opts.UpdatedSince.Format("2006-01-02T15:04:05Z"))
+		clauses = append(clauses, fmt.Sprintf("[System.ChangedDate] > '%s'", opts.UpdatedSince.Format("2006-01-02T15:04:05Z")))
+	}
+
+	query := "SELECT [System.Id] FROM workitems"
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 
 	wiqlBody, err := json.Marshal(map[string]string{"query": query})
@@ -65,8 +67,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		return nil, errors.WrapWithDetails(err, "marshalling WIQL query", "project", project)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/wiql", c.org, project)
-	resp, err := c.doRequest(ctx, http.MethodPost, path, "api-version=7.1", bytes.NewReader(wiqlBody), "application/json")
+	resp, err := c.doRequest(ctx, http.MethodPost, c.apisPath(project, "wit/wiql"), "api-version=7.1", bytes.NewReader(wiqlBody), "application/json")
 	if err != nil {
 		return nil, err
 	}
@@ -84,12 +85,11 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		ids[i] = strconv.Itoa(ref.ID)
 	}
 
-	batchPath := fmt.Sprintf("/%s/%s/_apis/wit/workitems", c.org, project)
 	batchQuery := url.Values{
 		"ids":         {strings.Join(ids, ",")},
 		"api-version": {"7.1"},
 	}
-	batchResp, err := c.doRequest(ctx, http.MethodGet, batchPath, batchQuery.Encode(), nil, "")
+	batchResp, err := c.doRequest(ctx, http.MethodGet, c.apisPath(project, "wit/workitems"), batchQuery.Encode(), nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +102,11 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 	issues := make([]tracker.Issue, 0, len(batchResult.Value))
 	for _, wi := range batchResult.Value {
-		issues = append(issues, toTrackerIssue(wi, project))
+		p := project
+		if p == "" {
+			p = wi.Fields.TeamProject
+		}
+		issues = append(issues, toTrackerIssue(wi, p))
 	}
 	return issues, nil
 }
@@ -475,4 +479,13 @@ func toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 	}
 
 	return issue
+}
+
+// apisPath builds an Azure DevOps API path, scoped to a project when provided
+// or to the organization when project is empty.
+func (c *Client) apisPath(project, resource string) string {
+	if project != "" {
+		return fmt.Sprintf("/%s/%s/_apis/%s", c.org, project, resource)
+	}
+	return fmt.Sprintf("/%s/_apis/%s", c.org, resource)
 }

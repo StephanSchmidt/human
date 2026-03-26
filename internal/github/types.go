@@ -46,3 +46,14 @@ type ghComment struct {
 type ghCurrentUser struct {
 	Login string `json:"login"`
 }
+
+// ghSearchResult is the response from GET /search/issues.
+type ghSearchResult struct {
+	Items []ghSearchItem `json:"items"`
+}
+
+// ghSearchItem extends ghIssue with repository context from the search endpoint.
+type ghSearchItem struct {
+	ghIssue
+	RepositoryURL string `json:"repository_url"` // e.g. "https://api.github.com/repos/owner/repo"
+}

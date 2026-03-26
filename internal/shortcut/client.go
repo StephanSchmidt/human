@@ -55,37 +55,51 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 
 // ListIssues implements tracker.Lister using GET /api/v3/groups/{id}/stories
 // for full sync, or POST /api/v3/stories/search for incremental sync.
+// When opts.Project is empty, searches across all groups.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	project := opts.Project
-	if project == "" {
-		return nil, errors.WithDetails("project is required for Shortcut")
-	}
-
-	groupID, err := c.resolveGroupID(ctx, project)
-	if err != nil {
-		return nil, err
-	}
-	if groupID == "" {
-		return nil, errors.WithDetails("group not found in Shortcut", "project", project)
-	}
 
 	var stories []scStory
-	if !opts.UpdatedSince.IsZero() {
-		stories, err = c.searchStories(ctx, groupID, opts.UpdatedSince)
+	var err error
+
+	if project != "" {
+		groupID, gErr := c.resolveGroupID(ctx, project)
+		if gErr != nil {
+			return nil, gErr
+		}
+		if groupID == "" {
+			return nil, errors.WithDetails("group not found in Shortcut", "project", project)
+		}
+		if !opts.UpdatedSince.IsZero() {
+			stories, err = c.searchStories(ctx, groupID, opts.UpdatedSince)
+		} else {
+			stories, err = c.listGroupStories(ctx, groupID)
+		}
 	} else {
-		stories, err = c.listGroupStories(ctx, groupID)
+		// Search across all groups.
+		stories, err = c.searchAllStories(ctx, opts.UpdatedSince)
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// Pre-load group name map for resolving story group IDs.
+	if project == "" {
+		if _, gErr := c.resolveGroupID(ctx, ""); gErr != nil {
+			return nil, gErr
+		}
 	}
 
 	issues := make([]tracker.Issue, 0, len(stories))
 	for _, story := range stories {
-		issue, err := c.toTrackerIssue(ctx, story, project)
-		if err != nil {
-			return nil, err
+		p := project
+		if p == "" {
+			p = c.groupNameByID(story.GroupID)
 		}
-		// toTrackerIssue loaded the workflow states; now we can filter.
+		issue, cErr := c.toTrackerIssue(ctx, story, p)
+		if cErr != nil {
+			return nil, cErr
+		}
 		if !opts.IncludeAll && c.isDoneOrArchived(story) {
 			continue
 		}
@@ -128,6 +142,41 @@ func (c *Client) searchStories(ctx context.Context, groupID string, since time.T
 		return nil, err
 	}
 	return stories, nil
+}
+
+// searchAllStories searches across all groups, optionally filtering by updated time.
+func (c *Client) searchAllStories(ctx context.Context, since time.Time) ([]scStory, error) {
+	body := scSearchRequest{}
+	if !since.IsZero() {
+		body.UpdatedAtStart = since.Format(time.RFC3339)
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "marshalling search request")
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v3/stories/search", "", bytes.NewReader(payload), "application/json")
+	if err != nil {
+		return nil, err
+	}
+	var stories []scStory
+	if err := apiclient.DecodeJSON(resp, &stories); err != nil {
+		return nil, err
+	}
+	return stories, nil
+}
+
+// groupNameByID returns the group name for a UUID, or "" if not found.
+// Requires resolveGroupID to have been called first to populate the cache.
+func (c *Client) groupNameByID(id string) string {
+	c.groupsMu.Lock()
+	defer c.groupsMu.Unlock()
+	for name, gid := range c.groups {
+		if gid == id {
+			return name
+		}
+	}
+	return ""
 }
 
 // GetIssue implements tracker.Getter.

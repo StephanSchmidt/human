@@ -138,16 +138,6 @@ func TestListIssues_httpError(t *testing.T) {
 	assert.Contains(t, err.Error(), "returned")
 }
 
-func TestListIssues_missingProject(t *testing.T) {
-	client := New("http://localhost", "myorg", "pat-test")
-	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
-		MaxResults: 10,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "project is required")
-}
-
 func TestGetIssue_happy(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)

@@ -48,12 +48,17 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
-	encodedProject, err := splitProject(opts.Project)
-	if err != nil {
-		return nil, err
+	var path string
+	if opts.Project != "" {
+		encodedProject, err := splitProject(opts.Project)
+		if err != nil {
+			return nil, err
+		}
+		path = fmt.Sprintf("/api/v4/projects/%s/issues", encodedProject)
+	} else {
+		path = "/api/v4/issues"
 	}
 
-	path := fmt.Sprintf("/api/v4/projects/%s/issues", encodedProject)
 	query := url.Values{
 		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
 	}
@@ -75,7 +80,11 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 	issues := make([]tracker.Issue, 0, len(glIssues))
 	for _, gi := range glIssues {
-		issues = append(issues, toTrackerIssue(opts.Project, gi))
+		project := opts.Project
+		if project == "" {
+			project = projectFromIssue(gi)
+		}
+		issues = append(issues, toTrackerIssue(project, gi))
 	}
 	return issues, nil
 }
@@ -448,4 +457,16 @@ func toTrackerIssue(project string, gi glIssue) tracker.Issue {
 	}
 
 	return issue
+}
+
+// projectFromIssue extracts the project path from a GitLab issue's references or web_url.
+// The references.full field looks like "group/project#123".
+func projectFromIssue(gi glIssue) string {
+	if gi.References != nil && gi.References.Full != "" {
+		ref := gi.References.Full
+		if idx := strings.LastIndex(ref, "#"); idx > 0 {
+			return ref[:idx]
+		}
+	}
+	return ""
 }

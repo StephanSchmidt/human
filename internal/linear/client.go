@@ -41,6 +41,35 @@ const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, 
 	}
 }`
 
+// All-teams query variants (no team filter — used when --project is omitted).
+const listAllIssuesQuery = `query($first: Int!) {
+	issues(first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
+const listAllOpenIssuesQuery = `query($first: Int!) {
+	issues(filter: { state: { type: { nin: ["completed", "canceled"] } } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
+const listAllIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTime!) {
+	issues(filter: { updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
+const listAllOpenIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTime!) {
+	issues(filter: { state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
+		nodes { identifier title description updatedAt state { name } priorityLabel
+			assignee { name } creator { name } labels { nodes { name } } }
+	}
+}`
+
 const getIssueQuery = `query($id: String!) {
 	issue(id: $id) {
 		identifier title description state { name } priorityLabel
@@ -120,22 +149,36 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 // ListIssues implements tracker.Lister.
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	vars := map[string]any{
-		"teamKey": opts.Project,
-		"first":   opts.MaxResults,
+		"first": opts.MaxResults,
 	}
 
 	var query string
+	if opts.Project != "" {
+		vars["teamKey"] = opts.Project
+		switch {
+		case !opts.UpdatedSince.IsZero() && opts.IncludeAll:
+			query = listIssuesUpdatedSinceQuery
+		case !opts.UpdatedSince.IsZero():
+			query = listOpenIssuesUpdatedSinceQuery
+		case opts.IncludeAll:
+			query = listIssuesQuery
+		default:
+			query = listOpenIssuesQuery
+		}
+	} else {
+		switch {
+		case !opts.UpdatedSince.IsZero() && opts.IncludeAll:
+			query = listAllIssuesUpdatedSinceQuery
+		case !opts.UpdatedSince.IsZero():
+			query = listAllOpenIssuesUpdatedSinceQuery
+		case opts.IncludeAll:
+			query = listAllIssuesQuery
+		default:
+			query = listAllOpenIssuesQuery
+		}
+	}
 	if !opts.UpdatedSince.IsZero() {
 		vars["since"] = opts.UpdatedSince.Format(time.RFC3339)
-		if opts.IncludeAll {
-			query = listIssuesUpdatedSinceQuery
-		} else {
-			query = listOpenIssuesUpdatedSinceQuery
-		}
-	} else if opts.IncludeAll {
-		query = listIssuesQuery
-	} else {
-		query = listOpenIssuesQuery
 	}
 
 	data, err := c.doGraphQL(ctx, query, vars)
@@ -151,7 +194,11 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 	issues := make([]tracker.Issue, len(result.Issues.Nodes))
 	for i, li := range result.Issues.Nodes {
-		issues[i] = toTrackerIssue(li, opts.Project)
+		project := opts.Project
+		if project == "" {
+			project = projectFromIdentifier(li.Identifier)
+		}
+		issues[i] = toTrackerIssue(li, project)
 	}
 	return issues, nil
 }
