@@ -321,6 +321,30 @@ func subcmdFromBinary() string {
 	return ""
 }
 
+// discoverDaemon auto-discovers daemon address and token from the info file,
+// and propagates chrome/proxy addresses into environment variables.
+func discoverDaemon(token string) (string, string) {
+	info, err := daemon.ReadInfo()
+	if err != nil || !info.IsAlive() {
+		return "", token
+	}
+	addr := info.Addr
+	if token == "" {
+		token = info.Token
+	}
+	if os.Getenv("HUMAN_CHROME_ADDR") == "" && info.ChromeAddr != "" {
+		if err := os.Setenv("HUMAN_CHROME_ADDR", info.ChromeAddr); err != nil {
+			errors.LogError(err).Msg("failed to set HUMAN_CHROME_ADDR")
+		}
+	}
+	if os.Getenv("HUMAN_PROXY_ADDR") == "" && info.ProxyAddr != "" {
+		if err := os.Setenv("HUMAN_PROXY_ADDR", info.ProxyAddr); err != nil {
+			errors.LogError(err).Msg("failed to set HUMAN_PROXY_ADDR")
+		}
+	}
+	return addr, token
+}
+
 func main() {
 	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
@@ -337,18 +361,7 @@ func main() {
 
 	// Auto-discover from daemon info file when env vars are not set.
 	if addr == "" {
-		if info, err := daemon.ReadInfo(); err == nil && info.IsAlive() {
-			addr = info.Addr
-			if token == "" {
-				token = info.Token
-			}
-			if os.Getenv("HUMAN_CHROME_ADDR") == "" && info.ChromeAddr != "" {
-				_ = os.Setenv("HUMAN_CHROME_ADDR", info.ChromeAddr)
-			}
-			if os.Getenv("HUMAN_PROXY_ADDR") == "" && info.ProxyAddr != "" {
-				_ = os.Setenv("HUMAN_PROXY_ADDR", info.ProxyAddr)
-			}
-		}
+		addr, token = discoverDaemon(token)
 	}
 
 	if addr != "" && !isLocalSubcommand(args) {
