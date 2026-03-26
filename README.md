@@ -86,6 +86,8 @@ devcontainer up --workspace-folder .
 human tui
 ```
 
+<img src="human-tui.png" width="960" alt="human TUI dashboard">
+
 The TUI shows running Claude Code instances, token usage per 5-hour window, daemon status, and connected containers — all in one view. It auto-starts the daemon if needed.
 
 ## CLI usage
