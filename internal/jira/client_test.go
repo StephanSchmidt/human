@@ -137,7 +137,7 @@ func TestListIssues_happy(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/rest/api/3/search/jql", r.URL.Path)
 		jql := r.URL.Query().Get("jql")
-		assert.Contains(t, jql, "project=KAN")
+		assert.Contains(t, jql, `project="KAN"`)
 		assert.Contains(t, jql, "statusCategory != Done")
 		assert.Equal(t, "10", r.URL.Query().Get("maxResults"))
 
@@ -169,7 +169,7 @@ func TestListIssues_happy(t *testing.T) {
 func TestListIssues_all(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jql := r.URL.Query().Get("jql")
-		assert.Contains(t, jql, "project=KAN")
+		assert.Contains(t, jql, `project="KAN"`)
 		assert.NotContains(t, jql, "statusCategory")
 
 		_, _ = fmt.Fprint(w, `{"issues":[

@@ -44,7 +44,7 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tracker.Issue, error) {
 	var clauses []string
 	if opts.Project != "" {
-		clauses = append(clauses, fmt.Sprintf("project=%s", opts.Project))
+		clauses = append(clauses, fmt.Sprintf("project=\"%s\"", strings.ReplaceAll(opts.Project, "\"", "\\\"")))
 	}
 	if !opts.IncludeAll {
 		clauses = append(clauses, "statusCategory != Done")
