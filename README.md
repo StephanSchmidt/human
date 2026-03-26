@@ -90,102 +90,21 @@ The TUI shows running Claude Code instances, token usage per 5-hour window, daem
 
 ## CLI usage
 
-Use `--table` for human-readable output. Quick commands auto-detect the tracker from key format and configuration:
+Quick commands auto-detect the tracker from the key format. Use `--table` for human-readable output.
 
 ```bash
-# Quick commands (auto-detect tracker)
-human get KAN-1                                          # get a single issue
-human list --project=KAN                                 # list issues in a project
-human list --project=KAN --tracker=work                  # disambiguate with --tracker
-human statuses KAN-1                                     # list available statuses
-human status KAN-1 "Done"                                # set issue status
-```
+human get KAN-1                        # get an issue
+human list --project=KAN               # list issues
+human status KAN-1 "Done"             # set status
+human jira issue start KAN-1           # transition + assign
+human jira issue edit KAN-1 --title "New title"
+human jira issue comment add KAN-1 "Shipped"
 
-The same commands also work in provider-specific form — only the project identifier changes:
-
-```bash
-# List issues (JSON by default)
-human jira issues list --project=KAN                    # Jira
-human github issues list --project=octocat/hello-world  # GitHub
-human gitlab issues list --project=mygroup/myproject    # GitLab
-human linear issues list --project=ENG                  # Linear
-human azuredevops issues list --project=Human           # Azure DevOps
-human shortcut issues list --project=MyProject          # Shortcut
-
-# Human-readable table
-human jira issues list --project=KAN --table
-
-# Get a single issue as markdown
-human jira issue get KAN-1
-human github issue get octocat/hello-world#42
-human gitlab issue get mygroup/myproject#42
-human linear issue get ENG-123
-human azuredevops issue get Human/42                    # Azure DevOps
-human shortcut issue get 123                            # Shortcut
-
-# Create an issue
-human linear issue create --project=ENG "Implement feature" --description "Feature details in markdown"
-
-# Edit an issue
-human jira issue edit KAN-1 --title "Updated title" --description "New description"
-
-# Start working on an issue (transition + assign)
-human jira issue start KAN-1
-
-# List available statuses and set status
-human jira issue statuses KAN-1
-human jira issue status KAN-1 "Done"
-
-# Add a comment to an issue
-human jira issue comment add KAN-1 "This is done"
-
-# List comments on an issue
-human jira issue comment list KAN-1
-
-# Use a named tracker instance from .humanconfig.yaml
-human --tracker=work jira issues list --project=KAN
-
-# Search across all trackers and Notion
-human index                                             # build search index
-human search "retry logic"                              # search the index
-human search "auth spec" --source=notion                # search only Notion
-
-# Notion — search, read pages, query databases
-human notion search "quarterly report"
-human notion page get <page-id>
-human notion databases list --table
-human notion database query <database-id> --table
-
-# Use a named Notion instance
-human notion --notion=work search "meeting notes"
-
-# Figma — browse files, inspect nodes, read comments
-human figma file get <file-key>
-human figma file comments <file-key>
-human figma file components <file-key>
-human figma file nodes <file-key> --ids=0:1,1:2
-human figma file image <file-key> --ids=0:1
-human figma projects list --team=<team-id>
-human figma project files <project-id>
-
-# Use a named Figma instance
-human figma --figma=design file get <file-key>
-
-# Amplitude — product analytics
-human amplitude events list
-human amplitude events query --event=_active --start=20260301 --end=20260311
-human amplitude taxonomy events
-human amplitude funnel --events=signup,purchase --start=20260301 --end=20260311
-human amplitude retention --start-event=signup --return-event=login --start=20260301 --end=20260311
-human amplitude user search alice@example.com
-human amplitude cohorts list
-
-# Use a named Amplitude instance
-human amplitude --amplitude=product events list
-
-# Telegram — read bot messages
-human telegram list
-human telegram get <update-id>
+human search "retry logic"             # cross-tracker search
+human notion search "quarterly report" # Notion
+human figma file get <file-key>        # Figma
+human amplitude events list            # Amplitude
+human telegram list                    # Telegram
 ```
 
 ## Devcontainer / Remote mode
