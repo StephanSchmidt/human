@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -58,58 +59,7 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, full
 	}
 
 	for _, project := range projects {
-		opts := tracker.ListOptions{
-			Project:    project,
-			MaxResults: 100,
-			IncludeAll: fullSync,
-		}
-		if incremental {
-			opts.UpdatedSince = lastIndexed
-		}
-
-		issues, err := inst.Provider.ListIssues(ctx, opts)
-		if err != nil {
-			_, _ = fmt.Fprintf(logger, "  Error listing %s/%s: %v\n", inst.Name, project, err)
-			result.Errors++
-			continue
-		}
-
-		label := project
-		if label == "" {
-			label = "(all projects)"
-		}
-		_, _ = fmt.Fprintf(logger, "Indexing %s (%s): %s (%d issues)...\n", inst.Name, inst.Kind, label, len(issues))
-
-		for _, issue := range issues {
-			full, err := inst.Provider.GetIssue(ctx, issue.Key)
-			if err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error fetching %s: %v\n", issue.Key, err)
-				result.Errors++
-				continue
-			}
-
-			p := project
-			if p == "" {
-				p = full.Project
-			}
-			entry := Entry{
-				Key:      issue.Key,
-				Source:   inst.Name,
-				Kind:     inst.Kind,
-				Project:  p,
-				Title:    full.Title,
-				Status:   full.Status,
-				Assignee: full.Assignee,
-				URL:      inst.URL,
-			}
-			if err := store.UpsertEntry(ctx, entry, full.Description); err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error indexing %s: %v\n", issue.Key, err)
-				result.Errors++
-				continue
-			}
-			seen[issue.Key] = true
-			result.Indexed++
-		}
+		syncProject(ctx, store, inst, project, fullSync, incremental, lastIndexed, logger, result, seen)
 	}
 
 	// Only prune on full sync — incremental sync cannot detect deletions.
@@ -131,4 +81,60 @@ func syncInstance(ctx context.Context, store Store, inst *tracker.Instance, full
 	}
 
 	return nil
+}
+
+// syncProject fetches and indexes issues for a single project (or all projects when project is "").
+func syncProject(ctx context.Context, store Store, inst *tracker.Instance, project string, fullSync, incremental bool, lastIndexed time.Time, logger io.Writer, result *SyncResult, seen map[string]bool) {
+	opts := tracker.ListOptions{
+		Project:    project,
+		MaxResults: 100,
+		IncludeAll: fullSync,
+	}
+	if incremental {
+		opts.UpdatedSince = lastIndexed
+	}
+
+	issues, err := inst.Provider.ListIssues(ctx, opts)
+	if err != nil {
+		_, _ = fmt.Fprintf(logger, "  Error listing %s/%s: %v\n", inst.Name, project, err)
+		result.Errors++
+		return
+	}
+
+	label := project
+	if label == "" {
+		label = "(all projects)"
+	}
+	_, _ = fmt.Fprintf(logger, "Indexing %s (%s): %s (%d issues)...\n", inst.Name, inst.Kind, label, len(issues))
+
+	for _, issue := range issues {
+		full, fErr := inst.Provider.GetIssue(ctx, issue.Key)
+		if fErr != nil {
+			_, _ = fmt.Fprintf(logger, "  Error fetching %s: %v\n", issue.Key, fErr)
+			result.Errors++
+			continue
+		}
+
+		p := project
+		if p == "" {
+			p = full.Project
+		}
+		entry := Entry{
+			Key:      issue.Key,
+			Source:   inst.Name,
+			Kind:     inst.Kind,
+			Project:  p,
+			Title:    full.Title,
+			Status:   full.Status,
+			Assignee: full.Assignee,
+			URL:      inst.URL,
+		}
+		if uErr := store.UpsertEntry(ctx, entry, full.Description); uErr != nil {
+			_, _ = fmt.Fprintf(logger, "  Error indexing %s: %v\n", issue.Key, uErr)
+			result.Errors++
+			continue
+		}
+		seen[issue.Key] = true
+		result.Indexed++
+	}
 }
