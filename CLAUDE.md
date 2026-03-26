@@ -24,9 +24,17 @@ Use 'human' to read and write tickets on both trackers.
 
 Maintain traceability from PM ticket → engineering ticket → git commits. Reference the Shortcut ticket in the Linear ticket, and reference the PM ticket (Shortcut) in commit messages.
 
-# Tracker Tokens
+# Daemon
 
-Tracker API tokens are stored in 1Password. Use `op.exe` (Windows host) to retrieve them and set as env vars before running `human`:
+When the human daemon is running, all CLI commands (except `daemon`, `install`, `init`, `tui`) are automatically forwarded to it. The daemon holds all tracker credentials on the host — **do NOT set tokens manually when the daemon is running**. Just run `human` commands directly.
+
+The daemon is auto-discovered via `~/.human/daemon.json`. Check with `human daemon status`.
+
+# Tracker Tokens (Daemon Host Setup)
+
+These tokens only need to be set **once on the host where the daemon runs**. They are NOT needed for individual CLI invocations when the daemon is running.
+
+Tracker API tokens are stored in 1Password. Use `op.exe` (Windows host) to retrieve them and set as env vars:
 
 ```sh
 # Shortcut
