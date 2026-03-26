@@ -148,7 +148,11 @@ func (c *Client) ExportImages(ctx context.Context, fileKey string, nodeIDs []str
 		format = "png"
 	}
 	ids := encodeNodeIDs(nodeIDs)
-	path := "/v1/images/" + fileKey + "?ids=" + ids + "&format=" + format
+	query := url.Values{
+		"ids":    {ids},
+		"format": {format},
+	}
+	path := "/v1/images/" + url.PathEscape(fileKey) + "?" + query.Encode()
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
