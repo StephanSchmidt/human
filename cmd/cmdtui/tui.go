@@ -22,6 +22,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
+	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -108,12 +109,13 @@ type model struct {
 	quitting bool
 	fetchGen uint64 // monotonic counter; assigned when dispatching a fetch
 	fetching bool   // true while a fetch command is in flight
+	logMode  string // traffic log mode: "off", "meta", "full"
 }
 
 func newModel(mon *monitor.Monitor) model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(humanRed)
-	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true}
+	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true, logMode: "off"}
 }
 
 // --- messages ---
@@ -126,19 +128,28 @@ type snapshotMsg struct {
 	gen  uint64
 }
 
+type logModeMsg string // result of log-mode set/get from daemon
+
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd())
+	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.String() == "q" || msg.String() == "ctrl+c" {
+		switch msg.String() {
+		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		case "l":
+			next := cycleLogMode(m.logMode)
+			m.logMode = next
+			return m, setLogModeCmd(next)
 		}
+	case logModeMsg:
+		m.logMode = string(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -227,7 +238,7 @@ func (m model) View() string {
 
 	// Footer.
 	b.WriteByte('\n')
-	b.WriteString(renderFooter(w))
+	b.WriteString(renderFooter(w, m.logMode))
 	b.WriteByte('\n')
 
 	return b.String()
@@ -579,9 +590,12 @@ func renderPanes(panes []claude.TmuxPane) string {
 
 // --- render: footer ---
 
-func renderFooter(w int) string {
+func renderFooter(w int, logMode string) string {
 	left := subtleStyle.Render("  ↻ live")
-	right := subtleStyle.Render("q quit")
+	if logMode != "" {
+		left += "  " + subtleStyle.Render("log:"+logMode)
+	}
+	right := subtleStyle.Render("l log  q quit")
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
@@ -632,5 +646,64 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1e3)
 	default:
 		return fmt.Sprintf("%d", n)
+	}
+}
+
+// --- log mode ---
+
+// cycleLogMode cycles through full → meta → off → full.
+func cycleLogMode(current string) string {
+	switch current {
+	case "full":
+		return "meta"
+	case "meta":
+		return "off"
+	default:
+		return "full"
+	}
+}
+
+// daemonAddr returns the daemon address and token for direct TCP communication.
+func daemonAddr() (string, string) {
+	addr := os.Getenv("HUMAN_DAEMON_ADDR")
+	token := os.Getenv("HUMAN_DAEMON_TOKEN")
+	if addr == "" {
+		if info, err := daemon.ReadInfo(); err == nil {
+			addr = info.Addr
+			if token == "" {
+				token = info.Token
+			}
+		}
+	}
+	return addr, token
+}
+
+// fetchLogModeCmd fetches the current log mode from the daemon.
+func fetchLogModeCmd() tea.Cmd {
+	return func() tea.Msg {
+		addr, token := daemonAddr()
+		if addr == "" {
+			return logModeMsg("full")
+		}
+		mode, err := daemon.GetLogMode(addr, token)
+		if err != nil {
+			return logModeMsg("full")
+		}
+		return logModeMsg(mode)
+	}
+}
+
+// setLogModeCmd sends a log-mode change to the daemon.
+func setLogModeCmd(mode string) tea.Cmd {
+	return func() tea.Msg {
+		addr, token := daemonAddr()
+		if addr == "" {
+			return logModeMsg(mode)
+		}
+		result, err := daemon.SetLogMode(addr, token, mode)
+		if err != nil {
+			return logModeMsg(mode) // optimistic
+		}
+		return logModeMsg(result)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
@@ -426,4 +427,47 @@ func TestRenderStatusLine(t *testing.T) {
 	if !strings.Contains(line, "Telegram") {
 		t.Errorf("expected 'Telegram' in status line, got: %s", line)
 	}
+}
+
+func TestCycleLogMode(t *testing.T) {
+	assert.Equal(t, "meta", cycleLogMode("full"))
+	assert.Equal(t, "off", cycleLogMode("meta"))
+	assert.Equal(t, "full", cycleLogMode("off"))
+	assert.Equal(t, "full", cycleLogMode(""))      // unknown defaults to full
+	assert.Equal(t, "full", cycleLogMode("bogus"))  // unknown defaults to full
+}
+
+func TestModelUpdate_LogModeKey(t *testing.T) {
+	m := testModel()
+	assert.Equal(t, "off", m.logMode)
+
+	// off → full
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	um := updated.(model)
+	assert.Equal(t, "full", um.logMode)
+	assert.NotNil(t, cmd, "expected async command to set log mode on daemon")
+
+	// full → meta
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	um = updated.(model)
+	assert.Equal(t, "meta", um.logMode)
+
+	// meta → off
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	um = updated.(model)
+	assert.Equal(t, "off", um.logMode)
+}
+
+func TestModelUpdate_LogModeMsg(t *testing.T) {
+	m := testModel()
+	updated, _ := m.Update(logModeMsg("meta"))
+	um := updated.(model)
+	assert.Equal(t, "meta", um.logMode)
+}
+
+func TestRenderFooter_ShowsLogMode(t *testing.T) {
+	footer := renderFooter(80, "meta")
+	assert.Contains(t, footer, "log:meta")
+	assert.Contains(t, footer, "l log")
+	assert.Contains(t, footer, "q quit")
 }
