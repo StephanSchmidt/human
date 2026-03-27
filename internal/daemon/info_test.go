@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"os"
 	"testing"
 
@@ -90,4 +91,23 @@ func TestDaemonInfo_IsAlive_InvalidPID(t *testing.T) {
 func TestDaemonInfo_IsAlive_ZeroPID(t *testing.T) {
 	info := DaemonInfo{PID: 0}
 	assert.False(t, info.IsAlive())
+}
+
+func TestDaemonInfo_IsReachable_ListeningServer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = ln.Close() }()
+
+	info := DaemonInfo{Addr: ln.Addr().String()}
+	assert.True(t, info.IsReachable())
+}
+
+func TestDaemonInfo_IsReachable_NoServer(t *testing.T) {
+	info := DaemonInfo{Addr: "127.0.0.1:1"}
+	assert.False(t, info.IsReachable())
+}
+
+func TestDaemonInfo_IsReachable_EmptyAddr(t *testing.T) {
+	info := DaemonInfo{}
+	assert.False(t, info.IsReachable())
 }

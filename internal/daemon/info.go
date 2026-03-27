@@ -2,10 +2,25 @@ package daemon
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/afero"
+)
+
+const (
+	// DefaultPort is the well-known daemon listening port.
+	DefaultPort = 19285
+	// DefaultChromePort is the well-known Chrome proxy port.
+	DefaultChromePort = 19286
+	// DefaultProxyPort is the well-known HTTPS proxy port.
+	DefaultProxyPort = 19287
+
+	// DockerHost is the hostname Docker provides for reaching the host machine
+	// from inside a container. Enabled by --add-host=host.docker.internal:host-gateway.
+	DockerHost = "host.docker.internal"
 )
 
 // DaemonInfo holds the runtime details of a running daemon instance.
@@ -51,6 +66,21 @@ func ReadInfo() (DaemonInfo, error) {
 		return DaemonInfo{}, err
 	}
 	return info, nil
+}
+
+// IsReachable checks whether the daemon is accepting TCP connections at its
+// advertised address. This works across process namespaces (e.g. host ↔
+// devcontainer) where PID-based checks fail.
+func (d DaemonInfo) IsReachable() bool {
+	if d.Addr == "" {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", d.Addr, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // RemoveInfo removes the daemon info file (best-effort).

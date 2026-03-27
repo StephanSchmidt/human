@@ -328,12 +328,34 @@ func subcmdFromBinary() string {
 
 // discoverDaemon auto-discovers daemon address and token from the info file,
 // and propagates chrome/proxy addresses into environment variables.
+// Falls back to probing host.docker.internal for cross-container discovery.
 func discoverDaemon(token string) (string, string) {
 	info, err := daemon.ReadInfo()
-	if err != nil || !info.IsReachable() {
-		return "", token
+	if err == nil && info.IsReachable() {
+		return applyDaemonInfo(info, token)
 	}
-	addr := info.Addr
+
+	// Fallback: probe host.docker.internal at well-known ports.
+	// This enables discovery inside Docker containers without env vars.
+	fallback := daemon.DaemonInfo{
+		Addr:       fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultPort),
+		ChromeAddr: fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultChromePort),
+		ProxyAddr:  fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultProxyPort),
+	}
+	if fallback.IsReachable() {
+		// Use token from daemon.json if available (e.g. via volume mount).
+		if err == nil && token == "" {
+			fallback.Token = info.Token
+		}
+		return applyDaemonInfo(fallback, token)
+	}
+
+	return "", token
+}
+
+// applyDaemonInfo propagates chrome/proxy addresses into environment variables
+// and returns the daemon address and token.
+func applyDaemonInfo(info daemon.DaemonInfo, token string) (string, string) {
 	if token == "" {
 		token = info.Token
 	}
@@ -347,7 +369,7 @@ func discoverDaemon(token string) (string, string) {
 			errors.LogError(err).Msg("failed to set HUMAN_PROXY_ADDR")
 		}
 	}
-	return addr, token
+	return info.Addr, token
 }
 
 func main() {
@@ -363,6 +385,14 @@ func main() {
 	// Skip forwarding for "daemon" subcommands — they must run locally.
 	addr := os.Getenv("HUMAN_DAEMON_ADDR")
 	token := os.Getenv("HUMAN_DAEMON_TOKEN")
+
+	// When addr is set via env but token isn't, read token from daemon.json
+	// (available inside devcontainers via the ~/.human volume mount).
+	if addr != "" && token == "" {
+		if info, infoErr := daemon.ReadInfo(); infoErr == nil {
+			token = info.Token
+		}
+	}
 
 	// Auto-discover from daemon info file when env vars are not set.
 	if addr == "" {
