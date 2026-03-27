@@ -9,6 +9,7 @@ import (
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
 // DevcontainerPrompter abstracts TUI interactions for the devcontainer step.
@@ -183,14 +184,17 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 	}
 
 	cfg := devcontainerConfig{
-		Name:     "human secure container",
-		Image:    "mcr.microsoft.com/devcontainers/base:ubuntu",
-		Features: features,
-		Mounts:   []string{"source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"},
-		RunArgs:  []string{"--add-host=host.docker.internal:host-gateway"},
+		Name:         "human secure container",
+		Image:        "mcr.microsoft.com/devcontainers/base:ubuntu",
+		Features:     features,
+		Mounts:       []string{"source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"},
+		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
 		RemoteEnv: map[string]string{
-			"BROWSER": "human-browser",
+			"BROWSER":           "human-browser",
+			"HUMAN_DAEMON_ADDR": fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultPort),
+			"HUMAN_CHROME_ADDR": fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultChromePort),
+			"HUMAN_PROXY_ADDR":  fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultProxyPort),
 		},
 	}
 

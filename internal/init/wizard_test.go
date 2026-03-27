@@ -639,15 +639,15 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 	assert.Contains(t, data, "ghcr.io/stephanschmidt/treehouse/human:1")
 	assert.Contains(t, data, `"BROWSER": "human-browser"`)
 	assert.Contains(t, data, ".human,target=/home/vscode/.human,type=bind")
-	assert.NotContains(t, data, "HUMAN_DAEMON_ADDR")
+	assert.Contains(t, data, `"HUMAN_DAEMON_ADDR": "host.docker.internal:19285"`)
 	assert.NotContains(t, data, "HUMAN_DAEMON_TOKEN")
-	assert.NotContains(t, data, "HUMAN_CHROME_ADDR")
+	assert.Contains(t, data, `"HUMAN_CHROME_ADDR": "host.docker.internal:19286"`)
+	assert.Contains(t, data, `"HUMAN_PROXY_ADDR": "host.docker.internal:19287"`)
 	assert.NotContains(t, data, "capAdd")
 	assert.Contains(t, data, "ghcr.io/anthropics/devcontainer-features/claude-code:1")
 	assert.Contains(t, data, "human install --agent claude")
 	assert.Contains(t, data, "human chrome-bridge")
 	assert.NotContains(t, data, "human-proxy-setup")
-	assert.NotContains(t, data, "HUMAN_PROXY_ADDR")
 }
 
 func TestDevcontainerStep_WithProxy(t *testing.T) {
