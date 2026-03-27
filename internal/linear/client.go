@@ -27,14 +27,14 @@ const listOpenIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	}
 }`
 
-const listIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTime!) {
+const listIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
 		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
-const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTime!) {
+const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
 		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
@@ -56,14 +56,14 @@ const listAllOpenIssuesQuery = `query($first: Int!) {
 	}
 }`
 
-const listAllIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTime!) {
+const listAllIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
 		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
-const listAllOpenIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTime!) {
+const listAllOpenIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
 		nodes { identifier title description updatedAt state { name } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
