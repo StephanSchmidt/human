@@ -119,6 +119,24 @@ func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
 	return []byte(resp.Stdout), nil
 }
 
+// GetLogMode fetches the current traffic log mode from the daemon.
+func GetLogMode(addr, token string) (string, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"log-mode"})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// SetLogMode sets the traffic log mode on the daemon. Returns the new mode.
+func SetLogMode(addr, token, mode string) (string, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"log-mode", mode})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // deliverCallback performs an HTTP GET to the callback URL, delivering the
 // OAuth callback to the local listener (e.g. Claude Code) from inside the
 // container where localhost is reachable.

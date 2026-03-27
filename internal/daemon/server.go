@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/browser"
+	"github.com/StephanSchmidt/human/internal/proxy"
 )
 
 // defaultBrowserOpener wraps browser.DefaultOpener for production use.
@@ -95,6 +96,12 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	s.Logger.Info().Strs("args", req.Args).Msg("handling request")
 
+	// Intercept log-mode get/set — direct in-memory, no subprocess needed.
+	if len(req.Args) >= 1 && req.Args[0] == "log-mode" {
+		s.handleLogMode(conn, req.Args[1:])
+		return
+	}
+
 	// Intercept browser commands with OAuth redirect_uri for relay.
 	if info, url := isBrowserWithRedirect(req.Args); info != nil {
 		s.Logger.Debug().Int("port", info.Port).Str("path", info.Path).Msg("OAuth redirect detected, starting relay")
@@ -137,6 +144,32 @@ func (s *Server) handleConn(conn net.Conn) {
 	if err := enc.Encode(resp); err != nil {
 		s.Logger.Warn().Err(err).Msg("failed to write response")
 	}
+}
+
+// handleLogMode handles get/set of the traffic log mode in-memory.
+// No args → return current mode. One arg → set and return new mode.
+func (s *Server) handleLogMode(conn net.Conn, args []string) {
+	if len(args) == 0 {
+		// Get current mode.
+		mode := proxy.GetLogMode()
+		resp := Response{Stdout: proxy.LogModeString(mode) + "\n"}
+		enc := json.NewEncoder(conn)
+		_ = enc.Encode(resp)
+		return
+	}
+
+	mode, err := proxy.ParseLogMode(args[0])
+	if err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+
+	proxy.SetLogMode(mode)
+	s.Logger.Info().Str("mode", proxy.LogModeString(mode)).Msg("traffic log mode changed")
+
+	resp := Response{Stdout: proxy.LogModeString(mode) + "\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
 }
 
 func (s *Server) writeError(conn net.Conn, msg string, code int) {
