@@ -17,6 +17,7 @@ type DevcontainerPrompter interface {
 	ConfirmDevcontainer() (bool, error)
 	ConfirmOverwriteDevcontainer() (bool, error)
 	ConfirmProxy() (bool, error)
+	ConfirmIntercept() (bool, error)
 	SelectStacks(available []StackType) ([]StackType, error)
 }
 
@@ -59,12 +60,20 @@ func (s *devcontainerStep) Run(w io.Writer, fw claude.FileWriter) ([]string, err
 		return nil, errors.WrapWithDetails(err, "confirming proxy setup")
 	}
 
+	var intercept bool
+	if proxy {
+		intercept, err = s.prompter.ConfirmIntercept()
+		if err != nil {
+			return nil, errors.WrapWithDetails(err, "confirming traffic intercept")
+		}
+	}
+
 	stacks, err := s.prompter.SelectStacks(StackRegistry())
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "selecting language stacks")
 	}
 
-	cfg := buildDevcontainerConfig(proxy, stacks)
+	cfg := buildDevcontainerConfig(proxy, intercept, stacks)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -165,7 +174,7 @@ func checkDevcontainerPrereqs() []string {
 	return hints
 }
 
-func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig {
+func buildDevcontainerConfig(proxy, intercept bool, stacks []StackType) devcontainerConfig {
 	featureOpts := map[string]interface{}{}
 	if proxy {
 		featureOpts["proxy"] = true
@@ -199,11 +208,15 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 		},
 	}
 
-	if proxy {
+	switch {
+	case proxy && intercept:
 		cfg.CapAdd = []string{"NET_ADMIN"}
 		cfg.RemoteEnv["NODE_EXTRA_CA_CERTS"] = "/home/vscode/.human/ca.crt"
 		cfg.PostStartCommand = "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 && sudo -E human-proxy-setup && sudo cp /home/vscode/.human/ca.crt /usr/local/share/ca-certificates/human-proxy.crt && sudo update-ca-certificates && human install --agent claude && human chrome-bridge"
-	} else {
+	case proxy:
+		cfg.CapAdd = []string{"NET_ADMIN"}
+		cfg.PostStartCommand = "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 && sudo -E human-proxy-setup && human install --agent claude && human chrome-bridge"
+	default:
 		cfg.PostStartCommand = "human install --agent claude && human chrome-bridge"
 	}
 

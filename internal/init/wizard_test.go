@@ -34,6 +34,8 @@ type mockPrompter struct {
 	confirmOverwriteDevErr  error
 	confirmProxy            bool
 	confirmProxyErr         error
+	confirmIntercept        bool
+	confirmInterceptErr     error
 	selectedStacks          []StackType
 	selectStacksErr         error
 	confirmLspSetup         bool
@@ -80,6 +82,10 @@ func (m *mockPrompter) ConfirmOverwriteDevcontainer() (bool, error) {
 
 func (m *mockPrompter) ConfirmProxy() (bool, error) {
 	return m.confirmProxy, m.confirmProxyErr
+}
+
+func (m *mockPrompter) ConfirmIntercept() (bool, error) {
+	return m.confirmIntercept, m.confirmInterceptErr
 }
 
 func (m *mockPrompter) SelectStacks(_ []StackType) ([]StackType, error) {
@@ -677,6 +683,36 @@ func TestDevcontainerStep_WithProxy(t *testing.T) {
 	assert.Contains(t, data, "human chrome-bridge")
 	assert.Contains(t, data, `"proxy": true`)
 	assert.Contains(t, data, `"BROWSER": "human-browser"`)
+	assert.NotContains(t, data, "NODE_EXTRA_CA_CERTS")
+	assert.NotContains(t, data, "update-ca-certificates")
+}
+
+func TestDevcontainerStep_WithProxyAndIntercept(t *testing.T) {
+	tmpDir := t.TempDir()
+	origDir, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	require.NoError(t, os.Chdir(tmpDir))
+
+	prompter := &mockPrompter{
+		confirmDevcontainer: true,
+		confirmProxy:        true,
+		confirmIntercept:    true,
+	}
+	step := NewDevcontainerStep(prompter)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	_, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+
+	data := string(fw.files[".devcontainer/devcontainer.json"])
+	assert.Contains(t, data, `"capAdd"`)
+	assert.Contains(t, data, "NET_ADMIN")
+	assert.Contains(t, data, "sudo -E human-proxy-setup")
+	assert.Contains(t, data, "NODE_EXTRA_CA_CERTS")
+	assert.Contains(t, data, "update-ca-certificates")
+	assert.Contains(t, data, "human install --agent claude")
 }
 
 func TestDevcontainerStep_OverwriteDeclined_InjectsFeature(t *testing.T) {

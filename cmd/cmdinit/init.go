@@ -221,6 +221,18 @@ func (h huhPrompter) ConfirmProxy() (bool, error) {
 	return proxy, err
 }
 
+func (h huhPrompter) ConfirmIntercept() (bool, error) {
+	intercept := false
+	err := huh.NewConfirm().
+		Title("Enable traffic logging (MITM)?").
+		Description("Intercept and log API traffic (e.g. Claude Code ↔ Anthropic). Requires CA cert trust.").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&intercept).
+		Run()
+	return intercept, err
+}
+
 func (h huhPrompter) ConfirmLspSetup() (bool, error) {
 	setup := true
 	err := huh.NewConfirm().
