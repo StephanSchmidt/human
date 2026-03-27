@@ -25,6 +25,9 @@ func BuildPingCmd() *cobra.Command {
 			if !cmd.Flags().Changed("addr") {
 				if info, err := daemon.ReadInfo(); err == nil && info.Addr != "" {
 					addr = info.Addr
+				} else {
+					// Fallback: try host.docker.internal (inside containers).
+					addr = fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultPort)
 				}
 			}
 
