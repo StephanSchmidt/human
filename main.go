@@ -17,12 +17,13 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdfigma"
 	"github.com/StephanSchmidt/human/cmd/cmdindex"
 	"github.com/StephanSchmidt/human/cmd/cmdinit"
-	"github.com/StephanSchmidt/human/cmd/cmdtui"
 	"github.com/StephanSchmidt/human/cmd/cmdnotion"
+	"github.com/StephanSchmidt/human/cmd/cmdping"
 	"github.com/StephanSchmidt/human/cmd/cmdprovider"
 	"github.com/StephanSchmidt/human/cmd/cmdslack"
 	"github.com/StephanSchmidt/human/cmd/cmdtelegram"
 	"github.com/StephanSchmidt/human/cmd/cmdtracker"
+	"github.com/StephanSchmidt/human/cmd/cmdtui"
 	"github.com/StephanSchmidt/human/cmd/cmdusage"
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
@@ -257,6 +258,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	tuiCmd.GroupID = "utility"
 	rootCmd.AddCommand(tuiCmd)
 
+	pingCmd := cmdping.BuildPingCmd()
+	pingCmd.GroupID = "utility"
+	rootCmd.AddCommand(pingCmd)
+
 	return rootCmd
 }
 
@@ -301,7 +306,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui"
+		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui" || a == "ping"
 	}
 	return false
 }
@@ -325,7 +330,7 @@ func subcmdFromBinary() string {
 // and propagates chrome/proxy addresses into environment variables.
 func discoverDaemon(token string) (string, string) {
 	info, err := daemon.ReadInfo()
-	if err != nil || !info.IsAlive() {
+	if err != nil || !info.IsReachable() {
 		return "", token
 	}
 	addr := info.Addr
