@@ -5,6 +5,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -102,7 +104,7 @@ func TestSync_prunesStaleEntries(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Pre-populate a stale entry.
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "old")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "old"))
 
 	provider := &mockProvider{
 		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
@@ -242,7 +244,7 @@ func TestSync_incrementalPassesUpdatedSince(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Pre-populate an entry so LastIndexedAt returns non-zero.
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Old"}, "old desc")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Old"}, "old desc"))
 
 	var capturedOpts tracker.ListOptions
 	provider := &mockProvider{
@@ -323,8 +325,8 @@ func TestSync_fullFlagForcesPruning(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Pre-populate entries.
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "stale")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "stale"))
 
 	provider := &mockProvider{
 		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
@@ -355,8 +357,8 @@ func TestSync_incrementalSkipsPruning(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Pre-populate entries including a "stale" one.
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "stale")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-99", Source: "work", Kind: "jira"}, "stale"))
 
 	provider := &mockProvider{
 		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {

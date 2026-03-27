@@ -5,6 +5,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/StephanSchmidt/human/internal/notion"
 )
 
@@ -120,7 +122,7 @@ func TestSyncNotion_prunesStaleEntries(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Pre-populate a stale entry.
-	_ = s.UpsertEntry(ctx, Entry{Key: "stale-page", Source: "workspace", Kind: "notion"}, "old content")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "stale-page", Source: "workspace", Kind: "notion"}, "old content"))
 
 	client := &mockNotionClient{
 		searchFn: func(_ context.Context, _ string) ([]notion.SearchResult, error) {

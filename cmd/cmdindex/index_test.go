@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/StephanSchmidt/human/internal/index"
 	"github.com/StephanSchmidt/human/internal/notion"
 	"github.com/StephanSchmidt/human/internal/tracker"
@@ -39,14 +41,14 @@ func testDeps(t *testing.T) (IndexDeps, *index.SQLiteStore) {
 func seedStore(t *testing.T, store *index.SQLiteStore) {
 	t.Helper()
 	ctx := context.Background()
-	_ = store.UpsertEntry(ctx, index.Entry{
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "KAN-42", Source: "work", Kind: "jira", Project: "KAN",
 		Title: "Implement retry logic", Status: "In Progress", Assignee: "alice",
-	}, "webhook delivery retry mechanism")
-	_ = store.UpsertEntry(ctx, index.Entry{
+	}, "webhook delivery retry mechanism"))
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "ENG-7", Source: "eng", Kind: "linear", Project: "ENG",
 		Title: "Fix login page", Status: "Open", Assignee: "bob",
-	}, "OAuth2 login flow broken on mobile")
+	}, "OAuth2 login flow broken on mobile"))
 }
 
 func TestRunSearch_agentOutput(t *testing.T) {
@@ -336,10 +338,10 @@ func TestRunIndex_skipsNotionForOtherSource(t *testing.T) {
 func TestRunSearch_notionPageOutput(t *testing.T) {
 	deps, store := testDeps(t)
 	ctx := context.Background()
-	_ = store.UpsertEntry(ctx, index.Entry{
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "abc123", Source: "workspace", Kind: "notion", Project: "workspace",
 		Title: "Auth Spec", Status: "page",
-	}, "authentication specification content")
+	}, "authentication specification content"))
 
 	var buf bytes.Buffer
 	err := RunSearch(context.Background(), &buf, "Auth Spec", 10, "", false, false, deps)
@@ -359,10 +361,10 @@ func TestRunSearch_notionPageOutput(t *testing.T) {
 func TestRunSearch_notionDatabaseOutput(t *testing.T) {
 	deps, store := testDeps(t)
 	ctx := context.Background()
-	_ = store.UpsertEntry(ctx, index.Entry{
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "db456", Source: "workspace", Kind: "notion", Project: "workspace",
 		Title: "Q1 Roadmap", Status: "database",
-	}, "Name: Auth | Status: Done")
+	}, "Name: Auth | Status: Done"))
 
 	var buf bytes.Buffer
 	err := RunSearch(context.Background(), &buf, "Roadmap", 10, "", false, false, deps)
@@ -382,14 +384,14 @@ func TestRunSearch_notionDatabaseOutput(t *testing.T) {
 func TestRunSearch_sourceFilter(t *testing.T) {
 	deps, store := testDeps(t)
 	ctx := context.Background()
-	_ = store.UpsertEntry(ctx, index.Entry{
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN",
 		Title: "Jira issue about auth", Status: "Open",
-	}, "auth flow")
-	_ = store.UpsertEntry(ctx, index.Entry{
+	}, "auth flow"))
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "page-1", Source: "workspace", Kind: "notion", Project: "workspace",
 		Title: "Notion auth spec", Status: "page",
-	}, "auth specification")
+	}, "auth specification"))
 
 	var buf bytes.Buffer
 	err := RunSearch(context.Background(), &buf, "auth", 10, "notion", false, false, deps)
@@ -409,14 +411,14 @@ func TestRunSearch_sourceFilter(t *testing.T) {
 func TestRunSearch_mixedResults(t *testing.T) {
 	deps, store := testDeps(t)
 	ctx := context.Background()
-	_ = store.UpsertEntry(ctx, index.Entry{
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN",
 		Title: "Jira auth issue", Status: "Open",
-	}, "auth")
-	_ = store.UpsertEntry(ctx, index.Entry{
+	}, "auth"))
+	require.NoError(t, store.UpsertEntry(ctx, index.Entry{
 		Key: "page-1", Source: "workspace", Kind: "notion", Project: "workspace",
 		Title: "Notion auth spec", Status: "page",
-	}, "auth specification")
+	}, "auth specification"))
 
 	var buf bytes.Buffer
 	err := RunSearch(context.Background(), &buf, "auth", 10, "", false, false, deps)

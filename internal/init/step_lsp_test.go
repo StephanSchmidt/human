@@ -10,6 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// findPlugin looks up a plugin by binary name in the registry.
+func findPlugin(t *testing.T, binary string) LspPlugin {
+	t.Helper()
+	for _, p := range LspRegistry() {
+		if p.Binary == binary {
+			return p
+		}
+	}
+	t.Fatalf("plugin with binary %q not found in LspRegistry", binary)
+	return LspPlugin{}
+}
+
 func TestLspSetupStep_Name(t *testing.T) {
 	step := NewLspSetupStep(&mockPrompter{}, newTestInstaller())
 	assert.Equal(t, "lsp-setup", step.Name())
@@ -141,7 +153,7 @@ func TestLspSetupStep_AutoInstallFailure(t *testing.T) {
 }
 
 func TestLspSetupStep_ManualOnly(t *testing.T) {
-	jdtls := LspRegistry()[3] // jdtls has empty InstallCmd
+	jdtls := findPlugin(t, "jdtls") // jdtls has empty InstallCmd
 	prompter := &mockPrompter{
 		confirmLspSetup: true,
 		selectedLsps:    []LspPlugin{jdtls},
@@ -225,10 +237,9 @@ func TestLspSetupStep_MarketplaceErrorContinues(t *testing.T) {
 }
 
 func TestLspSetupStep_MultiplePlugins(t *testing.T) {
-	reg := LspRegistry()
-	gopls := reg[0] // has InstallCmd, binary not installed
-	jdtls := reg[3] // manual only
-	vtsls := reg[7] // has InstallCmd, binary already installed
+	gopls := findPlugin(t, "gopls")  // has InstallCmd, binary not installed
+	jdtls := findPlugin(t, "jdtls")  // manual only
+	vtsls := findPlugin(t, "vtsls")  // has InstallCmd, binary already installed
 
 	prompter := &mockPrompter{
 		confirmLspSetup: true,

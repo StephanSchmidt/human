@@ -3,6 +3,8 @@ package index
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func newTestStore(t *testing.T) *SQLiteStore {
@@ -68,8 +70,8 @@ func TestSearch_matchesTitle(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some desc")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Fix login page"}, "some desc")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some desc"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Fix login page"}, "some desc"))
 
 	results, err := s.Search(ctx, "retry", 10)
 	if err != nil {
@@ -84,7 +86,7 @@ func TestSearch_matchesDescription(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Generic title"}, "webhook delivery retry mechanism")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Generic title"}, "webhook delivery retry mechanism"))
 
 	results, err := s.Search(ctx, "webhook", 10)
 	if err != nil {
@@ -99,7 +101,7 @@ func TestSearch_matchesKey(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-42", Source: "work", Kind: "jira", Title: "Some issue"}, "desc")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-42", Source: "work", Kind: "jira", Title: "Some issue"}, "desc"))
 
 	results, err := s.Search(ctx, "KAN-42", 10)
 	if err != nil {
@@ -114,7 +116,7 @@ func TestSearch_noResults(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Fix bug"}, "desc")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Fix bug"}, "desc"))
 
 	results, err := s.Search(ctx, "nonexistent", 10)
 	if err != nil {
@@ -131,7 +133,7 @@ func TestSearch_limit(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		key := "KAN-" + string(rune('1'+i))
-		_ = s.UpsertEntry(ctx, Entry{Key: key, Source: "work", Kind: "jira", Title: "retry issue"}, "desc")
+		require.NoError(t, s.UpsertEntry(ctx, Entry{Key: key, Source: "work", Kind: "jira", Title: "retry issue"}, "desc"))
 	}
 
 	results, err := s.Search(ctx, "retry", 2)
@@ -148,8 +150,8 @@ func TestSearch_ranking(t *testing.T) {
 	ctx := context.Background()
 
 	// Title match should rank higher than description-only match.
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Unrelated title"}, "retry logic in the background")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some description")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "Unrelated title"}, "retry logic in the background"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira", Title: "Implement retry logic"}, "some description"))
 
 	results, err := s.Search(ctx, "retry", 10)
 	if err != nil {
@@ -167,7 +169,7 @@ func TestDeleteEntry_removes(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "To delete"}, "desc")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "To delete"}, "desc"))
 
 	if err := s.DeleteEntry(ctx, "KAN-1", "work"); err != nil {
 		t.Fatalf("DeleteEntry: %v", err)
@@ -212,9 +214,9 @@ func TestStats_populated(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d"))
 
 	st, err := s.Stats(ctx)
 	if err != nil {
@@ -254,8 +256,8 @@ func TestLastIndexedAt_populated(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d"))
 
 	ts, err := s.LastIndexedAt(ctx, "work")
 	if err != nil {
@@ -288,9 +290,9 @@ func TestAllKeys_bySource(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d")
-	_ = s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d")
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "ENG-1", Source: "eng", Kind: "linear"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-2", Source: "work", Kind: "jira"}, "d"))
 
 	keys, err := s.AllKeys(ctx, "work")
 	if err != nil {

@@ -137,8 +137,7 @@ func TestRunRemote_DaemonClosesImmediately(t *testing.T) {
 	// Depending on timing, the error may be a clean EOF or a connection reset.
 	errMsg := err.Error()
 	assert.True(t,
-		strings.Contains(errMsg, "daemon closed connection without response") ||
-			strings.Contains(errMsg, "failed to read response") ||
+		strings.Contains(errMsg, "failed to read response") ||
 			strings.Contains(errMsg, "failed to send request"),
 		"unexpected error: %s", errMsg,
 	)

@@ -276,7 +276,7 @@ func TestInstall_PersonalMode(t *testing.T) {
 	// Verify files are written under the home directory, not ".claude"
 	for path := range fw.files {
 		assert.Contains(t, path, ".claude")
-		assert.NotEqual(t, ".claude", path[:6], "personal mode should use absolute home path")
+		assert.True(t, filepath.IsAbs(path), "personal mode should use absolute home path, got: %s", path)
 	}
 
 	// Verify hooks were installed in personal mode.
