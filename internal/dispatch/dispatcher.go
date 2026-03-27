@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -170,6 +171,30 @@ func (d *Dispatcher) dispatchMessages(ctx context.Context) {
 
 	if dispatched > 0 {
 		d.Logger.Info().Int("dispatched", dispatched).Int("remaining", len(d.queue)).Msg("dispatch cycle complete")
+	}
+
+	d.pruneSeen()
+}
+
+// maxSeenSize is the maximum number of update IDs to retain for deduplication.
+// Telegram update IDs are monotonically increasing, so we evict the lowest
+// IDs when the map exceeds this size.
+const maxSeenSize = 1000
+
+// pruneSeen evicts the oldest entries from the seen map when it exceeds maxSeenSize.
+func (d *Dispatcher) pruneSeen() {
+	if len(d.seen) <= maxSeenSize {
+		return
+	}
+	ids := make([]int, 0, len(d.seen))
+	for id := range d.seen {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	// Keep only the most recent maxSeenSize/2 entries.
+	keep := maxSeenSize / 2
+	for _, id := range ids[:len(ids)-keep] {
+		delete(d.seen, id)
 	}
 }
 

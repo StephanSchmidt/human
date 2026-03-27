@@ -357,3 +357,33 @@ func TestDispatcher_AckError(t *testing.T) {
 	require.Len(t, sender.calls, 1)
 	assert.Empty(t, d.queue)
 }
+
+func TestDispatcher_SeenMapPruning(t *testing.T) {
+	// Fill the seen map beyond maxSeenSize to trigger pruning.
+	source := &mockSource{}
+	finder := &mockFinder{agents: []Agent{{Label: "claude:0.0"}}}
+	sender := &mockSender{}
+	notifier := &mockNotifier{}
+
+	d := newTestDispatcher(source, finder, sender, notifier)
+	d.seen = make(map[int]bool)
+
+	// Pre-fill seen with maxSeenSize+100 entries.
+	for i := 0; i < maxSeenSize+100; i++ {
+		d.seen[i] = true
+	}
+
+	// Add one queued message so dispatchMessages runs and triggers pruneSeen.
+	d.queue = []QueuedMessage{{UpdateID: maxSeenSize + 200, ChatID: 42, Text: "task"}}
+	d.seen[maxSeenSize+200] = true
+
+	d.dispatchMessages(context.Background())
+
+	require.Len(t, sender.calls, 1)
+	// After pruning, seen should be bounded to maxSeenSize/2.
+	assert.LessOrEqual(t, len(d.seen), maxSeenSize, "seen map should be pruned")
+	// The most recent IDs should still be present.
+	assert.True(t, d.seen[maxSeenSize+99], "recent IDs should survive pruning")
+	// The oldest IDs should be evicted.
+	assert.False(t, d.seen[0], "oldest IDs should be pruned")
+}
