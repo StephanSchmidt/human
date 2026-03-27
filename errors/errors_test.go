@@ -16,8 +16,11 @@ func Test_isFormatVerb(t *testing.T) {
 		{"d is a verb", 'd', true},
 		{"s is a verb", 's', true},
 		{"v is a verb", 'v', true},
-		{"w is not a verb", 'w', false},
-		{"f is not a verb", 'f', false},
+		{"w is a verb", 'w', true},
+		{"f is a verb", 'f', true},
+		{"q is a verb", 'q', true},
+		{"x is a verb", 'x', true},
+		{"t is a verb", 't', true},
 		{"percent is not a verb", '%', false},
 	}
 	for _, tt := range tests {
@@ -65,7 +68,7 @@ func Test_extractArgs(t *testing.T) {
 			want:    []any{"get", 404, "not found"},
 		},
 		{
-			name:    "percent-w is not counted",
+			name:    "percent-w is counted",
 			message: "wrapping %w with %s",
 			details: []any{"key", "val"},
 			want:    []any{"val"},

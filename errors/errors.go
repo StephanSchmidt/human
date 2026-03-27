@@ -31,7 +31,11 @@ func AllDetails(err error) map[string]interface{} {
 }
 
 func isFormatVerb(c byte) bool {
-	return c == 'd' || c == 's' || c == 'v'
+	switch c {
+	case 'b', 'c', 'd', 'e', 'E', 'f', 'F', 'g', 'G', 'o', 'O', 'p', 'q', 's', 't', 'T', 'U', 'v', 'w', 'x', 'X':
+		return true
+	}
+	return false
 }
 
 func extractArgs(message string, details []interface{}) []interface{} {
