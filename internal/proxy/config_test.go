@@ -65,3 +65,39 @@ func TestLoadConfig_missingFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, cfg)
 }
+
+func TestLoadConfig_withIntercept(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `proxy:
+  mode: allowlist
+  domains:
+    - "*.anthropic.com"
+  intercept:
+    - "api.anthropic.com"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(yaml), 0o644))
+
+	cfg, err := LoadConfig(dir)
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	assert.Equal(t, ModeAllow, cfg.Mode)
+	assert.Equal(t, []string{"*.anthropic.com"}, cfg.Domains)
+	assert.Equal(t, []string{"api.anthropic.com"}, cfg.Intercept)
+}
+
+func TestLoadConfig_interceptWithoutDomains(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `proxy:
+  mode: allowlist
+  intercept:
+    - "api.anthropic.com"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(yaml), 0o644))
+
+	cfg, err := LoadConfig(dir)
+
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+	assert.Equal(t, []string{"api.anthropic.com"}, cfg.Intercept)
+}

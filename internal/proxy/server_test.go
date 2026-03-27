@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"io"
 	"net"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,6 +266,72 @@ func TestServer_ActiveConns(t *testing.T) {
 	_ = conn.Close()
 	time.Sleep(100 * time.Millisecond)
 	assert.Equal(t, int64(0), srv.ActiveConns())
+}
+
+func TestServer_interceptedConnectionMITM(t *testing.T) {
+	// Verify the proxy routes intercepted domains through the MITM interceptor.
+	env := newInterceptTestEnv(t)
+	hostname := "intercept.example.com"
+
+	policy, err := NewPolicy(ModeAllow, []string{hostname, "passthrough.example.com"})
+	require.NoError(t, err)
+
+	upstreamLn := startUpstreamTLS(t, env, hostname, handleEchoHTTPS)
+
+	li := &LoggingInterceptor{
+		Domains:   []string{hostname},
+		LeafCache: env.LeafCache,
+		Logger:    zerolog.Nop(),
+		LogDir:    env.LogDir,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // test only
+			})
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv := &Server{
+		Addr:        "127.0.0.1:0",
+		Policy:      policy,
+		Interceptor: li,
+		Logger:      zerolog.Nop(),
+	}
+
+	proxyLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = proxyLn.Addr().String()
+	_ = proxyLn.Close()
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	// Connect via real TLS through the proxy.
+	conn, err := tls.Dial("tcp", srv.Addr, &tls.Config{
+		ServerName: hostname,
+		RootCAs:    env.CAPool,
+	})
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	// Send HTTP request through MITM'd connection.
+	reqBody := `{"test":"data"}`
+	req, reqErr := http.NewRequest(http.MethodPost, "http://"+hostname+"/v1/messages", strings.NewReader(reqBody))
+	require.NoError(t, reqErr)
+	req.Header.Set("Connection", "close")
+	require.NoError(t, req.Write(conn))
+
+	resp, respErr := http.ReadResponse(bufio.NewReader(conn), req)
+	require.NoError(t, respErr)
+	defer func() { _ = resp.Body.Close() }()
+
+	body, readErr := io.ReadAll(resp.Body)
+	require.NoError(t, readErr)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, reqBody, string(body))
 }
 
 func TestServer_realTLSClientHello(t *testing.T) {

@@ -12,11 +12,13 @@ import (
 )
 
 // Server is a transparent HTTPS proxy that reads the SNI from TLS ClientHello
-// to block/allow domains without decrypting traffic.
+// to block/allow domains without decrypting traffic. Domains listed in the
+// Interceptor are MITM'd for traffic inspection/logging.
 type Server struct {
-	Addr   string
-	Policy Decider
-	Logger zerolog.Logger
+	Addr        string
+	Policy      Decider
+	Interceptor Interceptor // optional: MITM interceptor for specific domains
+	Logger      zerolog.Logger
 	// Dialer connects to upstream servers. Injected for testing.
 	Dialer func(ctx context.Context, network, address string) (net.Conn, error)
 
@@ -79,6 +81,18 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	if !s.Policy.Allowed(serverName) {
 		s.Logger.Info().Str("host", serverName).Msg("blocked by policy")
+		return
+	}
+
+	// Check if this domain should be intercepted (MITM for logging/inspection).
+	if s.Interceptor != nil && s.Interceptor.ShouldIntercept(serverName) {
+		s.activeConns.Add(1)
+		defer s.activeConns.Add(-1)
+
+		s.Logger.Info().Str("host", serverName).Msg("intercepting (MITM)")
+		if interceptErr := s.Interceptor.Intercept(ctx, conn, serverName, peeked); interceptErr != nil {
+			s.Logger.Warn().Err(interceptErr).Str("host", serverName).Msg("intercept failed")
+		}
 		return
 	}
 

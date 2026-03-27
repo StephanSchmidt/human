@@ -6,8 +6,9 @@ import (
 
 // Config holds the proxy section of .humanconfig.yaml.
 type Config struct {
-	Mode    Mode     `mapstructure:"mode"`
-	Domains []string `mapstructure:"domains"`
+	Mode      Mode     `mapstructure:"mode"`
+	Domains   []string `mapstructure:"domains"`
+	Intercept []string `mapstructure:"intercept"` // domains to MITM for traffic logging
 }
 
 // LoadConfig reads the proxy configuration from .humanconfig.yaml in dir.
