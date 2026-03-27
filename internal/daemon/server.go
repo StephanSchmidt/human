@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -30,6 +31,8 @@ type Server struct {
 	Opener        BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
+
+	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
@@ -105,8 +108,13 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	// Apply client environment variables (e.g. NO_COLOR, TERM, COLUMNS)
 	// for the duration of this request, then restore the originals.
+	// Mutex ensures concurrent requests don't corrupt each other's env.
+	s.envMu.Lock()
 	origEnv := applyEnv(req.Env)
-	defer restoreEnv(origEnv)
+	defer func() {
+		restoreEnv(origEnv)
+		s.envMu.Unlock()
+	}()
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd := s.CmdFactory()
