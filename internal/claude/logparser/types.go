@@ -37,10 +37,10 @@ func (OSFileReader) ReadFrom(path string, offset int64) ([]byte, int64, error) {
 
 // Subagent represents a spawned Agent tool_use and its lifecycle.
 type Subagent struct {
-	ToolUseID    string     // tool_use id (e.g. "toolu_01AaZ...") for completion tracking
-	Description  string     // from input.description
-	SubagentType string     // "Explore", "Plan", etc.
-	AgentID      string     // from toolUseResult.agentId on completion
+	ToolUseID    string // tool_use id (e.g. "toolu_01AaZ...") for completion tracking
+	Description  string // from input.description
+	SubagentType string // "Explore", "Plan", etc.
+	AgentID      string // from toolUseResult.agentId on completion
 	StartedAt    time.Time
 	CompletedAt  *time.Time // nil = still running
 	DurationMs   int64      // from toolUseResult.totalDurationMs (0 if still running)

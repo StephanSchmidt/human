@@ -27,7 +27,7 @@ type Server struct {
 	Token         string
 	SafeMode      bool
 	CmdFactory    func() *cobra.Command
-	Opener        BrowserOpener    // used for OAuth relay; defaults to browser.DefaultOpener
+	Opener        BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 }

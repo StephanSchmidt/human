@@ -152,7 +152,6 @@ func probeInstances(ctx context.Context, key string, instances []Instance) (*Fin
 	return nil, errors.WithDetails("no configured tracker recognized the key", "key", key)
 }
 
-
 // DetectKind returns the tracker kind that can be unambiguously inferred from
 // the key format. Currently only "github" is detectable (owner/repo#N or
 // owner/repo). Returns "" when the kind cannot be determined.

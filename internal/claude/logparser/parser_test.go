@@ -82,10 +82,10 @@ func makeToolResultEntry(t *testing.T, sessionID, timestamp, toolUseID string, t
 func makeProgressEntry(t *testing.T, sessionID, timestamp, parentToolUseID, agentID string) []byte {
 	t.Helper()
 	return marshalLine(t, map[string]interface{}{
-		"type":             "progress",
-		"sessionId":        sessionID,
-		"timestamp":        timestamp,
-		"parentToolUseID":  parentToolUseID,
+		"type":            "progress",
+		"sessionId":       sessionID,
+		"timestamp":       timestamp,
+		"parentToolUseID": parentToolUseID,
 		"data": map[string]interface{}{
 			"type":    "agent_progress",
 			"agentId": agentID,
@@ -165,9 +165,9 @@ func TestFileParser_SubagentLifecycle(t *testing.T) {
 			"id":   "toolu_agent1",
 			"name": "Agent",
 			"input": map[string]interface{}{
-				"description":  "Research codebase",
+				"description":   "Research codebase",
 				"subagent_type": "Explore",
-				"prompt":       "Find all Go files",
+				"prompt":        "Find all Go files",
 			},
 		},
 	})

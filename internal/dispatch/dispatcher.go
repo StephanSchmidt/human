@@ -62,11 +62,11 @@ type Config struct {
 // Dispatcher polls Telegram and dispatches messages to idle Claude agents.
 type Dispatcher struct {
 	Source   MessageSource
-	Finder  AgentFinder
-	Sender  AgentSender
+	Finder   AgentFinder
+	Sender   AgentSender
 	Notifier Notifier
-	Config  Config
-	Logger  zerolog.Logger
+	Config   Config
+	Logger   zerolog.Logger
 
 	mu    sync.Mutex
 	queue []QueuedMessage

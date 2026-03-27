@@ -8,13 +8,13 @@ import (
 // Entry holds the metadata for a single indexed issue.
 type Entry struct {
 	Key       string    `json:"key"`
-	Source    string    `json:"source"`     // instance name
-	Kind      string    `json:"kind"`       // "jira", "github", etc.
+	Source    string    `json:"source"` // instance name
+	Kind      string    `json:"kind"`   // "jira", "github", etc.
 	Project   string    `json:"project"`
 	Title     string    `json:"title"`
 	Status    string    `json:"status"`
 	Assignee  string    `json:"assignee"`
-	URL       string    `json:"url"`        // instance base URL
+	URL       string    `json:"url"` // instance base URL
 	IndexedAt time.Time `json:"indexed_at"`
 }
 

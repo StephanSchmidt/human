@@ -88,12 +88,12 @@ func (p *FileParser) parseBytes(data []byte) int {
 
 // jsonlEntry is the minimal structure for parsing JSONL lines.
 type jsonlEntry struct {
-	Type          string `json:"type"`
-	Timestamp     string `json:"timestamp"`
-	SessionID     string `json:"sessionId"`
-	Cwd           string `json:"cwd"`
-	Slug          string `json:"slug"`
-	Message       *struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd"`
+	Slug      string `json:"slug"`
+	Message   *struct {
 		StopReason *string `json:"stop_reason"`
 		Content    []struct {
 			Type      string          `json:"type"`
@@ -103,8 +103,8 @@ type jsonlEntry struct {
 			Input     json.RawMessage `json:"input,omitempty"`
 		} `json:"content"`
 	} `json:"message,omitempty"`
-	ToolUseResult   json.RawMessage `json:"toolUseResult,omitempty"`
-	Data            *struct {
+	ToolUseResult json.RawMessage `json:"toolUseResult,omitempty"`
+	Data          *struct {
 		Type    string `json:"type"`
 		AgentID string `json:"agentId,omitempty"`
 	} `json:"data,omitempty"`

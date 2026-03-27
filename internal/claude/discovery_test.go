@@ -408,9 +408,9 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 			{ID: "abc123def456", Name: "dev-myapp"},
 		},
 		execResults: map[string]mockExecResult{
-			"abc123def456|pgrep":   {exitCode: 0, data: []byte("1\n")},
-			"abc123def456|sh":      {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"abc123def456|cat":     {exitCode: 0, data: jsonlData},
+			"abc123def456|pgrep":    {exitCode: 0, data: []byte("1\n")},
+			"abc123def456|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"abc123def456|cat":      {exitCode: 0, data: jsonlData},
 			"abc123def456|printenv": {exitCode: 0, data: []byte("192.168.1.5:19287\n")},
 		},
 		statsResults: map[string]mockStatsResult{
@@ -464,7 +464,7 @@ func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
 	})
 	// Streaming assistant — null stop_reason means actively generating.
 	newSession, _ := json.Marshal(map[string]interface{}{
-		"type": "assistant",
+		"type":    "assistant",
 		"message": map[string]interface{}{},
 	})
 
@@ -553,9 +553,9 @@ func TestDockerFinder_ProxyNotConfigured(t *testing.T) {
 			{ID: "noproxy123456", Name: "no-proxy"},
 		},
 		execResults: map[string]mockExecResult{
-			"noproxy123456|pgrep":   {exitCode: 0, data: []byte("1\n")},
-			"noproxy123456|sh":      {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"noproxy123456|cat":     {exitCode: 0, data: jsonlData},
+			"noproxy123456|pgrep":    {exitCode: 0, data: []byte("1\n")},
+			"noproxy123456|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"noproxy123456|cat":      {exitCode: 0, data: jsonlData},
 			"noproxy123456|printenv": {exitCode: 1, data: nil},
 		},
 	}

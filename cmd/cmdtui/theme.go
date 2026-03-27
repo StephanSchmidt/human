@@ -21,15 +21,15 @@ var modelColors = map[string]string{
 
 // Styles used across the TUI.
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
-	subtleStyle   = lipgloss.NewStyle().Foreground(humanPurple)
+	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
+	subtleStyle       = lipgloss.NewStyle().Foreground(humanPurple)
 	busyInstanceStyle = lipgloss.NewStyle().Bold(true).Foreground(humanPink)
 	idleInstanceStyle = lipgloss.NewStyle().Bold(true).Foreground(humanTeal)
-	slugStyle     = lipgloss.NewStyle().Foreground(humanPurple).Italic(true)
-	accentStyle   = lipgloss.NewStyle().Foreground(humanRed)
-	specialStyle  = lipgloss.NewStyle().Foreground(humanTeal)
-	errorStyle    = lipgloss.NewStyle().Foreground(humanPink)
-	ruleStyle     = lipgloss.NewStyle().Foreground(humanPurple)
+	slugStyle         = lipgloss.NewStyle().Foreground(humanPurple).Italic(true)
+	accentStyle       = lipgloss.NewStyle().Foreground(humanRed)
+	specialStyle      = lipgloss.NewStyle().Foreground(humanTeal)
+	errorStyle        = lipgloss.NewStyle().Foreground(humanPink)
+	ruleStyle         = lipgloss.NewStyle().Foreground(humanPurple)
 )
 
 func modelColor(name string) string {
