@@ -11,6 +11,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 type stubFinder struct {
@@ -345,6 +346,71 @@ func TestFormatTokens(t *testing.T) {
 		if got := formatTokens(tt.n); got != tt.want {
 			t.Errorf("formatTokens(%d) = %q, want %q", tt.n, got, tt.want)
 		}
+	}
+}
+
+func TestRenderTrackers_onlyWorking(t *testing.T) {
+	trackers := []tracker.TrackerStatus{
+		{Name: "work", Kind: "linear", Label: "Linear", Working: true},
+		{Name: "amazingcto", Kind: "jira", Label: "Jira", Working: false, Missing: []string{"JIRA_KEY"}},
+	}
+	out := renderTrackers(trackers, 80)
+	if !strings.Contains(out, "Trackers") {
+		t.Errorf("expected 'Trackers' label, got: %s", out)
+	}
+	if !strings.Contains(out, "Linear") {
+		t.Errorf("expected 'Linear', got: %s", out)
+	}
+	if strings.Contains(out, "Jira") {
+		t.Errorf("non-working tracker should be hidden, got: %s", out)
+	}
+}
+
+func TestRenderTrackers_empty(t *testing.T) {
+	out := renderTrackers(nil, 80)
+	if out != "" {
+		t.Errorf("expected empty output for nil trackers, got: %s", out)
+	}
+}
+
+func TestRenderTrackers_countMultiple(t *testing.T) {
+	trackers := []tracker.TrackerStatus{
+		{Name: "acme", Kind: "jira", Label: "Jira", Working: true},
+		{Name: "corp", Kind: "jira", Label: "Jira", Working: true},
+		{Name: "work", Kind: "linear", Label: "Linear", Working: true},
+	}
+	out := renderTrackers(trackers, 80)
+	if !strings.Contains(out, "Jira (2)") {
+		t.Errorf("expected 'Jira (2)', got: %s", out)
+	}
+	if strings.Contains(out, "Linear (") {
+		t.Errorf("single tracker should not have count, got: %s", out)
+	}
+}
+
+func TestRenderTrackers_allMissing(t *testing.T) {
+	trackers := []tracker.TrackerStatus{
+		{Name: "broken", Kind: "github", Label: "GitHub", Working: false, Missing: []string{"GITHUB_TOKEN"}},
+	}
+	out := renderTrackers(trackers, 80)
+	if out != "" {
+		t.Errorf("expected empty when no working trackers, got: %s", out)
+	}
+}
+
+func TestModelView_WithTrackers(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Trackers = []tracker.TrackerStatus{
+			{Name: "work", Kind: "linear", Label: "Linear", Working: true},
+		}
+	})
+	view := m.View()
+	if !strings.Contains(view, "Linear") {
+		t.Errorf("expected tracker kind label in view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Trackers") {
+		t.Errorf("expected 'Trackers' label in view, got:\n%s", view)
 	}
 }
 

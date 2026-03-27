@@ -3,6 +3,7 @@ package tracker
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -89,6 +90,111 @@ func CheckCredsEnv(spec CredSpec, getenv func(string) string) CredResult {
 	}
 
 	return result
+}
+
+// TrackerStatus describes a configured tracker entry and its credential state.
+type TrackerStatus struct {
+	Name    string   // config entry name, e.g. "work", "amazingcto"
+	Kind    string   // tracker kind, e.g. "linear", "jira"
+	Label   string   // human-readable name, e.g. "Linear", "Jira"
+	Working bool     // true when all required credentials are present
+	Missing []string // env var names for missing credentials (empty when Working)
+}
+
+// sectionToKind maps .humanconfig YAML section names to tracker kinds.
+var sectionToKind = map[string]string{
+	"jiras":       "jira",
+	"githubs":     "github",
+	"gitlabs":     "gitlab",
+	"linears":     "linear",
+	"azuredevops": "azuredevops",
+	"shortcuts":   "shortcut",
+}
+
+// SectionToKind returns the mapping of .humanconfig section names to tracker kinds.
+func SectionToKind() map[string]string {
+	return sectionToKind
+}
+
+// diagnoseEntry holds the config fields needed to check credentials.
+type diagnoseEntry struct {
+	Name   string `mapstructure:"name"`
+	Key    string `mapstructure:"key"`
+	User   string `mapstructure:"user"`
+	Token  string `mapstructure:"token"`
+	Secret string `mapstructure:"secret"` // #nosec G117 -- config field name, not an actual secret value
+}
+
+func (e diagnoseEntry) fieldValue(suffix string) string {
+	switch suffix {
+	case "KEY":
+		return e.Key
+	case "USER":
+		return e.User
+	case "TOKEN":
+		return e.Token
+	case "SECRET":
+		return e.Secret
+	default:
+		return ""
+	}
+}
+
+// DiagnoseTrackers reads all configured tracker entries and checks whether
+// their required credentials are present. unmarshal reads a YAML section,
+// getenv looks up environment variables.
+func DiagnoseTrackers(dir string, unmarshal func(dir, section string, target any) error, getenv func(string) string) []TrackerStatus {
+	var result []TrackerStatus
+	for section, kind := range sectionToKind {
+		var entries []diagnoseEntry
+		_ = unmarshal(dir, section, &entries)
+
+		spec, ok := credSpecs[kind]
+		if !ok {
+			continue
+		}
+
+		for _, entry := range entries {
+			missing := diagnoseMissing(spec, entry, getenv)
+			result = append(result, TrackerStatus{
+				Name:    entry.Name,
+				Kind:    kind,
+				Label:   spec.Label,
+				Working: len(missing) == 0,
+				Missing: missing,
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Kind != result[j].Kind {
+			return result[i].Kind < result[j].Kind
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
+// diagnoseMissing returns env var names for credentials not provided by
+// the config file, per-instance env vars, or global env vars.
+func diagnoseMissing(spec CredSpec, entry diagnoseEntry, getenv func(string) string) []string {
+	var missing []string
+	for _, suffix := range spec.Required {
+		if entry.fieldValue(suffix) != "" {
+			continue
+		}
+		if entry.Name != "" {
+			instEnv := spec.EnvPrefix + "_" + strings.ToUpper(entry.Name) + "_" + suffix
+			if getenv(instEnv) != "" {
+				continue
+			}
+		}
+		globalEnv := spec.EnvPrefix + "_" + suffix
+		if getenv(globalEnv) != "" {
+			continue
+		}
+		missing = append(missing, spec.EnvPrefix+"_"+suffix)
+	}
+	return missing
 }
 
 // FormatMissingCreds returns a user-friendly message about which env vars to set.

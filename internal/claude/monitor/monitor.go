@@ -12,10 +12,12 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // Monitor owns the data-fetching and state-reconciliation cycle for the TUI.
@@ -47,6 +49,7 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.Telegram = telegramStatus()
 	snap.Slack = slackStatus()
+	snap.Trackers = tracker.DiagnoseTrackers(".", config.UnmarshalSection, os.Getenv)
 
 	instances, err := m.finder.FindInstances(ctx)
 	if err != nil {

@@ -22,6 +22,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 const defaultWidth = 80
@@ -192,6 +193,13 @@ func (m model) View() string {
 	// Status line: daemon left, telegram right.
 	b.WriteString(renderStatusLine(m.snap, w))
 	b.WriteByte('\n')
+
+	// Tracker status.
+	if ts := renderTrackers(m.snap.Trackers, w); ts != "" {
+		b.WriteString(ts)
+		b.WriteByte('\n')
+	}
+
 	b.WriteByte('\n')
 
 	if m.snap.Err != nil {
@@ -512,6 +520,38 @@ func renderTotalLine(b *strings.Builder, total *claude.UsageSummary, w int) {
 	if len(parts) > 0 {
 		b.WriteString("  " + subtleStyle.Render("Total  "+strings.Join(parts, "  ")) + "\n")
 	}
+}
+
+// --- render: trackers ---
+
+func renderTrackers(trackers []tracker.TrackerStatus, _ int) string {
+	counts := make(map[string]int)
+	labels := make(map[string]string) // kind → Label
+	var order []string
+	for _, t := range trackers {
+		if !t.Working {
+			continue
+		}
+		if counts[t.Kind] == 0 {
+			order = append(order, t.Kind)
+			labels[t.Kind] = t.Label
+		}
+		counts[t.Kind]++
+	}
+	if len(order) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, kind := range order {
+		s := labels[kind]
+		if counts[kind] > 1 {
+			s += fmt.Sprintf(" (%d)", counts[kind])
+		}
+		parts = append(parts, s)
+	}
+
+	return "  " + subtleStyle.Render("Trackers") + "  " + strings.Join(parts, "  ")
 }
 
 // --- render: tmux panes ---

@@ -70,6 +70,146 @@ func TestCheckCredsEnv_noneSet(t *testing.T) {
 	assert.Equal(t, []string{"TOKEN"}, result.Missing)
 }
 
+func TestDiagnoseTrackers_withToken(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		if section == "linears" {
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "work"}}
+		}
+		return nil
+	}
+	getenv := func(key string) string {
+		if key == "LINEAR_WORK_TOKEN" {
+			return "lin_test"
+		}
+		return ""
+	}
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	var found *TrackerStatus
+	for i := range statuses {
+		if statuses[i].Name == "work" && statuses[i].Kind == "linear" {
+			found = &statuses[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected linear/work in results")
+	assert.True(t, found.Working)
+	assert.Empty(t, found.Missing)
+	assert.Equal(t, "Linear", found.Label)
+}
+
+func TestDiagnoseTrackers_missingToken(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		if section == "githubs" {
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "personal"}}
+		}
+		return nil
+	}
+	getenv := func(_ string) string { return "" }
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	var found *TrackerStatus
+	for i := range statuses {
+		if statuses[i].Name == "personal" && statuses[i].Kind == "github" {
+			found = &statuses[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected github/personal in results")
+	assert.False(t, found.Working)
+	assert.Contains(t, found.Missing, "GITHUB_TOKEN")
+}
+
+func TestDiagnoseTrackers_configField(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		if section == "jiras" {
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "acme", Key: "from-config", User: "alice@acme.com"}}
+		}
+		return nil
+	}
+	getenv := func(_ string) string { return "" }
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	var found *TrackerStatus
+	for i := range statuses {
+		if statuses[i].Name == "acme" && statuses[i].Kind == "jira" {
+			found = &statuses[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected jira/acme in results")
+	assert.True(t, found.Working)
+	assert.Empty(t, found.Missing)
+}
+
+func TestDiagnoseTrackers_globalEnvOverride(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		if section == "linears" {
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "team"}}
+		}
+		return nil
+	}
+	getenv := func(key string) string {
+		if key == "LINEAR_TOKEN" {
+			return "global-token"
+		}
+		return ""
+	}
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	var found *TrackerStatus
+	for i := range statuses {
+		if statuses[i].Name == "team" && statuses[i].Kind == "linear" {
+			found = &statuses[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected linear/team in results")
+	assert.True(t, found.Working)
+}
+
+func TestDiagnoseTrackers_noConfig(t *testing.T) {
+	unmarshal := func(_, _ string, _ any) error { return nil }
+	getenv := func(_ string) string { return "" }
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+	assert.Empty(t, statuses)
+}
+
+func TestDiagnoseTrackers_sorted(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		switch section {
+		case "linears":
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "beta"}, {Name: "alpha"}}
+		case "githubs":
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "repo"}}
+		}
+		return nil
+	}
+	getenv := func(_ string) string { return "val" }
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	// Should be sorted by kind then name: github/repo, linear/alpha, linear/beta
+	require.Len(t, statuses, 3)
+	assert.Equal(t, "github", statuses[0].Kind)
+	assert.Equal(t, "repo", statuses[0].Name)
+	assert.Equal(t, "linear", statuses[1].Kind)
+	assert.Equal(t, "alpha", statuses[1].Name)
+	assert.Equal(t, "linear", statuses[2].Kind)
+	assert.Equal(t, "beta", statuses[2].Name)
+}
+
 func TestFormatMissingCreds(t *testing.T) {
 	spec := CredSpec{
 		Kind: "jira", EnvPrefix: "JIRA", Label: "Jira",

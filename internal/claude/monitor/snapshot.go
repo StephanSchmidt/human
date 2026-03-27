@@ -6,6 +6,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // Snapshot holds the complete TUI display state at a point in time.
@@ -15,6 +16,7 @@ type Snapshot struct {
 	Daemon     DaemonState
 	Telegram   string
 	Slack      string
+	Trackers   []tracker.TrackerStatus
 	Instances  []InstanceView
 	Panes      []claude.TmuxPane
 	TotalUsage *claude.UsageSummary
