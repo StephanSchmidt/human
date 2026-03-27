@@ -180,27 +180,12 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		}
 	}()
 
-	proxyCfg, _ := proxy.LoadConfig(".")
-	var policy proxy.Decider
-	if proxyCfg != nil {
-		policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
-		if err != nil {
-			return fmt.Errorf("invalid proxy policy: %w", err)
-		}
-	} else {
-		policy = proxy.BlockAllPolicy()
+	proxySrv, proxyStatus, proxyErr := buildProxyServer(proxyAddr, interactive, logger)
+	if proxyErr != nil {
+		return proxyErr
 	}
-
-	if interactive {
-		prompt := proxy.NewTerminalPrompt(os.Stdin, os.Stderr)
-		policy = proxy.NewInteractiveDecider(policy, prompt)
-		_, _ = fmt.Fprintln(out, "Interactive proxy mode: unknown domains will prompt for approval")
-	}
-
-	proxySrv := &proxy.Server{
-		Addr:   proxyAddr,
-		Policy: policy,
-		Logger: logger,
+	if proxyStatus != "" {
+		_, _ = fmt.Fprintln(out, proxyStatus)
 	}
 
 	go func() {
@@ -600,6 +585,72 @@ func writeDaemonStats(ctx context.Context, proxySrv *proxy.Server, tracker *daem
 			_ = daemon.WriteConnected(connectedPath, tracker.PIDs())
 		}
 	}
+}
+
+// buildProxyServer creates the HTTPS proxy server with policy and optional
+// MITM interceptor. Returns a status string for the startup banner.
+func buildProxyServer(addr string, interactive bool, logger zerolog.Logger) (*proxy.Server, string, error) {
+	proxyCfg, _ := proxy.LoadConfig(".")
+
+	var policy proxy.Decider
+	var err error
+	if proxyCfg != nil {
+		policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid proxy policy: %w", err)
+		}
+	} else {
+		policy = proxy.BlockAllPolicy()
+	}
+
+	var status string
+	if interactive {
+		prompt := proxy.NewTerminalPrompt(os.Stdin, os.Stderr)
+		policy = proxy.NewInteractiveDecider(policy, prompt)
+		status = "Interactive proxy mode: unknown domains will prompt for approval\n"
+	}
+
+	interceptor, interceptStatus := buildInterceptor(proxyCfg, logger)
+	if interceptStatus != "" {
+		status += interceptStatus
+	}
+
+	srv := &proxy.Server{
+		Addr:        addr,
+		Policy:      policy,
+		Interceptor: interceptor,
+		Logger:      logger,
+	}
+
+	return srv, status, nil
+}
+
+// buildInterceptor creates a MITM logging interceptor if intercept domains
+// are configured. Returns (nil, "") when not configured.
+func buildInterceptor(proxyCfg *proxy.Config, logger zerolog.Logger) (proxy.Interceptor, string) {
+	if proxyCfg == nil || len(proxyCfg.Intercept) == 0 {
+		return nil, ""
+	}
+
+	home, _ := os.UserHomeDir()
+	humanDir := filepath.Join(home, ".human")
+
+	caCert, caKey, _, err := proxy.LoadOrCreateCA(humanDir)
+	if err != nil {
+		logger.Error().Err(err).Msg("failed to load/create CA, intercept disabled")
+		return nil, "MITM intercept: disabled (CA error)"
+	}
+
+	logDir := filepath.Join(humanDir, "llm-traffic")
+	interceptor := &proxy.LoggingInterceptor{
+		Domains:   proxyCfg.Intercept,
+		LeafCache: &proxy.LeafCache{CACert: caCert, CAKey: caKey},
+		Logger:    logger,
+		LogDir:    logDir,
+	}
+
+	return interceptor, fmt.Sprintf("MITM intercept: %v\n  CA cert: %s\n  Traffic logs: %s",
+		proxyCfg.Intercept, filepath.Join(humanDir, "ca.crt"), logDir)
 }
 
 // replaceHost replaces an empty or wildcard host in addr with the given host.
