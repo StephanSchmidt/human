@@ -20,6 +20,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdnotion"
 	"github.com/StephanSchmidt/human/cmd/cmdping"
 	"github.com/StephanSchmidt/human/cmd/cmdprovider"
+	"github.com/StephanSchmidt/human/cmd/cmdproxy"
 	"github.com/StephanSchmidt/human/cmd/cmdslack"
 	"github.com/StephanSchmidt/human/cmd/cmdtelegram"
 	"github.com/StephanSchmidt/human/cmd/cmdtracker"
@@ -262,6 +263,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	pingCmd.GroupID = "utility"
 	rootCmd.AddCommand(pingCmd)
 
+	proxyCmd := cmdproxy.BuildProxyCmd()
+	proxyCmd.GroupID = "utility"
+	rootCmd.AddCommand(proxyCmd)
+
 	return rootCmd
 }
 
@@ -306,7 +311,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui" || a == "ping"
+		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui" || a == "ping" || a == "proxy"
 	}
 	return false
 }

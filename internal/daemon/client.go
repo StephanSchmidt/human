@@ -82,6 +82,43 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	return resp.ExitCode, nil
 }
 
+// RunRemoteCapture connects to the daemon and runs args, returning stdout
+// as bytes instead of printing to os.Stdout.
+func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
+	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach daemon at %s: %w", addr, err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	req := Request{
+		Token: token,
+		Args:  args,
+	}
+
+	enc := json.NewEncoder(conn)
+	if err := enc.Encode(req); err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var resp Response
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return nil, fmt.Errorf("invalid response from daemon: %w", err)
+	}
+
+	if resp.ExitCode != 0 {
+		return nil, fmt.Errorf("daemon command failed: %s", resp.Stderr)
+	}
+
+	return []byte(resp.Stdout), nil
+}
+
 // deliverCallback performs an HTTP GET to the callback URL, delivering the
 // OAuth callback to the local listener (e.g. Claude Code) from inside the
 // container where localhost is reachable.
