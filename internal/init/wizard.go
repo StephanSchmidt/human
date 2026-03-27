@@ -23,6 +23,7 @@ type WizardStep interface {
 type Prompter interface {
 	ServicesPrompter
 	DevcontainerPrompter
+	ClaudeMigratePrompter
 	LspPrompter
 	AgentInstallPrompter
 }

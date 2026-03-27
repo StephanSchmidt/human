@@ -267,6 +267,35 @@ func (h huhPrompter) SelectLspPlugins(available []initpkg.LspPlugin) ([]initpkg.
 	return selected, nil
 }
 
+func (h huhPrompter) ConfirmMigrateClaude() (bool, error) {
+	migrate := true
+	err := huh.NewConfirm().
+		Title("Do you want to migrate/copy the current Claude setup?").
+		Description("Copies session history so claude --continue works in the container").
+		Affirmative("Yes").
+		Negative("No").
+		Value(&migrate).
+		Run()
+	return migrate, err
+}
+
+func (h huhPrompter) PromptContainerPath(detected string) (string, error) {
+	var path string
+	err := huh.NewInput().
+		Title("Container project path").
+		Description("Where will this project be mounted inside the container?").
+		Placeholder(detected).
+		Value(&path).
+		Run()
+	if err != nil {
+		return "", err
+	}
+	if path == "" {
+		return detected, nil
+	}
+	return path, nil
+}
+
 func (h huhPrompter) ConfirmAgentInstall() (bool, error) {
 	install := true
 	err := huh.NewConfirm().
@@ -292,6 +321,7 @@ the environment variables you need to set.`,
 			steps := []initpkg.WizardStep{
 				initpkg.NewServicesStep(huhPrompter{}),
 				initpkg.NewDevcontainerStep(huhPrompter{}),
+				initpkg.NewClaudeMigrateStep(huhPrompter{}),
 				initpkg.NewLspSetupStep(huhPrompter{}, initpkg.OSLspInstaller{}),
 				initpkg.NewAgentInstallStep(huhPrompter{}),
 			}
