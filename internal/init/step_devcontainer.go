@@ -190,17 +190,19 @@ func buildDevcontainerConfig(proxy bool, stacks []StackType) devcontainerConfig 
 		Mounts:       []string{"source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"},
 		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
-		RemoteEnv: map[string]string{
-			"BROWSER":           "human-browser",
-			"HUMAN_DAEMON_ADDR": fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultPort),
-			"HUMAN_CHROME_ADDR": fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultChromePort),
-			"HUMAN_PROXY_ADDR":  fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultProxyPort),
+		RemoteEnv: map[string]string{ // #nosec G101 -- not a credential, just env var name referencing localEnv
+			"BROWSER":            "human-browser",
+			"HUMAN_DAEMON_ADDR":  fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultPort),
+			"HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}",
+			"HUMAN_CHROME_ADDR":  fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultChromePort),
+			"HUMAN_PROXY_ADDR":   fmt.Sprintf("%s:%d", daemon.DockerHost, daemon.DefaultProxyPort),
 		},
 	}
 
 	if proxy {
 		cfg.CapAdd = []string{"NET_ADMIN"}
-		cfg.PostStartCommand = "sudo human-proxy-setup && human install --agent claude && human chrome-bridge"
+		cfg.RemoteEnv["NODE_EXTRA_CA_CERTS"] = "/home/vscode/.human/ca.crt"
+		cfg.PostStartCommand = "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 && sudo -E human-proxy-setup && sudo cp /home/vscode/.human/ca.crt /usr/local/share/ca-certificates/human-proxy.crt && sudo update-ca-certificates && human install --agent claude && human chrome-bridge"
 	} else {
 		cfg.PostStartCommand = "human install --agent claude && human chrome-bridge"
 	}

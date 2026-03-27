@@ -640,7 +640,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 	assert.Contains(t, data, `"BROWSER": "human-browser"`)
 	assert.Contains(t, data, ".human,target=/home/vscode/.human,type=bind")
 	assert.Contains(t, data, `"HUMAN_DAEMON_ADDR": "host.docker.internal:19285"`)
-	assert.NotContains(t, data, "HUMAN_DAEMON_TOKEN")
+	assert.Contains(t, data, `"HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}"`)
 	assert.Contains(t, data, `"HUMAN_CHROME_ADDR": "host.docker.internal:19286"`)
 	assert.Contains(t, data, `"HUMAN_PROXY_ADDR": "host.docker.internal:19287"`)
 	assert.NotContains(t, data, "capAdd")
@@ -671,7 +671,7 @@ func TestDevcontainerStep_WithProxy(t *testing.T) {
 	data := string(fw.files[".devcontainer/devcontainer.json"])
 	assert.Contains(t, data, `"capAdd"`)
 	assert.Contains(t, data, "NET_ADMIN")
-	assert.Contains(t, data, "sudo human-proxy-setup")
+	assert.Contains(t, data, "sudo -E human-proxy-setup")
 	assert.Contains(t, data, "ghcr.io/anthropics/devcontainer-features/claude-code:1")
 	assert.Contains(t, data, "human install --agent claude")
 	assert.Contains(t, data, "human chrome-bridge")
@@ -874,7 +874,7 @@ func TestDevcontainerStep_StacksWithProxy(t *testing.T) {
 	data := string(fw.files[".devcontainer/devcontainer.json"])
 	assert.Contains(t, data, "ghcr.io/devcontainers/features/rust:1")
 	assert.Contains(t, data, `"proxy": true`)
-	assert.Contains(t, data, "sudo human-proxy-setup")
+	assert.Contains(t, data, "sudo -E human-proxy-setup")
 	assert.Contains(t, data, "NET_ADMIN")
 }
 

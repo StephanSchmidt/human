@@ -54,3 +54,12 @@ amplitudes:
     description: "Product analytics data"
     # key comes from env: export AMPLITUDE_PRODUCT_KEY=your-api-key
     # secret comes from env: export AMPLITUDE_PRODUCT_SECRET=your-secret-key
+
+proxy:
+  mode: allowlist
+  domains:
+    - "*.anthropic.com"
+    - "*.github.com"
+    - "*.googleapis.com"
+  intercept:  # domains to MITM for traffic logging (requires CA cert trust)
+    - "api.anthropic.com"

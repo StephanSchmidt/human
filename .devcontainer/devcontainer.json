@@ -11,6 +11,9 @@
       "proxy": true
     }
   },
+  "mounts": [
+    "source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"
+  ],
   "runArgs": [
     "--add-host=host.docker.internal:host-gateway"
   ],
@@ -26,7 +29,8 @@
     "HUMAN_CHROME_ADDR": "host.docker.internal:19286",
     "HUMAN_DAEMON_ADDR": "host.docker.internal:19285",
     "HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}",
-    "HUMAN_PROXY_ADDR": "host.docker.internal:19287"
+    "HUMAN_PROXY_ADDR": "host.docker.internal:19287",
+    "NODE_EXTRA_CA_CERTS": "/home/vscode/.human/ca.crt"
   },
-  "postStartCommand": "sudo human-proxy-setup \u0026\u0026 human install --agent claude \u0026\u0026 human chrome-bridge"
+  "postStartCommand": "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 && sudo -E human-proxy-setup && sudo cp /home/vscode/.human/ca.crt /usr/local/share/ca-certificates/human-proxy.crt && sudo update-ca-certificates && human install --agent claude && human chrome-bridge"
 }
