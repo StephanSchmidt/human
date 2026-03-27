@@ -301,6 +301,162 @@ func TestReplayConn_Read(t *testing.T) {
 	assert.Equal(t, "world", string(buf[:n]))
 }
 
+func TestLogMode_SetGet(t *testing.T) {
+	// Default is off (zero value).
+	SetLogMode(LogModeOff) // reset to default
+	assert.Equal(t, LogModeOff, GetLogMode())
+
+	SetLogMode(LogModeMeta)
+	assert.Equal(t, LogModeMeta, GetLogMode())
+
+	SetLogMode(LogModeFull)
+	assert.Equal(t, LogModeFull, GetLogMode())
+
+	SetLogMode(LogModeOff)
+	assert.Equal(t, LogModeOff, GetLogMode())
+}
+
+func TestLogModeString(t *testing.T) {
+	assert.Equal(t, "full", LogModeString(LogModeFull))
+	assert.Equal(t, "meta", LogModeString(LogModeMeta))
+	assert.Equal(t, "off", LogModeString(LogModeOff))
+}
+
+func TestParseLogMode(t *testing.T) {
+	mode, err := ParseLogMode("full")
+	assert.NoError(t, err)
+	assert.Equal(t, LogModeFull, mode)
+
+	mode, err = ParseLogMode("META")
+	assert.NoError(t, err)
+	assert.Equal(t, LogModeMeta, mode)
+
+	mode, err = ParseLogMode("off")
+	assert.NoError(t, err)
+	assert.Equal(t, LogModeOff, mode)
+
+	_, err = ParseLogMode("invalid")
+	assert.Error(t, err)
+}
+
+func TestLogMode_MetaStripsBody(t *testing.T) {
+	env := newInterceptTestEnv(t)
+	hostname := "meta.test"
+
+	upstreamLn := startUpstreamTLS(t, env, hostname, handleEchoHTTPS)
+
+	li := &LoggingInterceptor{
+		Domains:   []string{hostname},
+		LeafCache: env.LeafCache,
+		Logger:    zerolog.Nop(),
+		LogDir:    env.LogDir,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // test only
+			})
+		},
+	}
+
+	// Set meta mode.
+	SetLogMode(LogModeMeta)
+	defer SetLogMode(LogModeFull) // restore
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	proxyAddr := runInterceptViaListener(t, ctx, li, hostname)
+	time.Sleep(50 * time.Millisecond)
+
+	conn, err := tls.Dial("tcp", proxyAddr, &tls.Config{
+		ServerName: hostname,
+		RootCAs:    env.CAPool,
+	})
+	require.NoError(t, err)
+
+	reqBody := `{"model":"test"}`
+	req, err := http.NewRequest(http.MethodPost, "http://"+hostname+"/v1/messages", strings.NewReader(reqBody))
+	require.NoError(t, err)
+	req.Header.Set("Connection", "close")
+	require.NoError(t, req.Write(conn))
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	require.NoError(t, err)
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	_ = conn.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify log entries have empty body but correct metadata.
+	entries, err := os.ReadDir(env.LogDir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+
+	logData, err := os.ReadFile(filepath.Join(env.LogDir, entries[0].Name()))
+	require.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
+	require.Len(t, lines, 2)
+
+	var reqLog TrafficLog
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &reqLog))
+	assert.Equal(t, "request", reqLog.Direction)
+	assert.Equal(t, "POST", reqLog.Method)
+	assert.Empty(t, reqLog.Body, "meta mode should strip body")
+	assert.Equal(t, int64(len(reqBody)), reqLog.BodySize, "body_size should still be set")
+}
+
+func TestLogMode_OffSkipsLogging(t *testing.T) {
+	env := newInterceptTestEnv(t)
+	hostname := "off.test"
+
+	upstreamLn := startUpstreamTLS(t, env, hostname, handleEchoHTTPS)
+
+	li := &LoggingInterceptor{
+		Domains:   []string{hostname},
+		LeafCache: env.LeafCache,
+		Logger:    zerolog.Nop(),
+		LogDir:    env.LogDir,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // test only
+			})
+		},
+	}
+
+	SetLogMode(LogModeOff)
+	defer SetLogMode(LogModeFull)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	proxyAddr := runInterceptViaListener(t, ctx, li, hostname)
+	time.Sleep(50 * time.Millisecond)
+
+	conn, err := tls.Dial("tcp", proxyAddr, &tls.Config{
+		ServerName: hostname,
+		RootCAs:    env.CAPool,
+	})
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+hostname+"/v1/messages", strings.NewReader(`{"test":"off"}`))
+	require.NoError(t, err)
+	req.Header.Set("Connection", "close")
+	require.NoError(t, req.Write(conn))
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	require.NoError(t, err)
+	_, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	_ = conn.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	// No log file should be created.
+	entries, err := os.ReadDir(env.LogDir)
+	if err == nil {
+		assert.Empty(t, entries, "off mode should not create log files")
+	}
+}
+
 // --- test helpers ---
 
 // handleEchoHTTPS reads an HTTP request over TLS and echoes the body back.

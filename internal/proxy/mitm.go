@@ -6,12 +6,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -20,6 +22,51 @@ import (
 )
 
 const maxBodyLog = 10 * 1024 * 1024 // 10 MB max body logged
+
+// LogMode controls the verbosity of traffic logging.
+type LogMode int32
+
+const (
+	LogModeOff  LogMode = 0 // no logging (default, zero value)
+	LogModeMeta LogMode = 1 // log method, path, status, body_size only
+	LogModeFull LogMode = 2 // log everything including body
+)
+
+var globalLogMode atomic.Int32
+
+// SetLogMode sets the global traffic log mode.
+func SetLogMode(mode LogMode) { globalLogMode.Store(int32(mode)) }
+
+// GetLogMode returns the current global traffic log mode.
+func GetLogMode() LogMode { return LogMode(globalLogMode.Load()) }
+
+// LogModeString returns the string representation of a LogMode.
+func LogModeString(m LogMode) string {
+	switch m {
+	case LogModeFull:
+		return "full"
+	case LogModeMeta:
+		return "meta"
+	case LogModeOff:
+		return "off"
+	default:
+		return "full"
+	}
+}
+
+// ParseLogMode parses a string into a LogMode.
+func ParseLogMode(s string) (LogMode, error) {
+	switch strings.ToLower(s) {
+	case "full":
+		return LogModeFull, nil
+	case "meta":
+		return LogModeMeta, nil
+	case "off":
+		return LogModeOff, nil
+	default:
+		return LogModeFull, fmt.Errorf("unknown log mode %q (use off, meta, or full)", s)
+	}
+}
 
 // Interceptor can intercept and inspect decrypted traffic for specific domains.
 type Interceptor interface {
@@ -184,7 +231,16 @@ func (li *LoggingInterceptor) proxyHTTP(ctx context.Context, client, upstream ne
 }
 
 // logTraffic appends a TrafficLog entry to the daily JSON-lines file.
+// Respects the global log mode: off skips entirely, meta strips the body.
 func (li *LoggingInterceptor) logTraffic(entry TrafficLog) {
+	mode := GetLogMode()
+	if mode == LogModeOff {
+		return
+	}
+	if mode == LogModeMeta {
+		entry.Body = ""
+	}
+
 	if li.LogDir == "" {
 		return
 	}
