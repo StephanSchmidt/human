@@ -137,20 +137,22 @@ func TestLoadInstances_defaultURL(t *testing.T) {
 	assert.Equal(t, "https://api.github.com", instances[0].URL)
 }
 
-func TestLoadInstances_globalEnvOverridesInstance(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n    token: file-token\n")
+	// Config file has no token — the instance must get its credential from env.
+	writeConfig(t, dir, "githubs:\n  - name: work\n    url: https://api.github.com\n")
 
 	unsetEnv(t, "GITHUB_URL")
-	t.Setenv("GITHUB_TOKEN", "global-token")
+	unsetEnv(t, "GITHUB_WORK_URL")
+	// Set only instance-specific token, no global — instance should still be created.
+	unsetEnv(t, "GITHUB_TOKEN")
 	t.Setenv("GITHUB_WORK_TOKEN", "instance-token")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
-
-	// Global GITHUB_TOKEN takes priority over instance-specific GITHUB_WORK_TOKEN.
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://api.github.com", instances[0].URL)
+	assert.NotNil(t, instances[0].Provider)
 }
 
 func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {

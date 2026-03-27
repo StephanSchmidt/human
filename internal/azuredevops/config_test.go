@@ -176,19 +176,22 @@ func TestLoadInstances_incompleteConfigSkipped_missingOrg(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestLoadInstances_globalEnvOverridesInstance(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, "azuredevops:\n  - name: work\n    url: https://dev.azure.com\n    org: myorg\n    token: file-token\n")
+	// Config file has no token — the instance must get its credential from env.
+	writeConfig(t, dir, "azuredevops:\n  - name: work\n    url: https://dev.azure.com\n    org: myorg\n")
 
 	unsetEnv(t, "AZURE_URL")
-	t.Setenv("AZURE_TOKEN", "global-token")
-	t.Setenv("AZURE_WORK_TOKEN", "instance-token")
+	unsetEnv(t, "AZURE_WORK_URL")
 	unsetEnv(t, "AZURE_ORG")
+	unsetEnv(t, "AZURE_WORK_ORG")
+	// Set only instance-specific token, no global — instance should still be created.
+	unsetEnv(t, "AZURE_TOKEN")
+	t.Setenv("AZURE_WORK_TOKEN", "instance-token")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
-
-	// Global AZURE_TOKEN takes priority over instance-specific AZURE_WORK_TOKEN.
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://dev.azure.com", instances[0].URL)
+	assert.NotNil(t, instances[0].Provider)
 }

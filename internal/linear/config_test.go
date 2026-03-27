@@ -137,20 +137,22 @@ func TestLoadInstances_defaultURL(t *testing.T) {
 	assert.Equal(t, "https://api.linear.app", instances[0].URL)
 }
 
-func TestLoadInstances_globalEnvOverridesInstance(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, "linears:\n  - name: work\n    url: https://api.linear.app\n    token: file-token\n")
+	// Config file has no token — the instance must get its credential from env.
+	writeConfig(t, dir, "linears:\n  - name: work\n    url: https://api.linear.app\n")
 
 	unsetEnv(t, "LINEAR_URL")
-	t.Setenv("LINEAR_TOKEN", "global-token")
+	unsetEnv(t, "LINEAR_WORK_URL")
+	// Set only instance-specific token, no global — instance should still be created.
+	unsetEnv(t, "LINEAR_TOKEN")
 	t.Setenv("LINEAR_WORK_TOKEN", "instance-token")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
-
-	// Global LINEAR_TOKEN takes priority over instance-specific LINEAR_WORK_TOKEN.
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://api.linear.app", instances[0].URL)
+	assert.NotNil(t, instances[0].Provider)
 }
 
 func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {

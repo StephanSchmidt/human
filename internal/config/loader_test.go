@@ -38,8 +38,8 @@ func TestApplyEnvOverrides_instanceAndGlobal(t *testing.T) {
 	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
 	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields)
 
-	// Global takes precedence over instance.
-	assert.Equal(t, "global-token", cfg.Token)
+	// Instance-specific takes precedence over global.
+	assert.Equal(t, "instance-token", cfg.Token)
 	assert.Equal(t, "file-url", cfg.URL)
 }
 

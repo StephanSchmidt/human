@@ -14,23 +14,23 @@ type EnvField[C any] struct {
 }
 
 // ApplyEnvOverrides applies environment variable overrides to a config struct.
-// It checks per-instance variables first (PREFIX_NAME_SUFFIX), then global
-// variables (PREFIX_SUFFIX). Global overrides take precedence.
+// It checks global variables first (PREFIX_SUFFIX), then per-instance variables
+// (PREFIX_NAME_SUFFIX). Per-instance overrides take precedence.
 func ApplyEnvOverrides[C any](cfg *C, name, envPrefix string, fields []EnvField[C]) {
-	// Per-instance overrides: PREFIX_NAME_SUFFIX
+	// Global overrides: PREFIX_SUFFIX
+	for _, f := range fields {
+		if v, ok := os.LookupEnv(envPrefix + f.Suffix); ok {
+			f.Set(cfg, v)
+		}
+	}
+
+	// Per-instance overrides: PREFIX_NAME_SUFFIX (takes precedence)
 	if name != "" {
 		instancePrefix := envPrefix + strings.ToUpper(name) + "_"
 		for _, f := range fields {
 			if v, ok := os.LookupEnv(instancePrefix + f.Suffix); ok {
 				f.Set(cfg, v)
 			}
-		}
-	}
-
-	// Global overrides: PREFIX_SUFFIX (takes precedence)
-	for _, f := range fields {
-		if v, ok := os.LookupEnv(envPrefix + f.Suffix); ok {
-			f.Set(cfg, v)
 		}
 	}
 }

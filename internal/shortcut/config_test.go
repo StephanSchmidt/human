@@ -151,18 +151,20 @@ func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestLoadInstances_globalEnvOverridesInstance(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, "shortcuts:\n  - name: work\n    url: https://api.app.shortcut.com\n    token: file-token\n")
+	// Config file has no token — the instance must get its credential from env.
+	writeConfig(t, dir, "shortcuts:\n  - name: work\n    url: https://api.app.shortcut.com\n")
 
 	unsetEnv(t, "SHORTCUT_URL")
-	t.Setenv("SHORTCUT_TOKEN", "global-token")
+	unsetEnv(t, "SHORTCUT_WORK_URL")
+	// Set only instance-specific token, no global — instance should still be created.
+	unsetEnv(t, "SHORTCUT_TOKEN")
 	t.Setenv("SHORTCUT_WORK_TOKEN", "instance-token")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
-
-	// Global SHORTCUT_TOKEN takes priority over instance-specific SHORTCUT_WORK_TOKEN.
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://api.app.shortcut.com", instances[0].URL)
+	assert.NotNil(t, instances[0].Provider)
 }

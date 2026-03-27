@@ -121,17 +121,20 @@ func TestLoadInstances_missingTokenSkipped(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestLoadInstances_globalEnvOverride(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeTestConfig(t, dir, "notions:\n  - name: work\n    url: https://api.notion.com\n    token: file-token\n")
+	// Config file has no token — the instance must get its credential from env.
+	writeTestConfig(t, dir, "notions:\n  - name: work\n    url: https://api.notion.com\n")
 
 	unsetEnv(t, "NOTION_URL")
-	t.Setenv("NOTION_TOKEN", "global-token")
 	unsetEnv(t, "NOTION_WORK_URL")
-	unsetEnv(t, "NOTION_WORK_TOKEN")
+	// Set only instance-specific token, no global — instance should still be created.
+	unsetEnv(t, "NOTION_TOKEN")
+	t.Setenv("NOTION_WORK_TOKEN", "instance-token")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://api.notion.com", instances[0].URL)
+	assert.NotNil(t, instances[0].Client)
 }

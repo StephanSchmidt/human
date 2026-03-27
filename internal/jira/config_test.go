@@ -144,21 +144,24 @@ func TestLoadInstances_missingFile(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestLoadInstances_globalEnvOverridesInstanceEnv(t *testing.T) {
+func TestLoadInstances_instanceEnvOverridesGlobal(t *testing.T) {
 	dir := t.TempDir()
-	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n    key: file-key\n")
+	// Config file has no key — the instance must get its credential from env.
+	writeConfig(t, dir, "jiras:\n  - name: work\n    url: https://work.atlassian.net\n    user: me@work.com\n")
 
 	unsetEnv(t, "JIRA_URL")
 	unsetEnv(t, "JIRA_USER")
-	t.Setenv("JIRA_KEY", "global-key")
+	unsetEnv(t, "JIRA_WORK_URL")
+	unsetEnv(t, "JIRA_WORK_USER")
+	// Set only instance-specific key, no global — instance should still be created.
+	unsetEnv(t, "JIRA_KEY")
 	t.Setenv("JIRA_WORK_KEY", "instance-key")
 
 	instances, err := LoadInstances(dir)
 	require.NoError(t, err)
-	require.Len(t, instances, 1)
-
-	// Global JIRA_KEY takes priority over instance-specific JIRA_WORK_KEY.
+	require.Len(t, instances, 1, "instance-specific env should provide the credential")
 	assert.Equal(t, "https://work.atlassian.net", instances[0].URL)
+	assert.NotNil(t, instances[0].Provider)
 }
 
 func TestLoadInstances_incompleteConfigSkipped(t *testing.T) {
