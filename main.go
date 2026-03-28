@@ -267,6 +267,20 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	proxyCmd.GroupID = "utility"
 	rootCmd.AddCommand(proxyCmd)
 
+	// hook-event is a no-op when daemon isn't running. When the daemon is
+	// running, isLocalSubcommand returns false so the command is forwarded
+	// to the daemon where routeIntercept handles it.
+	hookEventCmd := &cobra.Command{
+		Use:    "hook-event [event] [session-id] [cwd] [notification-type]",
+		Short:  "Send a Claude Code hook event to the daemon",
+		Hidden: true,
+		Args:   cobra.MaximumNArgs(4),
+		RunE: func(_ *cobra.Command, _ []string) error {
+			return nil // no-op when daemon is not running
+		},
+	}
+	rootCmd.AddCommand(hookEventCmd)
+
 	return rootCmd
 }
 

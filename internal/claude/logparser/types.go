@@ -64,6 +64,8 @@ type SessionState struct {
 	StartedAt    time.Time
 	LastActivity time.Time
 	IsWorking    bool // true = Claude actively generating, false = idle/waiting
+	IsBlocked    bool // true = waiting for permission approval
+	HasError     bool // true = stopped due to API error or failure
 	Subagents    []Subagent
 	Tasks        []Task
 }

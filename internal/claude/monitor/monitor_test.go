@@ -51,6 +51,26 @@ func TestOverlayHookState_HookNewer(t *testing.T) {
 	assert.Equal(t, hookTime, sess.LastActivity)
 }
 
+func TestOverlayHookState_BlockedAndError(t *testing.T) {
+	jsonlTime := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
+	hookTime := time.Date(2026, 3, 25, 10, 0, 5, 0, time.UTC)
+
+	byPath := map[string]logparser.SessionState{
+		"/a.jsonl": {SessionID: "s1", IsWorking: true, LastActivity: jsonlTime},
+		"/b.jsonl": {SessionID: "s2", IsWorking: true, LastActivity: jsonlTime},
+	}
+	hooks := map[string]hookevents.SessionSnapshot{
+		"s1": {SessionID: "s1", IsBlocked: true, LastEventAt: hookTime},
+		"s2": {SessionID: "s2", HasError: true, LastEventAt: hookTime},
+	}
+	overlayHookState(byPath, hooks)
+
+	assert.True(t, byPath["/a.jsonl"].IsBlocked, "should be blocked")
+	assert.False(t, byPath["/a.jsonl"].IsWorking, "should not be working")
+	assert.True(t, byPath["/b.jsonl"].HasError, "should have error")
+	assert.False(t, byPath["/b.jsonl"].IsWorking, "should not be working")
+}
+
 func TestOverlayHookState_HookOlder(t *testing.T) {
 	jsonlTime := time.Date(2026, 3, 25, 10, 0, 5, 0, time.UTC)
 	hookTime := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
@@ -170,37 +190,20 @@ func TestAggregateUsage(t *testing.T) {
 func TestSessionToState(t *testing.T) {
 	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true}))
 	assert.Equal(t, claude.StateReady, sessionToState(logparser.SessionState{IsWorking: false}))
+	assert.Equal(t, claude.StateBlocked, sessionToState(logparser.SessionState{IsBlocked: true}))
+	assert.Equal(t, claude.StateError, sessionToState(logparser.SessionState{HasError: true}))
+	// Working takes precedence over everything.
+	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true, IsBlocked: true}))
+	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true, HasError: true}))
+	// Error takes precedence over blocked.
+	assert.Equal(t, claude.StateError, sessionToState(logparser.SessionState{HasError: true, IsBlocked: true}))
 }
 
-// --- buildHookReaders tests ---
+// --- fetchDaemonHookSnapshots tests ---
 
-func TestBuildHookReaders_HostOnly(t *testing.T) {
-	readers := buildHookReaders(nil, nil)
-	// Should have at least the host reader (if home dir resolves).
-	assert.NotEmpty(t, readers)
-}
-
-func TestBuildHookReaders_WithContainers(t *testing.T) {
-	instances := []claude.Instance{
-		{Source: "container", ContainerID: "abc123def456xyz"},
-		{Source: "container", ContainerID: "abc123def456xyz"}, // duplicate
-		{Source: "host"},
-	}
-	// dc is nil, so no container readers added.
-	readers := buildHookReaders(instances, nil)
-	// Only host reader.
-	hostCount := 0
-	for range readers {
-		hostCount++
-	}
-	assert.GreaterOrEqual(t, hostCount, 1)
-}
-
-// --- readHookSnapshots tests ---
-
-func TestReadHookSnapshots_NoReaders(t *testing.T) {
-	snaps := readHookSnapshots(context.Background(), nil)
-	assert.Empty(t, snaps)
+func TestFetchDaemonHookSnapshots_DaemonNotAlive(t *testing.T) {
+	snaps := fetchDaemonHookSnapshots(false)
+	assert.Nil(t, snaps)
 }
 
 // --- FetchFull integration test ---

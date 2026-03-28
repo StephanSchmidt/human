@@ -7,6 +7,8 @@ const (
 	StateUnknown InstanceState = iota
 	StateBusy
 	StateReady
+	StateBlocked // waiting for permission approval
+	StateError   // stopped due to API error or failure
 )
 
 func (s InstanceState) String() string {
@@ -15,6 +17,10 @@ func (s InstanceState) String() string {
 		return "🔴"
 	case StateReady:
 		return "🟢"
+	case StateBlocked:
+		return "🟡"
+	case StateError:
+		return "⚠️"
 	default:
 		return "⚪"
 	}

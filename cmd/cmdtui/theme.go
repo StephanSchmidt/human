@@ -28,6 +28,7 @@ var (
 	slugStyle         = lipgloss.NewStyle().Foreground(humanPurple).Italic(true)
 	accentStyle       = lipgloss.NewStyle().Foreground(humanRed)
 	specialStyle      = lipgloss.NewStyle().Foreground(humanTeal)
+	warningStyle      = lipgloss.NewStyle().Foreground(humanYellow)
 	errorStyle        = lipgloss.NewStyle().Foreground(humanPink)
 	ruleStyle         = lipgloss.NewStyle().Foreground(humanPurple)
 )

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 )
 
 const dialTimeout = 5 * time.Second
@@ -135,6 +137,19 @@ func SetLogMode(addr, token, mode string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GetHookSnapshot fetches the current per-session hook state from the daemon.
+func GetHookSnapshot(addr, token string) (map[string]hookevents.SessionSnapshot, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"hook-snapshot"})
+	if err != nil {
+		return nil, err
+	}
+	var snap map[string]hookevents.SessionSnapshot
+	if err := json.Unmarshal(out, &snap); err != nil {
+		return nil, fmt.Errorf("invalid hook snapshot JSON: %w", err)
+	}
+	return snap, nil
 }
 
 // deliverCallback performs an HTTP GET to the callback URL, delivering the

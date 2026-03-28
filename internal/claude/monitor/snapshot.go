@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/internal/claude"
-	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -22,7 +21,6 @@ type Snapshot struct {
 	TotalUsage *claude.UsageSummary
 
 	// internal — carried forward between fetches, not used by renderers.
-	hookReaders   []hookevents.EventReader
 	sessionByPath map[string]logparser.SessionState
 	connectedPIDs map[int]bool // PIDs of Claude instances connected to the daemon
 }

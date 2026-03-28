@@ -331,10 +331,7 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 
 	// Instance header: icon + label + elapsed + slug
 	icon := m.sessionIcon(iv.Session)
-	labelStyle := idleInstanceStyle
-	if iv.Session != nil && iv.Session.IsWorking {
-		labelStyle = busyInstanceStyle
-	}
+	labelStyle := sessionLabelStyle(iv.Session)
 	header := "  " + icon + " " + labelStyle.Render(iv.Usage.Instance.Label)
 	if iv.Usage.Instance.DaemonConnected {
 		if iv.Usage.Instance.ProxyConfigured {
@@ -576,6 +573,10 @@ func renderPanes(panes []claude.TmuxPane) string {
 			icon = accentStyle.Render("●")
 		case claude.StateReady:
 			icon = specialStyle.Render("●")
+		case claude.StateBlocked:
+			icon = warningStyle.Render("●")
+		case claude.StateError:
+			icon = accentStyle.Render("⚠")
 		default:
 			icon = "○"
 		}
@@ -605,12 +606,34 @@ func renderFooter(w int, logMode string) string {
 
 // --- render: icon ---
 
+func sessionLabelStyle(sess *logparser.SessionState) lipgloss.Style {
+	if sess == nil {
+		return idleInstanceStyle
+	}
+	if sess.IsWorking {
+		return busyInstanceStyle
+	}
+	if sess.HasError {
+		return errorStyle
+	}
+	if sess.IsBlocked {
+		return warningStyle
+	}
+	return idleInstanceStyle
+}
+
 func (m model) sessionIcon(sess *logparser.SessionState) string {
 	if sess == nil {
 		return subtleStyle.Render("○")
 	}
 	if sess.IsWorking {
 		return m.spinner.View()
+	}
+	if sess.HasError {
+		return accentStyle.Render("⚠")
+	}
+	if sess.IsBlocked {
+		return warningStyle.Render("●")
 	}
 	if !sess.LastActivity.IsZero() {
 		return specialStyle.Render("●")

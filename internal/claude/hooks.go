@@ -18,13 +18,19 @@ const hookCommand = "bash ~/.claude/hooks/human-status-hook.sh"
 
 // hookEvents lists the Claude Code hook events we register for.
 var hookEvents = []struct {
-	name  string
-	async bool
+	name    string
+	async   bool
+	matcher string // "" for default empty matcher; set for events like Notification
 }{
-	{"UserPromptSubmit", false}, // blocking — must not be async
-	{"Stop", true},
-	{"SubagentStart", true},
-	{"SubagentStop", true},
+	{"UserPromptSubmit", false, ""},  // blocking — must not be async
+	{"Stop", true, ""},
+	{"SubagentStart", true, ""},
+	{"SubagentStop", true, ""},
+	{"PermissionRequest", true, ""}, // blocked waiting for tool permission
+	{"Notification", true, ".*"},    // catches idle_prompt, permission_prompt, etc.
+	{"StopFailure", true, ""},       // API error or crash
+	{"SessionStart", true, ""},      // new session began
+	{"SessionEnd", true, ""},        // session ended (e.g. /clear)
 }
 
 // InstallHooks writes the hook script and registers hooks in ~/.claude/settings.json.
@@ -86,7 +92,7 @@ func mergeHooksIntoSettings(w io.Writer, fw FileWriter, path string) error {
 
 	changed := false
 	for _, evt := range hookEvents {
-		if addHookMatcher(hooks, evt.name, evt.async) {
+		if addHookMatcher(hooks, evt.name, evt.async, evt.matcher) {
 			changed = true
 		}
 	}
@@ -114,16 +120,16 @@ func mergeHooksIntoSettings(w io.Writer, fw FileWriter, path string) error {
 
 // addHookMatcher adds our hook matcher to an event if not already present.
 // Returns true if a new matcher was added.
-func addHookMatcher(hooks map[string]interface{}, eventName string, async bool) bool {
+func addHookMatcher(hooks map[string]interface{}, eventName string, async bool, matcher string) bool {
 	matchers, _ := hooks[eventName].([]interface{})
 
 	// Check if our hook already exists.
 	for _, m := range matchers {
-		matcher, ok := m.(map[string]interface{})
+		matcherObj, ok := m.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		hookList, _ := matcher["hooks"].([]interface{})
+		hookList, _ := matcherObj["hooks"].([]interface{})
 		for _, h := range hookList {
 			hookDef, ok := h.(map[string]interface{})
 			if !ok {
@@ -144,7 +150,7 @@ func addHookMatcher(hooks map[string]interface{}, eventName string, async bool) 
 	}
 
 	newMatcher := map[string]interface{}{
-		"matcher": "",
+		"matcher": matcher,
 		"hooks":   []interface{}{hookDef},
 	}
 	hooks[eventName] = append(matchers, newMatcher)

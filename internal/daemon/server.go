@@ -29,9 +29,10 @@ type Server struct {
 	Token         string
 	SafeMode      bool
 	CmdFactory    func() *cobra.Command
-	Opener        BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
+	Opener        BrowserOpener  // used for OAuth relay; defaults to browser.DefaultOpener
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
+	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
 
 	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
 }
@@ -96,20 +97,7 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	s.Logger.Info().Strs("args", req.Args).Msg("handling request")
 
-	// Intercept log-mode get/set — direct in-memory, no subprocess needed.
-	if len(req.Args) >= 1 && req.Args[0] == "log-mode" {
-		s.handleLogMode(conn, req.Args[1:])
-		return
-	}
-
-	// Intercept browser commands with OAuth redirect_uri for relay.
-	if info, url := isBrowserWithRedirect(req.Args); info != nil {
-		s.Logger.Debug().Int("port", info.Port).Str("path", info.Path).Msg("OAuth redirect detected, starting relay")
-		opener := s.Opener
-		if opener == nil {
-			opener = defaultBrowserOpener{}
-		}
-		s.handleOAuthRelay(conn, reader, info, url, opener)
+	if s.routeIntercept(conn, reader, req.Args) {
 		return
 	}
 
@@ -168,6 +156,68 @@ func (s *Server) handleLogMode(conn net.Conn, args []string) {
 	s.Logger.Info().Str("mode", proxy.LogModeString(mode)).Msg("traffic log mode changed")
 
 	resp := Response{Stdout: proxy.LogModeString(mode) + "\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// routeIntercept handles special commands that don't need subprocess execution.
+// Returns true if the command was handled.
+func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "log-mode":
+		s.handleLogMode(conn, args[1:])
+		return true
+	case "hook-event":
+		s.handleHookEvent(conn, args[1:])
+		return true
+	case "hook-snapshot":
+		s.handleHookSnapshot(conn)
+		return true
+	}
+
+	// Intercept browser commands with OAuth redirect_uri for relay.
+	if info, url := isBrowserWithRedirect(args); info != nil {
+		s.Logger.Debug().Int("port", info.Port).Str("path", info.Path).Msg("OAuth redirect detected, starting relay")
+		opener := s.Opener
+		if opener == nil {
+			opener = defaultBrowserOpener{}
+		}
+		s.handleOAuthRelay(conn, reader, info, url, opener)
+		return true
+	}
+
+	return false
+}
+
+// handleHookEvent appends a Claude Code hook event to the in-memory store.
+func (s *Server) handleHookEvent(conn net.Conn, args []string) {
+	if s.HookEvents != nil {
+		evt := ParseHookEventArgs(args)
+		s.HookEvents.Append(evt)
+	}
+	resp := Response{Stdout: "ok\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleHookSnapshot returns the current per-session hook state as JSON.
+func (s *Server) handleHookSnapshot(conn net.Conn) {
+	var out string
+	if s.HookEvents != nil {
+		snap := s.HookEvents.Snapshot()
+		data, err := json.Marshal(snap)
+		if err != nil {
+			s.writeError(conn, err.Error(), 1)
+			return
+		}
+		out = string(data) + "\n"
+	} else {
+		out = "{}\n"
+	}
+	resp := Response{Stdout: out}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
 }

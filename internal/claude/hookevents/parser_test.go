@@ -103,3 +103,103 @@ func TestParse_EmptyLines(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.True(t, got["s1"].IsWorking)
 }
+
+func TestParse_PermissionRequest(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"PermissionRequest","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:02Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].IsWorking)
+	assert.True(t, got["s1"].IsBlocked)
+}
+
+func TestParse_StopFailure(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"StopFailure","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].IsWorking)
+	assert.True(t, got["s1"].HasError)
+}
+
+func TestParse_StopFailureClearedByPrompt(t *testing.T) {
+	data := []byte(
+		`{"event":"StopFailure","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.True(t, got["s1"].IsWorking)
+	assert.False(t, got["s1"].HasError)
+}
+
+func TestParse_NotificationIdlePrompt(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"Notification","session_id":"s1","cwd":"/proj","notification_type":"idle_prompt","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].IsWorking)
+	assert.False(t, got["s1"].IsBlocked)
+}
+
+func TestParse_NotificationPermissionPrompt(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"Notification","session_id":"s1","cwd":"/proj","notification_type":"permission_prompt","timestamp":"2026-03-25T10:00:02Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].IsWorking)
+	assert.True(t, got["s1"].IsBlocked)
+}
+
+func TestParse_NotificationUnknownTypeIgnored(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"Notification","session_id":"s1","cwd":"/proj","notification_type":"some_other","timestamp":"2026-03-25T10:00:02Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.True(t, got["s1"].IsWorking, "unknown notification should not change working state")
+}
+
+func TestParse_SessionStartResetsState(t *testing.T) {
+	data := []byte(
+		`{"event":"StopFailure","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"SessionStart","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].HasError)
+	assert.False(t, got["s1"].IsWorking)
+	assert.False(t, got["s1"].IsEnded)
+}
+
+func TestParse_SessionEnd(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"SessionEnd","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.False(t, got["s1"].IsWorking)
+	assert.True(t, got["s1"].IsEnded)
+}
+
+func TestParse_StopPreservesError(t *testing.T) {
+	// StopFailure followed by Stop should keep HasError true.
+	data := []byte(
+		`{"event":"StopFailure","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"Stop","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:01Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.True(t, got["s1"].HasError, "Stop should not clear HasError")
+	assert.False(t, got["s1"].IsWorking)
+}

@@ -29,8 +29,58 @@ func Parse(data []byte) map[string]SessionSnapshot {
 			snap.Cwd = evt.Cwd
 		}
 		snap.LastEventAt = evt.Timestamp
-		snap.IsWorking = evt.EventName == "UserPromptSubmit" || evt.EventName == "SubagentStart"
+		ApplyEvent(&snap, &evt)
 		sessions[evt.SessionID] = snap
 	}
 	return sessions
+}
+
+// ApplyEvent updates a session snapshot based on a hook event.
+func ApplyEvent(snap *SessionSnapshot, evt *Event) {
+	if snap == nil || evt == nil {
+		return
+	}
+	switch evt.EventName {
+	case "UserPromptSubmit", "SubagentStart":
+		snap.IsWorking = true
+		snap.IsBlocked = false
+		snap.HasError = false
+		snap.IsEnded = false
+
+	case "Stop", "SubagentStop":
+		snap.IsWorking = false
+		snap.IsBlocked = false
+		// HasError intentionally not cleared — Stop after StopFailure keeps error visible
+
+	case "StopFailure":
+		snap.IsWorking = false
+		snap.IsBlocked = false
+		snap.HasError = true
+
+	case "PermissionRequest":
+		snap.IsWorking = false
+		snap.IsBlocked = true
+
+	case "Notification":
+		switch evt.NotificationType {
+		case "idle_prompt":
+			snap.IsWorking = false
+			snap.IsBlocked = false
+		case "permission_prompt":
+			snap.IsWorking = false
+			snap.IsBlocked = true
+		}
+		// Other notification types are ignored (no state change).
+
+	case "SessionStart":
+		snap.IsWorking = false
+		snap.IsBlocked = false
+		snap.HasError = false
+		snap.IsEnded = false
+
+	case "SessionEnd":
+		snap.IsWorking = false
+		snap.IsBlocked = false
+		snap.IsEnded = true
+	}
 }

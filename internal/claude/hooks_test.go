@@ -44,8 +44,9 @@ func TestInstallHooks_NewSettings(t *testing.T) {
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	require.True(t, ok, "hooks key should exist")
 
-	// All 4 events registered.
-	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop"} {
+	// All 9 events registered.
+	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop",
+		"PermissionRequest", "Notification", "StopFailure", "SessionStart", "SessionEnd"} {
 		matchers, ok := hooks[evt].([]interface{})
 		require.True(t, ok, "event %s should have matchers", evt)
 		assert.Len(t, matchers, 1)
@@ -159,7 +160,8 @@ func TestInstallHooks_Idempotent(t *testing.T) {
 	var settings map[string]interface{}
 	require.NoError(t, json.Unmarshal(fw.files[settingsPath], &settings))
 	hooks := settings["hooks"].(map[string]interface{})
-	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop"} {
+	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop",
+		"PermissionRequest", "Notification", "StopFailure", "SessionStart", "SessionEnd"} {
 		matchers := hooks[evt].([]interface{})
 		assert.Len(t, matchers, 1, "event %s should still have exactly 1 matcher", evt)
 	}
@@ -238,8 +240,39 @@ func TestInstallHooks_WritesScript(t *testing.T) {
 	content := string(fw.files[scriptPath])
 	assert.Contains(t, content, "#!/bin/bash")
 	assert.Contains(t, content, "hook_event_name")
-	assert.Contains(t, content, "human-events")
-	assert.Contains(t, content, "events.jsonl")
+	assert.Contains(t, content, "human hook-event")
+}
+
+func TestInstallHooks_NotificationMatcher(t *testing.T) {
+	fw := newMockFileWriter()
+	fw.readFn = func(_ string) ([]byte, error) {
+		return nil, os.ErrNotExist
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, InstallHooks(&buf, fw))
+
+	var settingsPath string
+	for path := range fw.files {
+		if filepath.Base(path) == "settings.json" {
+			settingsPath = path
+			break
+		}
+	}
+
+	var settings map[string]interface{}
+	require.NoError(t, json.Unmarshal(fw.files[settingsPath], &settings))
+	hooks := settings["hooks"].(map[string]interface{})
+
+	// Notification should have matcher ".*" (not empty).
+	matchers := hooks["Notification"].([]interface{})
+	matcher := matchers[0].(map[string]interface{})
+	assert.Equal(t, ".*", matcher["matcher"], "Notification hook should have .* matcher")
+
+	// Other hooks should have empty matcher.
+	stopMatchers := hooks["Stop"].([]interface{})
+	stopMatcher := stopMatchers[0].(map[string]interface{})
+	assert.Equal(t, "", stopMatcher["matcher"], "Stop hook should have empty matcher")
 }
 
 func TestInstallHooks_UserPromptSubmitNotAsync(t *testing.T) {

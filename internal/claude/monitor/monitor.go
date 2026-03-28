@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -68,9 +67,8 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	// JSONL session parsing.
 	sessionByPath := m.parseSessions(instances)
 
-	// Hook events.
-	snap.hookReaders = buildHookReaders(instances, m.dockerClient)
-	hookSnaps := readHookSnapshots(ctx, snap.hookReaders)
+	// Hook events from daemon in-memory store.
+	hookSnaps := fetchDaemonHookSnapshots(snap.Daemon.Alive)
 	overlayHookState(sessionByPath, hookSnaps)
 
 	// Match sessions to instances, then mark daemon-connected ones.
@@ -93,7 +91,7 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 // FetchQuick updates daemon status, pane states, and hook-based working/idle
 // on an existing snapshot. Instances, sessions, agents, and tasks are carried
 // forward to avoid flicker.
-func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
+func (m *Monitor) FetchQuick(_ context.Context, prev *Snapshot) *Snapshot {
 	if prev == nil {
 		return nil
 	}
@@ -110,12 +108,9 @@ func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
 	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.connectedPIDs = readConnectedPIDs()
 
-	// Re-read hook events for sub-second state transitions.
-	if len(snap.hookReaders) > 0 {
-		quickCtx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
-		hookSnaps := readHookSnapshots(quickCtx, snap.hookReaders)
-		cancel()
-
+	// Re-read hook events from daemon for sub-second state transitions.
+	hookSnaps := fetchDaemonHookSnapshots(snap.Daemon.Alive)
+	if len(hookSnaps) > 0 {
 		// Deep-copy sessionByPath before mutating.
 		byPath := make(map[string]logparser.SessionState, len(snap.sessionByPath))
 		for k, v := range snap.sessionByPath {
@@ -126,13 +121,9 @@ func (m *Monitor) FetchQuick(ctx context.Context, prev *Snapshot) *Snapshot {
 
 		// Rebuild instance views with updated sessions.
 		snap.Instances = matchInstances(extractUsages(prev.Instances), byPath)
-		applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
 	}
 
-	// Update daemon-connected status even when instances aren't rebuilt.
-	if len(snap.hookReaders) == 0 {
-		applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
-	}
+	applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
 
 	// Carry forward panes from prev, updating only their states from hook data.
 	if len(prev.Panes) > 0 {
@@ -190,43 +181,21 @@ func collectContainerIDs(instances []claude.Instance) []string {
 	return ids
 }
 
-func buildHookReaders(instances []claude.Instance, dc claude.DockerClient) []hookevents.EventReader {
-	var readers []hookevents.EventReader
-
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		readers = append(readers, &hookevents.FileEventReader{
-			Path: filepath.Join(home, ".claude", "human-events", "events.jsonl"),
-		})
+// fetchDaemonHookSnapshots reads hook state from the daemon's in-memory store.
+// Returns nil when daemon is unavailable.
+func fetchDaemonHookSnapshots(daemonAlive bool) map[string]hookevents.SessionSnapshot {
+	if !daemonAlive {
+		return nil
 	}
-
-	if dc != nil {
-		seen := make(map[string]bool)
-		for _, inst := range instances {
-			if inst.Source == "container" && inst.ContainerID != "" && !seen[inst.ContainerID] {
-				seen[inst.ContainerID] = true
-				readers = append(readers, &hookevents.DockerEventReader{
-					Client:      dc,
-					ContainerID: inst.ContainerID,
-				})
-			}
-		}
+	info, err := daemon.ReadInfo()
+	if err != nil || info.Addr == "" {
+		return nil
 	}
-
-	return readers
-}
-
-func readHookSnapshots(ctx context.Context, readers []hookevents.EventReader) map[string]hookevents.SessionSnapshot {
-	all := make(map[string]hookevents.SessionSnapshot)
-	for _, r := range readers {
-		evtData, err := r.ReadEvents(ctx)
-		if err != nil || len(evtData) == 0 {
-			continue
-		}
-		for sid, snap := range hookevents.Parse(evtData) {
-			all[sid] = snap
-		}
+	snap, err := daemon.GetHookSnapshot(info.Addr, info.Token)
+	if err != nil {
+		return nil
 	}
-	return all
+	return snap
 }
 
 // overlayHookState updates sessions in byPath from hook snapshots when the
@@ -242,6 +211,8 @@ func overlayHookState(byPath map[string]logparser.SessionState, hooks map[string
 		}
 		if snap.LastEventAt.After(sess.LastActivity) {
 			sess.IsWorking = snap.IsWorking
+			sess.IsBlocked = snap.IsBlocked
+			sess.HasError = snap.HasError
 			sess.LastActivity = snap.LastEventAt
 			byPath[path] = sess
 		}
@@ -315,6 +286,12 @@ func matchPaneStates(panes []claude.TmuxPane, byPath map[string]logparser.Sessio
 func sessionToState(s logparser.SessionState) claude.InstanceState {
 	if s.IsWorking {
 		return claude.StateBusy
+	}
+	if s.HasError {
+		return claude.StateError
+	}
+	if s.IsBlocked {
+		return claude.StateBlocked
 	}
 	return claude.StateReady
 }
