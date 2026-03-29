@@ -223,6 +223,11 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier)
 	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
 
+	// Auto-upgrade lifecycle hooks in ~/.claude/settings.json.
+	if err := claude.InstallHooks(out, claude.OSFileWriter{}); err != nil {
+		logger.Warn().Err(err).Msg("hook upgrade failed")
+	}
+
 	return srv.ListenAndServe(ctx)
 }
 

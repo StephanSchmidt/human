@@ -43,8 +43,9 @@ func TestInstallHooks_NewSettings(t *testing.T) {
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	require.True(t, ok, "hooks key should exist")
 
-	// All 9 events registered.
+	// All 12 events registered.
 	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop",
+		"PreToolUse", "PostToolUse", "PostToolUseFailure",
 		"PermissionRequest", "Notification", "StopFailure", "SessionStart", "SessionEnd"} {
 		matchers, ok := hooks[evt].([]interface{})
 		require.True(t, ok, "event %s should have matchers", evt)
@@ -155,6 +156,7 @@ func TestInstallHooks_Idempotent(t *testing.T) {
 	require.NoError(t, json.Unmarshal(fw.files[settingsPath], &settings))
 	hooks := settings["hooks"].(map[string]interface{})
 	for _, evt := range []string{"UserPromptSubmit", "Stop", "SubagentStart", "SubagentStop",
+		"PreToolUse", "PostToolUse", "PostToolUseFailure",
 		"PermissionRequest", "Notification", "StopFailure", "SessionStart", "SessionEnd"} {
 		matchers := hooks[evt].([]interface{})
 		assert.Len(t, matchers, 1, "event %s should still have exactly 1 matcher", evt)
