@@ -6,10 +6,11 @@ import (
 
 // Config holds the configuration for a single Telegram bot instance.
 type Config struct {
-	Name         string  `mapstructure:"name"`
-	Token        string  `mapstructure:"token"`
-	Description  string  `mapstructure:"description"`
-	AllowedUsers []int64 `mapstructure:"allowed_users"`
+	Name          string  `mapstructure:"name"`
+	Token         string  `mapstructure:"token"`
+	Description   string  `mapstructure:"description"`
+	AllowedUsers  []int64 `mapstructure:"allowed_users"`
+	NotifyChatID  int64   `mapstructure:"notify_chat_id"` // Chat ID for proactive notifications (destructive ops, etc.)
 }
 
 // Instance represents a configured Telegram bot ready for use.
@@ -18,6 +19,7 @@ type Instance struct {
 	Description  string
 	Client       *Client
 	AllowedUsers []int64
+	NotifyChatID int64 // Chat ID for proactive notifications
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
@@ -48,6 +50,7 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 			Description:  cfg.Description,
 			Client:       New(cfg.Token),
 			AllowedUsers: cfg.AllowedUsers,
+			NotifyChatID: cfg.NotifyChatID,
 		}, true
 	},
 }

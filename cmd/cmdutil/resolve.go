@@ -10,23 +10,30 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/dispatch"
+	"github.com/StephanSchmidt/human/internal/slack"
+	"github.com/StephanSchmidt/human/internal/telegram"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // Deps holds injectable dependencies for command builders that need
 // tracker instance loading and resolution.
 type Deps struct {
-	LoadInstances     func(dir string) ([]tracker.Instance, error)
-	InstanceFromFlags func(cmd *cobra.Command) *tracker.Instance
-	AuditLogPath      func() string
+	LoadInstances       func(dir string) ([]tracker.Instance, error)
+	InstanceFromFlags   func(cmd *cobra.Command) *tracker.Instance
+	AuditLogPath        func() string
+	DestructiveLogPath  func() string
+	DestructiveNotifier func() tracker.DestructiveNotifier // returns nil if no notification configured
 }
 
 // DefaultDeps returns a Deps using the real implementations.
 func DefaultDeps() Deps {
 	return Deps{
-		LoadInstances:     LoadAllInstances,
-		InstanceFromFlags: InstanceFromFlags,
-		AuditLogPath:      AuditLogPath,
+		LoadInstances:       LoadAllInstances,
+		InstanceFromFlags:   InstanceFromFlags,
+		AuditLogPath:        AuditLogPath,
+		DestructiveLogPath:  DestructiveLogPath,
+		DestructiveNotifier: loadDestructiveNotifier,
 	}
 }
 
@@ -71,7 +78,10 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 		fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
 		return p, func() {}, nil
 	}
-	return ap, func() { _ = ap.Close() }, nil
+	p = ap
+
+	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, os.Stderr)
+	return p, func() { dpCleanup(); _ = ap.Close() }, nil
 }
 
 // ResolveAutoProvider loads all instances, applies flag overrides, and resolves
@@ -181,7 +191,10 @@ func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, de
 		_, _ = fmt.Fprintln(errW, "warning: audit logging disabled:", auditErr)
 		return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() {}}, nil
 	}
-	return &AutoResult{Provider: ap, Kind: instance.Kind, Key: key, Cleanup: func() { _ = ap.Close() }}, nil
+	p = ap
+
+	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, errW)
+	return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() { dpCleanup(); _ = ap.Close() }}, nil
 }
 
 // matchInstanceByKindAndURL finds a configured instance matching the tracker kind
@@ -222,4 +235,65 @@ func applyPolicyWrapper(p tracker.Provider, instanceName string, errW io.Writer)
 	return tracker.NewPolicyProvider(p, instanceName, policy, func(msg string) {
 		_, _ = fmt.Fprintln(errW, "policy: confirm:", msg)
 	})
+}
+
+// applyDestructiveWrapper wraps the provider with a DestructiveProvider for
+// logging and notifying on destructive operations. If wiring fails, a warning
+// is printed and the original provider is returned.
+func applyDestructiveWrapper(p tracker.Provider, name, kind string, deps Deps, errW io.Writer) (tracker.Provider, func()) {
+	if deps.DestructiveLogPath == nil {
+		return p, func() {}
+	}
+	logPath := deps.DestructiveLogPath()
+
+	var notifier tracker.DestructiveNotifier
+	if deps.DestructiveNotifier != nil {
+		notifier = deps.DestructiveNotifier()
+	}
+
+	dp, dpErr := tracker.NewDestructiveProvider(p, name, kind, logPath, notifier)
+	if dpErr != nil {
+		_, _ = fmt.Fprintln(errW, "warning: destructive logging disabled:", dpErr)
+		return p, func() {}
+	}
+	return dp, func() { _ = dp.Close() }
+}
+
+// loadDestructiveNotifier builds a DestructiveNotifier from configured
+// Telegram and Slack instances. Returns nil if neither is configured.
+func loadDestructiveNotifier() tracker.DestructiveNotifier {
+	var notifiers []dispatch.Notifier
+	var chatID int64
+
+	// Load Telegram
+	telegramInstances, _ := telegram.LoadInstances(".")
+	if len(telegramInstances) > 0 {
+		configs, _ := telegram.LoadConfigs(".")
+		for _, cfg := range configs {
+			if cfg.NotifyChatID != 0 {
+				chatID = cfg.NotifyChatID
+				// Find the matching instance
+				for _, inst := range telegramInstances {
+					if inst.Name == cfg.Name {
+						notifiers = append(notifiers, &dispatch.TelegramNotifier{Client: inst.Client})
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Load Slack
+	slackInstances, _ := slack.LoadInstances(".")
+	if len(slackInstances) > 0 {
+		notifiers = append(notifiers, &dispatch.SlackNotifier{Client: slackInstances[0].Client})
+	}
+
+	if len(notifiers) == 0 {
+		return nil
+	}
+
+	combined := &dispatch.CompositeNotifier{Notifiers: notifiers}
+	return &DispatchDestructiveNotifier{Notifier: combined, ChatID: chatID}
 }

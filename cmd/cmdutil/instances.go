@@ -176,3 +176,15 @@ func AuditLogPath() string {
 	_ = os.MkdirAll(dir, 0o750)
 	return filepath.Join(dir, "audit.log")
 }
+
+// DestructiveLogPath returns the path to the destructive operations log file
+// (~/.human/destructive.log), creating the directory if needed.
+func DestructiveLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".human", "destructive.log")
+	}
+	dir := filepath.Join(home, ".human")
+	_ = os.MkdirAll(dir, 0o750)
+	return filepath.Join(dir, "destructive.log")
+}
