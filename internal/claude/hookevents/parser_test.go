@@ -299,6 +299,37 @@ func TestParse_FullToolLifecycle(t *testing.T) {
 	assert.Empty(t, got["s1"].CurrentTool, "PostToolUse should clear CurrentTool")
 }
 
+func TestApplyEvent_PreToolUseExitPlanModeSetsWaiting(t *testing.T) {
+	snap := &SessionSnapshot{Status: logparser.StatusWorking}
+	ApplyEvent(snap, &Event{EventName: "PreToolUse", ToolName: "ExitPlanMode"})
+	assert.Equal(t, logparser.StatusWaiting, snap.Status)
+	assert.Empty(t, snap.CurrentTool, "waiting tools should not show as current tool")
+}
+
+func TestApplyEvent_PreToolUseAskUserQuestionSetsWaiting(t *testing.T) {
+	snap := &SessionSnapshot{Status: logparser.StatusWorking}
+	ApplyEvent(snap, &Event{EventName: "PreToolUse", ToolName: "AskUserQuestion"})
+	assert.Equal(t, logparser.StatusWaiting, snap.Status)
+	assert.Empty(t, snap.CurrentTool)
+}
+
+func TestParse_ExitPlanModeWaitingThenResumes(t *testing.T) {
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"PreToolUse","session_id":"s1","cwd":"/proj","tool_name":"ExitPlanMode","timestamp":"2026-03-25T10:00:01Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.Equal(t, logparser.StatusWaiting, got["s1"].Status)
+	assert.Empty(t, got["s1"].CurrentTool)
+
+	// User responds, PostToolUse fires.
+	data = append(data, []byte("\n"+
+		`{"event":"PostToolUse","session_id":"s1","cwd":"/proj","tool_name":"ExitPlanMode","timestamp":"2026-03-25T10:00:05Z"}`)...)
+	got = Parse(data)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
+}
+
 func TestParse_BlockedThenPostToolUseResumes(t *testing.T) {
 	// PermissionRequest → PostToolUse (permission granted, tool ran).
 	data := []byte(

@@ -50,7 +50,12 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 		snap.BlockedTool = ""
 
 	case "PreToolUse":
-		snap.CurrentTool = evt.ToolName
+		if isUserBlockingTool(evt.ToolName) {
+			snap.Status = logparser.StatusWaiting
+			snap.CurrentTool = ""
+		} else {
+			snap.CurrentTool = evt.ToolName
+		}
 
 	case "PostToolUse", "PostToolUseFailure":
 		snap.CurrentTool = ""
@@ -76,14 +81,7 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 		snap.CurrentTool = ""
 
 	case "Notification":
-		switch evt.NotificationType {
-		case "idle_prompt":
-			snap.Status = logparser.StatusReady
-			snap.CurrentTool = ""
-			snap.BlockedTool = ""
-		case "permission_prompt":
-			snap.Status = logparser.StatusBlocked
-		}
+		applyNotification(snap, evt)
 
 	case "SessionStart":
 		snap.Status = logparser.StatusReady
@@ -95,5 +93,27 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 		snap.Status = logparser.StatusEnded
 		snap.CurrentTool = ""
 		snap.BlockedTool = ""
+	}
+}
+
+func applyNotification(snap *SessionSnapshot, evt *Event) {
+	switch evt.NotificationType {
+	case "idle_prompt":
+		snap.Status = logparser.StatusReady
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
+	case "permission_prompt":
+		snap.Status = logparser.StatusBlocked
+	}
+}
+
+// isUserBlockingTool returns true for tools that block on user input.
+// Keep in sync with logparser.isUserBlockingToolUse().
+func isUserBlockingTool(name string) bool {
+	switch name {
+	case "AskUserQuestion", "ExitPlanMode":
+		return true
+	default:
+		return false
 	}
 }
