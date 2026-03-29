@@ -400,7 +400,7 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 
 	// Subagents + tasks.
 	if iv.Session != nil {
-		m.renderSubagents(b, iv.Session.Subagents, iv.Session.Status == logparser.StatusWorking, iv.Session.LastActivity)
+		m.renderSubagents(b, iv.Session.Subagents)
 		renderTaskSummary(b, iv.Session.Tasks)
 	}
 }
@@ -460,31 +460,29 @@ func renderModelBars(b *strings.Builder, summary *claude.UsageSummary, w int) {
 
 // --- render: subagents ---
 
-func (m model) renderSubagents(b *strings.Builder, subagents []logparser.Subagent, isWorking bool, lastActivity time.Time) {
+func (m model) renderSubagents(b *strings.Builder, subagents []logparser.Subagent) {
 	if len(subagents) == 0 {
 		return
 	}
 
-	// Hide completed agents once idle for 5s.
-	if !isWorking && time.Since(lastActivity) > 5*time.Second {
-		hasRunning := false
-		for _, sa := range subagents {
-			if sa.CompletedAt == nil {
-				hasRunning = true
-				break
-			}
+	// Filter out completed agents older than 5s.
+	var visible []logparser.Subagent
+	for _, sa := range subagents {
+		if sa.CompletedAt != nil && time.Since(*sa.CompletedAt) > 5*time.Second {
+			continue
 		}
-		if !hasRunning {
-			return
-		}
+		visible = append(visible, sa)
+	}
+	if len(visible) == 0 {
+		return
 	}
 
 	start := 0
-	if len(subagents) > 5 {
-		start = len(subagents) - 5
+	if len(visible) > 5 {
+		start = len(visible) - 5
 	}
-	for i := start; i < len(subagents); i++ {
-		sa := subagents[i]
+	for i := start; i < len(visible); i++ {
+		sa := visible[i]
 		agentType := sa.SubagentType
 		if agentType == "" {
 			agentType = "agent"
