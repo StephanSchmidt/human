@@ -81,21 +81,30 @@ human <tracker> issue create --project=<PROJECT> "Short title derived from the i
 
 10. Store the PM ticket key as `<PM_TICKET_KEY>` and the tracker as `<PM_TRACKER>` for traceability.
 
+## Step 3.5 — Ask engineering tracker
+
+Ask the user which tracker and project for the engineering ticket:
+
+1. Ask via `AskUserQuestion`: "Which tracker should the engineering ticket be created on? (e.g. linear, jira, github, gitlab, azuredevops, shortcut)"
+2. Ask via `AskUserQuestion`: "What project should the ticket be created in? (e.g. 'HUM' for Linear, 'myorg/myrepo' for GitHub)"
+
+Store the answers as `<ENG_TRACKER>` and `<ENG_PROJECT>`.
+
 ## Step 4 — Phase 2: Plan (creates engineering ticket)
 
 Delegate to the **human-planner** agent:
 
 ```
-Task(subagent_type="human-planner", prompt="Create an implementation plan for the idea described in .human/ideation/<slug>.md. The PM ticket is <PM_TICKET_KEY> on <PM_TRACKER>. Create the engineering ticket on Linear project HUM. Reference the PM ticket in the engineering ticket description for traceability.")
+Task(subagent_type="human-planner", prompt="Create an implementation plan for the idea described in .human/ideation/<slug>.md. The PM ticket is <PM_TICKET_KEY> on <PM_TRACKER>. Create the engineering ticket on <ENG_TRACKER> project <ENG_PROJECT>. Reference the PM ticket in the engineering ticket description for traceability.")
 ```
 
-The planner agent reads the ideation artifact, explores the codebase, writes the plan to `.human/plans/<key>.md`, and creates the Linear engineering ticket.
+The planner agent reads the ideation artifact, explores the codebase, writes the plan to `.human/plans/<key>.md`, and creates the engineering ticket.
 
 Store the engineering ticket key as `<ENG_TICKET_KEY>`.
 
 **If `<pipeline_depth>` is "Tickets only":** Stop here. Tell the user:
 - PM ticket created: `<PM_TRACKER> #<PM_TICKET_KEY>`
-- Engineering ticket created: `Linear HUM-<ENG_TICKET_KEY>`
+- Engineering ticket created: `<ENG_TRACKER> <ENG_TICKET_KEY>`
 - Plan written to `.human/plans/<key>.md`
 - Ideation record at `.human/ideation/<slug>.md`
 
@@ -118,7 +127,7 @@ The executor reads `.human/plans/<key>.md`, implements changes, and runs its own
 
 **If `<pipeline_depth>` is "Plan + execute":** Stop here. Tell the user:
 - PM ticket: `<PM_TRACKER> #<PM_TICKET_KEY>`
-- Engineering ticket: `Linear HUM-<ENG_TICKET_KEY>`
+- Engineering ticket: `<ENG_TRACKER> <ENG_TICKET_KEY>`
 - Implementation complete
 - Suggest running `/human-review <ENG_TICKET_KEY>` manually if desired
 
@@ -147,7 +156,7 @@ Sprint complete for: <original idea>
 
 Traceability:
 - PM ticket:    <PM_TRACKER> #<PM_TICKET_KEY> — the original idea
-- Eng ticket:   Linear HUM-<ENG_TICKET_KEY> — the implementation plan
+- Eng ticket:   <ENG_TRACKER> <ENG_TICKET_KEY> — the implementation plan
 - Commits:      reference both tickets
 
 Artifacts:
