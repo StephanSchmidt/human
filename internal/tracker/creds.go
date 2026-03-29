@@ -24,43 +24,15 @@ type CredResult struct {
 	Complete  bool              // true if all required vars are set
 }
 
-// credSpecs maps tracker kinds to their credential requirements.
-var credSpecs = map[string]CredSpec{
-	"jira": {
-		Kind: "jira", EnvPrefix: "JIRA", Label: "Jira",
-		Required: []string{"KEY", "USER"},
-		HelpURL:  "https://id.atlassian.com/manage-profile/security/api-tokens",
-	},
-	"github": {
-		Kind: "github", EnvPrefix: "GITHUB", Label: "GitHub",
-		Required: []string{"TOKEN"},
-		HelpURL:  "https://github.com/settings/tokens",
-	},
-	"gitlab": {
-		Kind: "gitlab", EnvPrefix: "GITLAB", Label: "GitLab",
-		Required: []string{"TOKEN"},
-		HelpURL:  "https://gitlab.com/-/user_settings/personal_access_tokens",
-	},
-	"linear": {
-		Kind: "linear", EnvPrefix: "LINEAR", Label: "Linear",
-		Required: []string{"TOKEN"},
-		HelpURL:  "https://linear.app/settings/api",
-	},
-	"azuredevops": {
-		Kind: "azuredevops", EnvPrefix: "AZURE", Label: "Azure DevOps",
-		Required: []string{"TOKEN"},
-		HelpURL:  "https://dev.azure.com/_usersSettings/tokens",
-	},
-	"shortcut": {
-		Kind: "shortcut", EnvPrefix: "SHORTCUT", Label: "Shortcut",
-		Required: []string{"TOKEN"},
-		HelpURL:  "https://app.shortcut.com/settings/account/api-tokens",
-	},
-}
+// CredSpecs maps tracker kinds to their credential requirements.
+// This is exported so the cmd layer can populate it with provider-specific
+// knowledge, keeping internal/tracker free of provider-specific data.
+// The cmd/cmdutil package populates it at init time.
+var CredSpecs = map[string]CredSpec{}
 
 // CredSpecForKind returns the credential specification for a tracker kind.
 func CredSpecForKind(kind string) (CredSpec, bool) {
-	spec, ok := credSpecs[kind]
+	spec, ok := CredSpecs[kind]
 	return spec, ok
 }
 
@@ -101,14 +73,25 @@ type TrackerStatus struct {
 	Missing []string // env var names for missing credentials (empty when Working)
 }
 
-// sectionToKind maps .humanconfig YAML section names to tracker kinds.
-var sectionToKind = map[string]string{
-	"jiras":       "jira",
-	"githubs":     "github",
-	"gitlabs":     "gitlab",
-	"linears":     "linear",
+// KindToSection maps tracker kinds to their .humanconfig YAML section names.
+// This is the canonical mapping; use SectionToKind() for the inverse.
+var KindToSection = map[string]string{
+	"jira":        "jiras",
+	"github":      "githubs",
+	"gitlab":      "gitlabs",
+	"linear":      "linears",
 	"azuredevops": "azuredevops",
-	"shortcuts":   "shortcut",
+	"shortcut":    "shortcuts",
+}
+
+// sectionToKind is the inverse of KindToSection, derived at init time.
+var sectionToKind map[string]string
+
+func init() {
+	sectionToKind = make(map[string]string, len(KindToSection))
+	for kind, section := range KindToSection {
+		sectionToKind[section] = kind
+	}
 }
 
 // SectionToKind returns the mapping of .humanconfig section names to tracker kinds.
@@ -149,7 +132,7 @@ func DiagnoseTrackers(dir string, unmarshal func(dir, section string, target any
 		var entries []diagnoseEntry
 		_ = unmarshal(dir, section, &entries)
 
-		spec, ok := credSpecs[kind]
+		spec, ok := CredSpecs[kind]
 		if !ok {
 			continue
 		}

@@ -10,21 +10,12 @@ import (
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
-// configSectionKey maps tracker kinds to their YAML section names.
-var configSectionKey = map[string]string{
-	"jira":        "jiras",
-	"github":      "githubs",
-	"gitlab":      "gitlabs",
-	"linear":      "linears",
-	"azuredevops": "azuredevops",
-	"shortcut":    "shortcuts",
-}
 
 // AutoSaveTrackerConfig ensures the parsed tracker URL is represented in
 // .humanconfig.yaml. If the config file doesn't exist, it creates one.
 // If it exists, it appends the tracker entry if not already present.
 func AutoSaveTrackerConfig(parsed *tracker.ParsedURL, configDir string) error {
-	section, ok := configSectionKey[parsed.Kind]
+	section, ok := tracker.KindToSection[parsed.Kind]
 	if !ok {
 		return errors.WithDetails("unknown tracker kind", "kind", parsed.Kind)
 	}
