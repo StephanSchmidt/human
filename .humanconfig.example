@@ -63,3 +63,11 @@ proxy:
     - "*.googleapis.com"
   intercept:  # domains to MITM for traffic logging (requires CA cert trust)
     - "api.anthropic.com"
+
+policies:
+  block:
+    - delete       # never allow agents to delete tickets
+    - assign       # don't reassign tickets
+  confirm:
+    - transition:Done   # log a warning before marking tickets as done
+    - create            # log a warning before creating new tickets

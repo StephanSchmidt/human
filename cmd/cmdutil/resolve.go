@@ -63,6 +63,8 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 
+	p = applyPolicyWrapper(p, instance.Name, os.Stderr)
+
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
 	if auditErr != nil {
@@ -171,6 +173,8 @@ func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, de
 		errW = cmd.ErrOrStderr()
 	}
 
+	p = applyPolicyWrapper(p, instance.Name, errW)
+
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
 	if auditErr != nil {
@@ -200,4 +204,22 @@ func urlsCompatible(a, b string) bool {
 	a = strings.TrimRight(strings.ToLower(a), "/")
 	b = strings.TrimRight(strings.ToLower(b), "/")
 	return a == b
+}
+
+// applyPolicyWrapper loads policy config and wraps the provider with a
+// PolicyProvider if policies are defined. Errors are reported as warnings
+// to errW; the original provider is returned unchanged on error.
+func applyPolicyWrapper(p tracker.Provider, instanceName string, errW io.Writer) tracker.Provider {
+	cfg, err := tracker.LoadPolicyConfig(".")
+	if err != nil {
+		_, _ = fmt.Fprintln(errW, "warning: policy config error:", err)
+		return p
+	}
+	if cfg == nil {
+		return p
+	}
+	policy := tracker.NewPolicy(*cfg)
+	return tracker.NewPolicyProvider(p, instanceName, policy, func(msg string) {
+		_, _ = fmt.Fprintln(errW, "policy: confirm:", msg)
+	})
 }

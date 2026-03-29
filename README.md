@@ -76,6 +76,7 @@ devcontainer up --workspace-folder .
 | Analytics | Amplitude (events, funnels, retention, cohorts) |
 | Messaging | Telegram (bot messages as task inbox), Slack (notifications) |
 | Infrastructure | Daemon mode, HTTPS proxy/firewall, Chrome Bridge, OAuth forwarding |
+| Governance | Declarative policy rules in `.humanconfig` (block/confirm agent operations) |
 | Skills | Ideate, sprint, ready, brainstorm, plan, execute, review, done, findbugs, security |
 | Dashboard | TUI with agent monitoring, token usage, tracker issues, pipeline state |
 | Search | Cross-tracker and Notion full-text index |
