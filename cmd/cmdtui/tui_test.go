@@ -2,11 +2,13 @@ package cmdtui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/StephanSchmidt/human/internal/claude"
@@ -470,4 +472,130 @@ func TestRenderFooter_ShowsLogMode(t *testing.T) {
 	assert.Contains(t, footer, "log:meta")
 	assert.Contains(t, footer, "l log")
 	assert.Contains(t, footer, "q quit")
+}
+
+// --- issues panel tests ---
+
+func TestRenderIssuesPanel_WithIssues(t *testing.T) {
+	groups := []trackerIssues{
+		{
+			TrackerKind: "linear",
+			Project:     "HUM",
+			Issues: []tracker.Issue{
+				{Key: "HUM-42", Status: "In Progress", Title: "Add issues to TUI"},
+				{Key: "HUM-41", Status: "Todo", Title: "Fix daemon reconnect"},
+			},
+		},
+	}
+	out := renderIssuesPanel(groups, time.Now(), 80)
+	assert.Contains(t, out, "Issues")
+	assert.Contains(t, out, "linear/HUM")
+	assert.Contains(t, out, "HUM-42")
+	assert.Contains(t, out, "In Progress")
+	assert.Contains(t, out, "Add issues to TUI")
+	assert.Contains(t, out, "HUM-41")
+}
+
+func TestRenderIssuesPanel_Empty(t *testing.T) {
+	out := renderIssuesPanel(nil, time.Time{}, 80)
+	assert.Equal(t, "", out)
+}
+
+func TestRenderIssuesPanel_TrackerError(t *testing.T) {
+	groups := []trackerIssues{
+		{
+			TrackerKind: "jira",
+			Project:     "KAN",
+			Err:         fmt.Errorf("unauthorized"),
+		},
+	}
+	out := renderIssuesPanel(groups, time.Now(), 80)
+	assert.Contains(t, out, "jira/KAN")
+	assert.Contains(t, out, "fetch failed")
+}
+
+func TestRenderIssuesPanel_MixedSuccess(t *testing.T) {
+	groups := []trackerIssues{
+		{
+			TrackerKind: "jira",
+			Project:     "KAN",
+			Err:         fmt.Errorf("timeout"),
+		},
+		{
+			TrackerKind: "linear",
+			Project:     "HUM",
+			Issues: []tracker.Issue{
+				{Key: "HUM-1", Status: "Todo", Title: "Working issue"},
+			},
+		},
+	}
+	out := renderIssuesPanel(groups, time.Now(), 80)
+	assert.Contains(t, out, "fetch failed")
+	assert.Contains(t, out, "HUM-1")
+	assert.Contains(t, out, "Working issue")
+}
+
+func TestModelUpdate_IssuesResultMsg(t *testing.T) {
+	m := testModel()
+	m.issuesLoading = true
+	results := []trackerIssues{
+		{
+			TrackerKind: "linear",
+			Project:     "HUM",
+			Issues: []tracker.Issue{
+				{Key: "HUM-1", Title: "Test"},
+			},
+		},
+	}
+	updated, _ := m.Update(issuesResultMsg{results: results})
+	um := updated.(model)
+	assert.False(t, um.issuesLoading)
+	assert.Len(t, um.issues, 1)
+	assert.Len(t, um.issues[0].Issues, 1)
+	assert.False(t, um.issuesFetched.IsZero())
+}
+
+func TestModelUpdate_IssueTickWhileLoading(t *testing.T) {
+	m := testModel()
+	m.issuesLoading = true
+	updated, cmd := m.Update(issueTickMsg(time.Now()))
+	um := updated.(model)
+	assert.True(t, um.issuesLoading, "should remain loading")
+	assert.NotNil(t, cmd, "should reschedule tick")
+}
+
+func TestIssueStatusStyle(t *testing.T) {
+	// "In Progress" should get specialStyle (teal)
+	assert.Equal(t, specialStyle, issueStatusStyle("In Progress"))
+	assert.Equal(t, specialStyle, issueStatusStyle("Active"))
+	assert.Equal(t, specialStyle, issueStatusStyle("Started"))
+
+	// "Done" / "Closed" should get subtleStyle
+	assert.Equal(t, subtleStyle, issueStatusStyle("Done"))
+	assert.Equal(t, subtleStyle, issueStatusStyle("Closed"))
+
+	// "Blocked" should get warningStyle
+	assert.Equal(t, warningStyle, issueStatusStyle("Blocked"))
+
+	// Unknown gets default
+	assert.Equal(t, lipgloss.NewStyle(), issueStatusStyle("Todo"))
+}
+
+func TestModelView_WithIssues(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot()
+	m.issues = []trackerIssues{
+		{
+			TrackerKind: "linear",
+			Project:     "HUM",
+			Issues: []tracker.Issue{
+				{Key: "HUM-99", Status: "Todo", Title: "Visible in view"},
+			},
+		},
+	}
+	m.issuesFetched = time.Now()
+	view := m.View()
+	assert.Contains(t, view, "Issues")
+	assert.Contains(t, view, "HUM-99")
+	assert.Contains(t, view, "Visible in view")
 }

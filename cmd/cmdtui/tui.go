@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
@@ -27,6 +28,15 @@ import (
 )
 
 const defaultWidth = 80
+
+// trackerIssues groups issues from one tracker instance and project.
+type trackerIssues struct {
+	TrackerName string
+	TrackerKind string
+	Project     string
+	Issues      []tracker.Issue
+	Err         error
+}
 
 // BuildTuiCmd creates the "tui" command.
 func BuildTuiCmd() *cobra.Command {
@@ -110,6 +120,10 @@ type model struct {
 	fetchGen uint64 // monotonic counter; assigned when dispatching a fetch
 	fetching bool   // true while a fetch command is in flight
 	logMode  string // traffic log mode: "off", "meta", "full"
+
+	issues        []trackerIssues // issues from configured tracker projects
+	issuesLoading bool            // true while issue fetch is in flight
+	issuesFetched time.Time       // when issues were last successfully fetched
 }
 
 func newModel(mon *monitor.Monitor) model {
@@ -130,10 +144,15 @@ type snapshotMsg struct {
 
 type logModeMsg string // result of log-mode set/get from daemon
 
+type issueTickMsg  time.Time
+type issuesResultMsg struct {
+	results []trackerIssues
+}
+
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd())
+	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -173,12 +192,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snap = msg.snap
 		m.fetching = false
+	case issueTickMsg:
+		return m.handleIssueTick()
+	case issuesResultMsg:
+		m.issues = msg.results
+		m.issuesLoading = false
+		m.issuesFetched = time.Now()
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
+	if m.issuesLoading {
+		return m, issueTickCmd()
+	}
+	m.issuesLoading = true
+	return m, tea.Batch(fetchIssuesCmd(), issueTickCmd())
 }
 
 func (m model) View() string {
@@ -234,6 +267,12 @@ func (m model) View() string {
 	if len(m.snap.Panes) > 0 {
 		b.WriteByte('\n')
 		b.WriteString(renderPanes(m.snap.Panes))
+	}
+
+	// Issues panel.
+	if ip := renderIssuesPanel(m.issues, m.issuesFetched, w); ip != "" {
+		b.WriteByte('\n')
+		b.WriteString(ip)
 	}
 
 	// Footer.
@@ -755,5 +794,101 @@ func setLogModeCmd(mode string) tea.Cmd {
 			return logModeMsg(mode) // optimistic
 		}
 		return logModeMsg(result)
+	}
+}
+
+// --- issue fetching ---
+
+func issueTickCmd() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg { return issueTickMsg(t) })
+}
+
+func fetchIssuesCmd() tea.Cmd {
+	return func() tea.Msg {
+		instances, err := cmdutil.LoadAllInstances(".")
+		if err != nil {
+			return issuesResultMsg{}
+		}
+		var results []trackerIssues
+		for _, inst := range instances {
+			if len(inst.Projects) == 0 {
+				continue
+			}
+			for _, project := range inst.Projects {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
+					Project:    project,
+					MaxResults: 20,
+					IncludeAll: false,
+				})
+				cancel()
+				results = append(results, trackerIssues{
+					TrackerName: inst.Name,
+					TrackerKind: inst.Kind,
+					Project:     project,
+					Issues:      issues,
+					Err:         fetchErr,
+				})
+			}
+		}
+		return issuesResultMsg{results: results}
+	}
+}
+
+// --- render: issues ---
+
+func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) string {
+	if len(groups) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+
+	header := "  " + subtleStyle.Render("Issues")
+	if !fetchedAt.IsZero() {
+		header += "  " + subtleStyle.Render(formatElapsed(time.Since(fetchedAt)) + " ago")
+	}
+	b.WriteString(header)
+	b.WriteByte('\n')
+
+	for _, g := range groups {
+		if g.Err != nil {
+			_, _ = fmt.Fprintf(&b, "    %s %s/%s: %s\n",
+				errorStyle.Render("!"),
+				g.TrackerKind, g.Project,
+				subtleStyle.Render("fetch failed"))
+			continue
+		}
+		if len(g.Issues) == 0 {
+			continue
+		}
+
+		_, _ = fmt.Fprintf(&b, "    %s %s/%s\n",
+			subtleStyle.Render("▸"),
+			g.TrackerKind, g.Project)
+
+		for _, issue := range g.Issues {
+			title := truncate(issue.Title, w-30)
+			_, _ = fmt.Fprintf(&b, "      %-12s %-14s %s\n",
+				subtleStyle.Render(issue.Key),
+				issueStatusStyle(issue.Status).Render(truncate(issue.Status, 12)),
+				title)
+		}
+	}
+
+	return b.String()
+}
+
+func issueStatusStyle(status string) lipgloss.Style {
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "progress") || strings.Contains(lower, "active") || strings.Contains(lower, "started"):
+		return specialStyle
+	case strings.Contains(lower, "done") || strings.Contains(lower, "closed") || strings.Contains(lower, "resolved"):
+		return subtleStyle
+	case strings.Contains(lower, "block"):
+		return warningStyle
+	default:
+		return lipgloss.NewStyle()
 	}
 }
