@@ -106,6 +106,9 @@ var ideateSkillContent []byte
 //go:embed embed/human-ideator-agent.md
 var ideatorAgentContent []byte
 
+//go:embed embed/human-sprint-skill.md
+var sprintSkillContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -180,6 +183,7 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: brainstormerAgentContent, relPath: filepath.Join("agents", "human-brainstormer.md")},
 		{content: ideateSkillContent, relPath: filepath.Join("skills", "human-ideate", "SKILL.md")},
 		{content: ideatorAgentContent, relPath: filepath.Join("agents", "human-ideator.md")},
+		{content: sprintSkillContent, relPath: filepath.Join("skills", "human-sprint", "SKILL.md")},
 	}
 
 	for _, f := range files {

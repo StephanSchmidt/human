@@ -1,0 +1,157 @@
+---
+name: human-sprint
+description: Auto-pipeline from idea to implementation-ready tickets (or full implementation)
+argument-hint: <rough idea or topic>
+---
+
+# Overview
+
+This skill chains the full human pipeline into a single flow: **Ideate -> Plan -> Execute -> Review**. It auto-decides mechanical questions using encoded decision principles and only surfaces genuine taste decisions to the user. The user can stop at any phase.
+
+## Decision Principles (for auto-deciding mechanical questions)
+
+- **Narrowest wedge first**: Choose the smallest scope that delivers value
+- **Completeness within scope**: Whatever is in scope should be complete
+- **Explicit > clever**: Prefer obvious solutions over clever ones
+- **Reuse > reinvent**: Use existing patterns and code before creating new ones
+- **Bias toward action**: When in doubt, lean toward building
+
+## Taste Decisions (always surface to user via AskUserQuestion)
+
+- Scope expansion vs. reduction
+- Architecture choices with genuine tradeoffs
+- When product and engineering perspectives conflict
+- Pipeline depth (how far to go)
+
+---
+
+Follow these steps in order:
+
+## Step 1 — Parse arguments
+
+Parse `$ARGUMENTS` as a rough idea or topic. Set `<slug>` to a slugified version (lowercase, spaces to hyphens, strip special chars, max 50 chars).
+
+## Step 2 — Ask pipeline depth
+
+Ask the user via `AskUserQuestion`:
+
+"How far should the pipeline go?
+- (A) **Tickets only** — create PM ticket + engineering plan, then stop
+- (B) **Plan + execute** — create tickets and implement the plan
+- (C) **Full pipeline** — create tickets, implement, and run a review"
+
+Store the user's choice as `<pipeline_depth>`.
+
+## Step 3 — Phase 1: Ideate (creates PM ticket)
+
+1. Create the output directory: `mkdir -p .human/ideation`
+
+2. Delegate to the **human-ideator** agent (Phase 1 — context gathering):
+
+```
+Task(subagent_type="human-ideator", prompt="Phase 1: Gather context for the idea: $ARGUMENTS. Explore the codebase for relevant code, existing patterns, recent git history, existing tickets, and any .human/ artifacts. Return a context summary and suggested forcing questions.")
+```
+
+3. Present the agent's context summary to the user.
+
+4. Ask forcing questions one at a time using `AskUserQuestion`. Ask each question individually, collecting the answer before proceeding to the next:
+   - "What is the actual pain? (not the feature request — what hurts today?)"
+   - "Who has this pain? (specific users or personas, not hypothetical)"
+   - "What is the status quo? (how do people cope without this?)"
+   - "What is the narrowest wedge? (the smallest version that delivers value)"
+   - "What would make this a 10-star version? (dream big, then we scope back)"
+
+5. Ask scope choice via `AskUserQuestion`: "Based on your answers, should we: (A) Expand — go broader than the narrowest wedge, (B) Hold — keep the narrowest wedge as described, or (C) Reduce — cut even further?"
+
+6. Ask tracker choice via `AskUserQuestion`: "Which tracker should the PM ticket be created on? (e.g., 'shortcut' or 'linear')"
+
+7. Delegate to the **human-ideator** agent (Phase 2 — generate ticket content):
+
+```
+Task(subagent_type="human-ideator", prompt="Phase 2: Generate PM ticket content for the idea: $ARGUMENTS. Forcing question answers: <paste all Q&A pairs>. Scope choice: <user's scope choice>. Tracker: <chosen tracker>. Generate a structured ticket with problem statement, user story, acceptance criteria, scope decisions, and challenge record.")
+```
+
+8. Create PM ticket on the chosen tracker:
+
+```bash
+human <tracker> issue create --project=<PROJECT> "Short title derived from the idea" --description "<structured ticket content from agent>"
+```
+
+9. Write ideation record to `.human/ideation/<slug>.md` including the full challenge record.
+
+10. Store the PM ticket key as `<PM_TICKET_KEY>` and the tracker as `<PM_TRACKER>` for traceability.
+
+## Step 4 — Phase 2: Plan (creates engineering ticket)
+
+Delegate to the **human-planner** agent:
+
+```
+Task(subagent_type="human-planner", prompt="Create an implementation plan for the idea described in .human/ideation/<slug>.md. The PM ticket is <PM_TICKET_KEY> on <PM_TRACKER>. Create the engineering ticket on Linear project HUM. Reference the PM ticket in the engineering ticket description for traceability.")
+```
+
+The planner agent reads the ideation artifact, explores the codebase, writes the plan to `.human/plans/<key>.md`, and creates the Linear engineering ticket.
+
+Store the engineering ticket key as `<ENG_TICKET_KEY>`.
+
+**If `<pipeline_depth>` is "Tickets only":** Stop here. Tell the user:
+- PM ticket created: `<PM_TRACKER> #<PM_TICKET_KEY>`
+- Engineering ticket created: `Linear HUM-<ENG_TICKET_KEY>`
+- Plan written to `.human/plans/<key>.md`
+- Ideation record at `.human/ideation/<slug>.md`
+
+## Step 5 — Mechanical decision gate
+
+Before executing, check the plan in `.human/plans/<key>.md` for architecture choices or trade-offs:
+
+- **If the plan has no taste decisions** (only mechanical implementation steps): Proceed automatically to execution. Apply the decision principles above.
+- **If the plan contains trade-offs or architecture choices**: Present them to the user via `AskUserQuestion` and let the user decide before proceeding. Example: "The plan includes the following architecture choices that need your input: <list choices>. What is your preference for each?"
+
+## Step 6 — Phase 3: Execute (implements the plan)
+
+Delegate to the **human-executor** agent:
+
+```
+Task(subagent_type="human-executor", prompt="Execute the plan for ticket <ENG_TICKET_KEY>")
+```
+
+The executor reads `.human/plans/<key>.md`, implements changes, and runs its own review checkpoint.
+
+**If `<pipeline_depth>` is "Plan + execute":** Stop here. Tell the user:
+- PM ticket: `<PM_TRACKER> #<PM_TICKET_KEY>`
+- Engineering ticket: `Linear HUM-<ENG_TICKET_KEY>`
+- Implementation complete
+- Suggest running `/human-review <ENG_TICKET_KEY>` manually if desired
+
+## Step 7 — Phase 4: Review (final quality gate)
+
+Delegate to the **human-reviewer** agent:
+
+```
+Task(subagent_type="human-reviewer", prompt="Review changes for ticket <ENG_TICKET_KEY>")
+```
+
+Present the review results to the user.
+
+If the review finds issues, ask the user via `AskUserQuestion`: "The review found the following issues: <list issues>. Should we: (A) Fix the issues and re-review, or (B) Accept as-is?"
+
+If the user chooses to fix:
+- Address each issue found by the reviewer
+- Re-run the review: `Task(subagent_type="human-reviewer", prompt="Review changes for ticket <ENG_TICKET_KEY>")`
+
+## Step 8 — Summary
+
+Present the full traceability chain to the user:
+
+```
+Sprint complete for: <original idea>
+
+Traceability:
+- PM ticket:    <PM_TRACKER> #<PM_TICKET_KEY> — the original idea
+- Eng ticket:   Linear HUM-<ENG_TICKET_KEY> — the implementation plan
+- Commits:      reference both tickets
+
+Artifacts:
+- Ideation:     .human/ideation/<slug>.md
+- Plan:         .human/plans/<key>.md
+- Review:       .human/reviews/<key>.md
+```
