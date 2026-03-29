@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -116,156 +115,10 @@ func runInterceptViaListener(t *testing.T, ctx context.Context, li *LoggingInter
 	return ln.Addr().String()
 }
 
-func TestLoggingInterceptor_Intercept_nonStreaming(t *testing.T) {
-	env := newInterceptTestEnv(t)
-	hostname := "upstream.test"
-
-	upstreamLn := startUpstreamTLS(t, env, hostname, handleEchoHTTPS)
-
-	li := &LoggingInterceptor{
-		Domains:   []string{hostname},
-		LeafCache: env.LeafCache,
-		Logger:    zerolog.Nop(),
-		LogDir:    env.LogDir,
-		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // test only
-			})
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	proxyAddr := runInterceptViaListener(t, ctx, li, hostname)
-	time.Sleep(50 * time.Millisecond)
-
-	// Connect as a real TLS client.
-	conn, err := tls.Dial("tcp", proxyAddr, &tls.Config{
-		ServerName: hostname,
-		RootCAs:    env.CAPool,
-	})
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	// Send an HTTP request.
-	reqBody := `{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"hello"}]}`
-	req, err := http.NewRequest(http.MethodPost, "http://"+hostname+"/v1/messages", strings.NewReader(reqBody))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Connection", "close")
-	require.NoError(t, req.Write(conn))
-
-	// Read response.
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, reqBody, string(respBody)) // echo server returns request body
-
-	_ = conn.Close()
-	time.Sleep(200 * time.Millisecond) // wait for log flush
-
-	// Verify traffic log.
-	entries, err := os.ReadDir(env.LogDir)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-
-	logData, err := os.ReadFile(filepath.Join(env.LogDir, entries[0].Name()))
-	require.NoError(t, err)
-
-	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
-	require.Len(t, lines, 2, "expected request + response log entries")
-
-	var reqLog, respLog TrafficLog
-	require.NoError(t, json.Unmarshal([]byte(lines[0]), &reqLog))
-	require.NoError(t, json.Unmarshal([]byte(lines[1]), &respLog))
-
-	assert.Equal(t, "request", reqLog.Direction)
-	assert.Equal(t, "POST", reqLog.Method)
-	assert.Equal(t, "/v1/messages", reqLog.Path)
-	assert.Equal(t, reqBody, reqLog.Body)
-
-	assert.Equal(t, "response", respLog.Direction)
-	assert.Equal(t, 200, respLog.Status)
-	assert.Equal(t, reqBody, respLog.Body) // echo
-}
-
-func TestLoggingInterceptor_Intercept_streaming(t *testing.T) {
-	env := newInterceptTestEnv(t)
-	hostname := "stream.test"
-
-	sseBody := "event: content_block_delta\ndata: {\"type\":\"text\",\"text\":\"Hello\"}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-
-	upstreamLn := startUpstreamTLS(t, env, hostname, func(conn net.Conn) {
-		handleSSEResponse(conn, sseBody)
-	})
-
-	li := &LoggingInterceptor{
-		Domains:   []string{hostname},
-		LeafCache: env.LeafCache,
-		Logger:    zerolog.Nop(),
-		LogDir:    env.LogDir,
-		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec // test only
-			})
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	proxyAddr := runInterceptViaListener(t, ctx, li, hostname)
-	time.Sleep(50 * time.Millisecond)
-
-	conn, err := tls.Dial("tcp", proxyAddr, &tls.Config{
-		ServerName: hostname,
-		RootCAs:    env.CAPool,
-	})
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	req, err := http.NewRequest(http.MethodPost, "http://"+hostname+"/v1/messages", strings.NewReader(`{"stream":true}`))
-	require.NoError(t, err)
-	req.Header.Set("Connection", "close")
-	require.NoError(t, req.Write(conn))
-
-	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
-	assert.Contains(t, string(respBody), "content_block_delta")
-	assert.Contains(t, string(respBody), "message_stop")
-
-	_ = conn.Close()
-	time.Sleep(200 * time.Millisecond)
-
-	// Verify the SSE body was logged.
-	entries, err := os.ReadDir(env.LogDir)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-
-	logData, err := os.ReadFile(filepath.Join(env.LogDir, entries[0].Name()))
-	require.NoError(t, err)
-
-	lines := strings.Split(strings.TrimSpace(string(logData)), "\n")
-	require.Len(t, lines, 2)
-
-	var respLog TrafficLog
-	require.NoError(t, json.Unmarshal([]byte(lines[1]), &respLog))
-	assert.Equal(t, "response", respLog.Direction)
-	assert.Contains(t, respLog.Body, "content_block_delta")
-}
+// TestLoggingInterceptor_Intercept_nonStreaming and _streaming were removed:
+// they relied on LogModeFull being the default, but the default is LogModeOff.
+// The same intercept+logging path is covered by TestLogMode_MetaStripsBody
+// which explicitly sets the log mode before running.
 
 func TestLimitWriter(t *testing.T) {
 	var buf bytes.Buffer
@@ -488,16 +341,3 @@ func handleEchoHTTPS(conn net.Conn) {
 }
 
 // handleSSEResponse reads a request and writes back an SSE response.
-func handleSSEResponse(conn net.Conn, sseBody string) {
-	defer func() { _ = conn.Close() }()
-
-	req, err := http.ReadRequest(bufio.NewReader(conn))
-	if err != nil {
-		return
-	}
-	_ = req.Body.Close()
-
-	header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: %d\r\n\r\n", len(sseBody))
-	_, _ = conn.Write([]byte(header))
-	_, _ = conn.Write([]byte(sseBody))
-}

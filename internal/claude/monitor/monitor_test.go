@@ -69,21 +69,22 @@ func TestOverlayHookState_BlockedAndError(t *testing.T) {
 	assert.Equal(t, logparser.StatusError, byPath["/b.jsonl"].Status)
 }
 
-func TestOverlayHookState_HookOlder(t *testing.T) {
+func TestOverlayHookState_SkipsStaleHook(t *testing.T) {
 	jsonlTime := time.Date(2026, 3, 25, 10, 0, 5, 0, time.UTC)
 	hookTime := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
 
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking, LastActivity: jsonlTime},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusReady, LastActivity: jsonlTime},
 	}
 	hooks := map[string]hookevents.SessionSnapshot{
-		"s1": {SessionID: "s1", Status: logparser.StatusReady, LastEventAt: hookTime},
+		"s1": {SessionID: "s1", Status: logparser.StatusBlocked, BlockedTool: "Bash", LastEventAt: hookTime},
 	}
 	overlayHookState(byPath, hooks)
 
 	sess := byPath["/a.jsonl"]
-	assert.Equal(t, logparser.StatusReady, sess.Status, "hook is authoritative regardless of timestamp")
-	assert.Equal(t, jsonlTime, sess.LastActivity, "LastActivity keeps the newer timestamp")
+	assert.Equal(t, logparser.StatusReady, sess.Status, "stale hook should not override newer JSONL state")
+	assert.Empty(t, sess.BlockedTool, "stale hook fields should not be applied")
+	assert.Equal(t, jsonlTime, sess.LastActivity, "LastActivity should keep JSONL timestamp")
 }
 
 // --- fillMissingFromHooks tests ---

@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -11,12 +10,10 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
-	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
-	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // Monitor owns the data-fetching and state-reconciliation cycle for the TUI.
@@ -48,7 +45,11 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.Telegram = telegramStatus()
 	snap.Slack = slackStatus()
-	snap.Trackers = tracker.DiagnoseTrackers(".", config.UnmarshalSection, os.Getenv)
+	if snap.Daemon.Alive {
+		if info, err := daemon.ReadInfo(); err == nil {
+			snap.Trackers, _ = daemon.GetTrackerDiagnose(info.Addr, info.Token)
+		}
+	}
 
 	instances, err := m.finder.FindInstances(ctx)
 	if err != nil {
@@ -211,9 +212,9 @@ func fetchDaemonHookSnapshots(daemonAlive bool) map[string]hookevents.SessionSna
 }
 
 // overlayHookState updates sessions in byPath from hook snapshots.
-// Hook state is authoritative — when a hook snapshot exists for a session,
-// it unconditionally overrides the JSONL-derived working/blocked/error flags.
-// JSONL parsing is only the source of truth when no hook data exists.
+// Hook state is authoritative only when its last event is at least as recent
+// as the JSONL-derived last activity. Async hooks can arrive out of order
+// (e.g. PermissionRequest after Stop), so stale hook snapshots are skipped.
 func overlayHookState(byPath map[string]logparser.SessionState, hooks map[string]hookevents.SessionSnapshot) {
 	if len(hooks) == 0 {
 		return
@@ -223,13 +224,14 @@ func overlayHookState(byPath map[string]logparser.SessionState, hooks map[string
 		if !ok {
 			continue
 		}
+		if snap.LastEventAt.Before(sess.LastActivity) {
+			continue
+		}
 		sess.Status = snap.Status
 		sess.CurrentTool = snap.CurrentTool
 		sess.BlockedTool = snap.BlockedTool
 		sess.ErrorType = snap.ErrorType
-		if snap.LastEventAt.After(sess.LastActivity) {
-			sess.LastActivity = snap.LastEventAt
-		}
+		sess.LastActivity = snap.LastEventAt
 		byPath[path] = sess
 	}
 }
