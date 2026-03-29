@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/apiclient"
@@ -311,16 +312,5 @@ func richTextPlain(texts []notionRichText) string {
 	for _, t := range texts {
 		sb = append(sb, t.PlainText)
 	}
-	return joinStrings(sb)
-}
-
-func joinStrings(ss []string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += ""
-		}
-		result += s
-	}
-	return result
+	return strings.Join(sb, "")
 }

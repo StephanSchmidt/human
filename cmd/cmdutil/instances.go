@@ -17,45 +17,30 @@ import (
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
+// instanceLoader loads tracker instances from provider-specific config in dir.
+type instanceLoader func(dir string) ([]tracker.Instance, error)
+
+// allLoaders lists every provider's instance loader in registration order.
+var allLoaders = []instanceLoader{
+	jira.LoadInstances,
+	github.LoadInstances,
+	gitlab.LoadInstances,
+	linear.LoadInstances,
+	azuredevops.LoadInstances,
+	shortcut.LoadInstances,
+}
+
 // LoadAllInstances collects tracker instances from all provider configs.
 func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 	var all []tracker.Instance
-
-	ji, err := jira.LoadInstances(dir)
-	if err != nil {
-		return nil, err
+	for _, load := range allLoaders {
+		instances, err := load(dir)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, instances...)
 	}
-	all = append(all, ji...)
-
-	gi, err := github.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, gi...)
-
-	gli, err := gitlab.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, gli...)
-
-	li, err := linear.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, li...)
-
-	adi, err := azuredevops.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	all = append(all, adi...)
-
-	sci, err := shortcut.LoadInstances(dir)
-	if err != nil {
-		return nil, err
-	}
-	return append(all, sci...), nil
+	return all, nil
 }
 
 // InstanceFromFlags builds a tracker instance from root persistent flags,
@@ -165,26 +150,22 @@ func LoadNotionIndexInstances(dir string) ([]index.NotionInstance, error) {
 	return result, nil
 }
 
-// AuditLogPath returns the path to the audit log file (~/.human/audit.log),
-// creating the directory if needed.
-func AuditLogPath() string {
+// humanFilePath returns the path to a file inside ~/.human/, creating the
+// directory if needed. Falls back to ./.human/ if the home dir is unknown.
+func humanFilePath(filename string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".human", "audit.log")
+		return filepath.Join(".", ".human", filename)
 	}
 	dir := filepath.Join(home, ".human")
 	_ = os.MkdirAll(dir, 0o750)
-	return filepath.Join(dir, "audit.log")
+	return filepath.Join(dir, filename)
 }
+
+// AuditLogPath returns the path to the audit log file (~/.human/audit.log),
+// creating the directory if needed.
+func AuditLogPath() string { return humanFilePath("audit.log") }
 
 // DestructiveLogPath returns the path to the destructive operations log file
 // (~/.human/destructive.log), creating the directory if needed.
-func DestructiveLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".human", "destructive.log")
-	}
-	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
-	return filepath.Join(dir, "destructive.log")
-}
+func DestructiveLogPath() string { return humanFilePath("destructive.log") }

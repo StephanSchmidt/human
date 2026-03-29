@@ -166,9 +166,9 @@ func TestFormatTokens(t *testing.T) {
 		{0, "0"},
 	}
 	for _, tt := range tests {
-		got := formatTokens(tt.n)
+		got := FormatTokens(tt.n)
 		if got != tt.want {
-			t.Errorf("formatTokens(%d) = %q, want %q", tt.n, got, tt.want)
+			t.Errorf("FormatTokens(%d) = %q, want %q", tt.n, got, tt.want)
 		}
 	}
 }

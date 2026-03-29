@@ -32,7 +32,7 @@ func TestIsEnvFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, IsEnvFile(tt.filename))
+			assert.Equal(t, tt.want, IsSensitiveFile(tt.filename) == FileKindEnv)
 		})
 	}
 }

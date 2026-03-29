@@ -107,12 +107,6 @@ func detectTier(server *fuse.Server) string {
 	return "splice"
 }
 
-// IsEnvFile returns true if the filename matches .env patterns:
-// .env, .env.local, .env.production, .env.*, etc.
-func IsEnvFile(name string) bool {
-	return IsSensitiveFile(name) == FileKindEnv
-}
-
 // IsSensitiveFile classifies a filename by its sensitivity.
 func IsSensitiveFile(name string) FileKind {
 	base := filepath.Base(name)

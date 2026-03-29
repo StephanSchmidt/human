@@ -158,7 +158,8 @@ func FormatMemory(mem *MemoryInfo) string {
 	return fmt.Sprintf("mem: %s", usage)
 }
 
-func formatTokens(n int) string {
+// FormatTokens formats a token count as a human-readable string (e.g. 1.5M, 2.3K).
+func FormatTokens(n int) string {
 	switch {
 	case n >= 1_000_000:
 		return fmt.Sprintf("%.1fM", float64(n)/1e6)
@@ -209,8 +210,8 @@ func FormatUsage(w io.Writer, summary *UsageSummary, now time.Time) error {
 			pct = float64(mu.Total()) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
-			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
-			formatTokens(mu.CacheCreate), formatTokens(mu.CacheRead))
+			model, pct, FormatTokens(mu.InputTokens), FormatTokens(mu.OutputTokens),
+			FormatTokens(mu.CacheCreate), FormatTokens(mu.CacheRead))
 		if err != nil {
 			return err
 		}
@@ -273,8 +274,8 @@ func FormatModelRows(w io.Writer, summary *UsageSummary, grandTotal int) error {
 			pct = float64(mu.Total()) / float64(grandTotal) * 100
 		}
 		_, err := fmt.Fprintf(w, "  %-12s  %4.0f%%  in: %s  out: %s  cache: %s/%s\n",
-			model, pct, formatTokens(mu.InputTokens), formatTokens(mu.OutputTokens),
-			formatTokens(mu.CacheCreate), formatTokens(mu.CacheRead))
+			model, pct, FormatTokens(mu.InputTokens), FormatTokens(mu.OutputTokens),
+			FormatTokens(mu.CacheCreate), FormatTokens(mu.CacheRead))
 		if err != nil {
 			return err
 		}
