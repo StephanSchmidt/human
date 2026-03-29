@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/StephanSchmidt/human/errors"
 )
 
 const (
@@ -19,21 +21,21 @@ func PeekClientHello(conn net.Conn) (peeked []byte, serverName string, err error
 	// Read 5-byte TLS record header.
 	header := make([]byte, 5) //nolint:mnd // TLS record header is always 5 bytes
 	if _, err := io.ReadFull(conn, header); err != nil {
-		return nil, "", fmt.Errorf("reading TLS record header: %w", err)
+		return nil, "", errors.WrapWithDetails(err, "reading TLS record header")
 	}
 
 	if header[0] != tlsRecordHandshake {
-		return nil, "", fmt.Errorf("not a TLS handshake record (type 0x%02x)", header[0])
+		return nil, "", errors.WithDetails("not a TLS handshake record", "recordType", fmt.Sprintf("0x%02x", header[0]))
 	}
 
 	recordLen := int(header[3])<<8 | int(header[4])
 	if recordLen == 0 || recordLen > 16384 { //nolint:mnd // TLS max record size
-		return nil, "", fmt.Errorf("invalid TLS record length %d", recordLen)
+		return nil, "", errors.WithDetails("invalid TLS record length", "length", recordLen)
 	}
 
 	body := make([]byte, recordLen)
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return nil, "", fmt.Errorf("reading TLS record body: %w", err)
+		return nil, "", errors.WrapWithDetails(err, "reading TLS record body")
 	}
 
 	peeked = append(header, body...)
@@ -49,13 +51,13 @@ func PeekClientHello(conn net.Conn) (peeked []byte, serverName string, err error
 // parseClientHello extracts the SNI hostname from a ClientHello handshake message.
 func parseClientHello(data []byte) (string, error) {
 	if len(data) < 1 || data[0] != handshakeClientHello {
-		return "", fmt.Errorf("not a ClientHello (type 0x%02x)", safeFirst(data))
+		return "", errors.WithDetails("not a ClientHello", "handshakeType", fmt.Sprintf("0x%02x", safeFirst(data)))
 	}
 
 	// Skip: handshake type (1) + length (3) + client version (2) + random (32)
 	pos := 1 + 3 + 2 + 32 //nolint:mnd // fixed ClientHello field sizes
 	if pos >= len(data) {
-		return "", fmt.Errorf("ClientHello too short for session ID")
+		return "", errors.WithDetails("ClientHello too short for session ID")
 	}
 
 	// Skip session ID (length-prefixed, 1-byte length).
@@ -64,14 +66,14 @@ func parseClientHello(data []byte) (string, error) {
 
 	// Skip cipher suites (length-prefixed, 2-byte length).
 	if pos+2 > len(data) {
-		return "", fmt.Errorf("ClientHello too short for cipher suites")
+		return "", errors.WithDetails("ClientHello too short for cipher suites")
 	}
 	cipherLen := int(data[pos])<<8 | int(data[pos+1])
 	pos += 2 + cipherLen
 
 	// Skip compression methods (length-prefixed, 1-byte length).
 	if pos >= len(data) {
-		return "", fmt.Errorf("ClientHello too short for compression methods")
+		return "", errors.WithDetails("ClientHello too short for compression methods")
 	}
 	compLen := int(data[pos])
 	pos += 1 + compLen
@@ -85,7 +87,7 @@ func parseClientHello(data []byte) (string, error) {
 
 	end := pos + extLen
 	if end > len(data) {
-		return "", fmt.Errorf("extensions length exceeds record")
+		return "", errors.WithDetails("extensions length exceeds record")
 	}
 
 	for pos+4 <= end {
@@ -94,7 +96,7 @@ func parseClientHello(data []byte) (string, error) {
 		pos += 4
 
 		if pos+extDataLen > end {
-			return "", fmt.Errorf("extension data exceeds record")
+			return "", errors.WithDetails("extension data exceeds record")
 		}
 
 		if extType == extServerName {
@@ -110,7 +112,7 @@ func parseClientHello(data []byte) (string, error) {
 // parseSNIExtension extracts the hostname from the server_name extension data.
 func parseSNIExtension(data []byte) (string, error) {
 	if len(data) < 2 { //nolint:mnd // server name list length
-		return "", fmt.Errorf("SNI extension too short")
+		return "", errors.WithDetails("SNI extension too short")
 	}
 
 	// Skip server name list length (2 bytes).
@@ -118,7 +120,7 @@ func parseSNIExtension(data []byte) (string, error) {
 	data = data[2:]
 
 	if len(data) < listLen || listLen == 0 {
-		return "", fmt.Errorf("SNI list length mismatch")
+		return "", errors.WithDetails("SNI list length mismatch")
 	}
 
 	// Parse entries.
@@ -129,7 +131,7 @@ func parseSNIExtension(data []byte) (string, error) {
 		pos += 3
 
 		if pos+nameLen > listLen || pos+nameLen > len(data) {
-			return "", fmt.Errorf("SNI name length exceeds list")
+			return "", errors.WithDetails("SNI name length exceeds list")
 		}
 
 		if nameType == sniHostNameType {

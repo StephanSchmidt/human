@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/huh"
+
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
@@ -56,7 +58,7 @@ func (h huhPrompter) SelectServices(available []initpkg.ServiceType) ([]initpkg.
 		Filterable(false).
 		Validate(func(selected []int) error {
 			if len(selected) == 0 {
-				return fmt.Errorf("select at least one service")
+				return errors.WithDetails("select at least one service")
 			}
 			return nil
 		}).

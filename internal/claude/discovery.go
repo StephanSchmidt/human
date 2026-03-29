@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/StephanSchmidt/human/errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,7 +131,7 @@ func (r FileSessionResolver) ResolveSessionID(pid int) (string, error) {
 		return "", err
 	}
 	if session.SessionID == "" {
-		return "", fmt.Errorf("empty sessionId in %s", path)
+		return "", errors.WithDetails("empty sessionId", "path", path)
 	}
 	return session.SessionID, nil
 }

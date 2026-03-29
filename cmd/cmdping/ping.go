@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
@@ -33,7 +34,7 @@ func BuildPingCmd() *cobra.Command {
 
 			if addr == "" {
 				_, _ = fmt.Fprintln(out, "No daemon configured")
-				return fmt.Errorf("no daemon address found")
+				return errors.WithDetails("no daemon address found")
 			}
 
 			start := time.Now()
@@ -42,7 +43,7 @@ func BuildPingCmd() *cobra.Command {
 
 			if err != nil {
 				_, _ = fmt.Fprintf(out, "Daemon at %s is not reachable\n", addr)
-				return fmt.Errorf("cannot connect: %w", err)
+				return errors.WrapWithDetails(err, "cannot connect", "addr", addr)
 			}
 			_ = conn.Close()
 

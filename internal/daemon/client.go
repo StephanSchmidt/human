@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -23,7 +24,7 @@ const dialTimeout = 5 * time.Second
 func RunRemote(addr, token string, args []string, version string) (int, error) {
 	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
-		return 1, fmt.Errorf("cannot reach daemon at %s: %w", addr, err)
+		return 1, errors.WrapWithDetails(err, "cannot reach daemon", "addr", addr)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -39,7 +40,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 
 	enc := json.NewEncoder(conn)
 	if err := enc.Encode(req); err != nil {
-		return 1, fmt.Errorf("failed to send request: %w", err)
+		return 1, errors.WrapWithDetails(err, "failed to send request")
 	}
 
 	// Single buffered reader for the connection — creating a new
@@ -48,12 +49,12 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
-		return 1, fmt.Errorf("failed to read response: %w", err)
+		return 1, errors.WrapWithDetails(err, "failed to read response")
 	}
 
 	var resp Response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return 1, fmt.Errorf("invalid response from daemon: %w", err)
+		return 1, errors.WrapWithDetails(err, "invalid response from daemon")
 	}
 
 	if resp.Stdout != "" {
@@ -69,15 +70,15 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	if resp.AwaitCallback {
 		line2, err := reader.ReadBytes('\n')
 		if err != nil {
-			return 1, fmt.Errorf("failed to read callback response: %w", err)
+			return 1, errors.WrapWithDetails(err, "failed to read callback response")
 		}
 		var resp2 Response
 		if err := json.Unmarshal(line2, &resp2); err != nil {
-			return 1, fmt.Errorf("invalid callback response: %w", err)
+			return 1, errors.WrapWithDetails(err, "invalid callback response")
 		}
 		if resp2.Callback != "" {
 			if err := deliverCallback(resp2.Callback); err != nil {
-				return 1, fmt.Errorf("failed to deliver OAuth callback: %w", err)
+				return 1, errors.WrapWithDetails(err, "failed to deliver OAuth callback")
 			}
 		}
 	}
@@ -90,7 +91,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
 	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("cannot reach daemon at %s: %w", addr, err)
+		return nil, errors.WrapWithDetails(err, "cannot reach daemon", "addr", addr)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -101,22 +102,22 @@ func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
 
 	enc := json.NewEncoder(conn)
 	if err := enc.Encode(req); err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, errors.WrapWithDetails(err, "failed to send request")
 	}
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+		return nil, errors.WrapWithDetails(err, "failed to read response")
 	}
 
 	var resp Response
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("invalid response from daemon: %w", err)
+		return nil, errors.WrapWithDetails(err, "invalid response from daemon")
 	}
 
 	if resp.ExitCode != 0 {
-		return nil, fmt.Errorf("daemon command failed: %s", resp.Stderr)
+		return nil, errors.WithDetails("daemon command failed", "stderr", resp.Stderr)
 	}
 
 	return []byte(resp.Stdout), nil
@@ -148,7 +149,7 @@ func GetHookSnapshot(addr, token string) (map[string]hookevents.SessionSnapshot,
 	}
 	var snap map[string]hookevents.SessionSnapshot
 	if err := json.Unmarshal(out, &snap); err != nil {
-		return nil, fmt.Errorf("invalid hook snapshot JSON: %w", err)
+		return nil, errors.WrapWithDetails(err, "invalid hook snapshot JSON")
 	}
 	return snap, nil
 }
@@ -161,7 +162,7 @@ func GetTrackerDiagnose(addr, token string) ([]tracker.TrackerStatus, error) {
 	}
 	var statuses []tracker.TrackerStatus
 	if err := json.Unmarshal(out, &statuses); err != nil {
-		return nil, fmt.Errorf("invalid tracker diagnose JSON: %w", err)
+		return nil, errors.WrapWithDetails(err, "invalid tracker diagnose JSON")
 	}
 	return statuses, nil
 }
@@ -174,7 +175,7 @@ func GetTrackerIssues(addr, token string) ([]TrackerIssuesResult, error) {
 	}
 	var results []TrackerIssuesResult
 	if err := json.Unmarshal(out, &results); err != nil {
-		return nil, fmt.Errorf("invalid tracker issues JSON: %w", err)
+		return nil, errors.WrapWithDetails(err, "invalid tracker issues JSON")
 	}
 	return results, nil
 }
@@ -189,14 +190,14 @@ func deliverCallback(callbackURL string) error {
 		return err
 	}
 	if httpResp == nil {
-		return fmt.Errorf("OAuth callback delivery returned nil response")
+		return errors.WithDetails("OAuth callback delivery returned nil response")
 	}
 	if httpResp.Body != nil {
 		defer func() { _ = httpResp.Body.Close() }()
 		_, _ = io.Copy(io.Discard, httpResp.Body)
 	}
 	if httpResp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("OAuth callback delivery failed with status %d", httpResp.StatusCode)
+		return errors.WithDetails("OAuth callback delivery failed", "statusCode", httpResp.StatusCode)
 	}
 	return nil
 }

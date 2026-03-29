@@ -134,7 +134,7 @@ func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps D
 	// 3. No creds — return actionable error.
 	spec, _ := tracker.CredSpecForKind(parsed.Kind)
 	result := tracker.CheckCreds(spec)
-	return nil, fmt.Errorf("%s", tracker.FormatMissingCreds(result, parsed))
+	return nil, errors.WithDetails(tracker.FormatMissingCreds(result, parsed))
 }
 
 // resolveFromKey is the original key-based resolution logic.

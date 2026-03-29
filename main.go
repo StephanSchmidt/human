@@ -314,7 +314,7 @@ func buildInstallCmd() *cobra.Command {
 				}
 				fmt.Println("Done. Skill: /human-plan <ticket-key>")
 			default:
-				return fmt.Errorf("unsupported agent: %s", agent)
+				return errors.WithDetails("unsupported agent", "agent", agent)
 			}
 			return nil
 		},
