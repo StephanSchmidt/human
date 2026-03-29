@@ -229,7 +229,6 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 | `/human-bug-plan` | Analyzes a bug ticket for root cause and writes a fix plan |
 | `/human-execute` | Loads a plan, executes step by step, runs a review checkpoint |
 | `/human-review` | Diffs the current branch against acceptance criteria |
-| `/human-done` | Runs tests and produces a pass/fail Definition of Done report |
 | `/human-findbugs` | Multi-agent pipeline to find logic errors, race conditions, and security issues |
 | `/human-security` | Deep security audit with attack chain analysis and OWASP Top 10 coverage |
 | `/human-gardening` | Multi-agent pipeline for codebase health analysis, refactoring triage, and automated fixes |
@@ -243,7 +242,6 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 /human-plan 42                     # create engineering plan
 /human-execute HUM-43              # implement the plan
 /human-review HUM-43               # review changes
-/human-done HUM-43                 # verify definition of done
 ```
 
 All outputs are saved to `.human/` (plans, reviews, done reports, bug analyses, security audits, health reports).
