@@ -14,10 +14,10 @@
 
 **The everything framework for secure AI development.** Claude is the engine. human is everything else. Trackers. Skills. Agents. Docs. Designs. Analytics. One install.
 
-- **Dashboard** — Monitor running agents, token usage, and container resources in real time
+- **Pipeline Dashboard** — Monitor running agents, token usage, tracker issues, and pipeline state in real time
 - **Secure Devcontainer** — OAuth, MCP, browser access, Chrome Bridge, firewall — all configured out of the box
 - **Context Management** — Connectors for every source with cross-tracker and Notion search
-- **Lifecycle Skills** — Plan, execute, review, ship. Built-in skills so you never start from a blank prompt
+- **Lifecycle Skills** — Ideate, plan, execute, review. One command (`/human-sprint`) runs the full pipeline
 
 ### Architecture
 
@@ -76,8 +76,8 @@ devcontainer up --workspace-folder .
 | Analytics | Amplitude (events, funnels, retention, cohorts) |
 | Messaging | Telegram (bot messages as task inbox), Slack (notifications) |
 | Infrastructure | Daemon mode, HTTPS proxy/firewall, Chrome Bridge, OAuth forwarding |
-| Skills | Ready, brainstorm, plan, execute, review, done, findbugs, security |
-| Dashboard | TUI with real-time agent monitoring and token usage |
+| Skills | Ideate, sprint, ready, brainstorm, plan, execute, review, done, findbugs, security |
+| Dashboard | TUI with agent monitoring, token usage, tracker issues, pipeline state |
 | Search | Cross-tracker and Notion full-text index |
 
 ## Dashboard
@@ -220,6 +220,8 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 
 | Skill | Description |
 |-------|-------------|
+| `/human-ideate` | Challenge an idea with forcing questions and create a ready PM ticket |
+| `/human-sprint` | Run the full pipeline in one command: ideate → plan → execute → review |
 | `/human-ready` | Evaluates a ticket against a Definition of Ready checklist |
 | `/human-brainstorm` | Explores the codebase and generates 2-3 implementation approaches |
 | `/human-plan` | Fetches a ticket and produces a structured implementation plan |
@@ -231,13 +233,15 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 | `/human-security` | Deep security audit with attack chain analysis and OWASP Top 10 coverage |
 
 ```bash
-# Example workflow
-/human-ready KAN-1        # check ticket readiness
-/human-brainstorm KAN-1   # explore approaches
-/human-plan KAN-1         # create implementation plan
-/human-execute KAN-1      # execute the plan
-/human-review KAN-1       # review changes against ticket
-/human-done KAN-1         # verify definition of done
+# Full pipeline in one command
+/human-sprint "add rate limiting to the API"
+
+# Or step by step
+/human-ideate "add rate limiting"  # challenge idea, create PM ticket
+/human-plan 42                     # create engineering plan
+/human-execute HUM-43              # implement the plan
+/human-review HUM-43               # review changes
+/human-done HUM-43                 # verify definition of done
 ```
 
 All outputs are saved to `.human/` (plans, reviews, done reports, bug analyses, security audits).
