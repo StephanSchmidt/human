@@ -56,5 +56,7 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - If a plan step is ambiguous, read the surrounding code to resolve the ambiguity rather than guessing.
 - Run tests after completing all changes to catch regressions early.
 - Preserve the original ticket key throughout. Include it in git commit messages (e.g. `KAN-1: Add validation for email field`).
+- **Boil the Lake**: When the complete implementation costs minutes more than a partial one, do the complete thing. Handle all edge cases, all error paths, all related tests. Completeness is cheap with AI — do not leave known gaps for follow-up tickets.
+- **User Sovereignty**: Recommend, do not decide. When a plan step has multiple valid approaches or a judgment call, present both sides with trade-offs and let the user choose. Never silently make opinionated choices on the user's behalf.
 
 Do NOT use `AskUserQuestion` — you cannot interact with the user. Execute the plan autonomously and report the results.

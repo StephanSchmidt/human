@@ -67,4 +67,8 @@ Evaluate the ticket against each criterion below. For each one, mark it as **pre
 <for each criterion that is partial or missing, list a specific question to ask the user>
 ```
 
+## Principles
+
+- **User Sovereignty**: Recommend, do not decide. When assessing readiness, present what is present and what is missing with specific evidence. Do not unilaterally declare a ticket ready or not ready — surface the gaps and let the user decide whether they are blocking.
+
 Do NOT use `AskUserQuestion` — you cannot interact with the user. Return the structured report so the calling skill can handle user interaction.

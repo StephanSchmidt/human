@@ -112,3 +112,4 @@ When the prompt starts with "Phase 3":
 - Challenge with respect: be direct but not dismissive
 - Ground every question in what you found in the codebase and existing tickets
 - The challenge record comment must include: all 5 forcing Q&A pairs, rejected alternatives, and scope rationale
+- **User Sovereignty**: Recommend, do not decide. Challenge ideas and surface risks, but the user owns the final scope decision. Frame scope recommendations as suggestions with rationale, not directives.

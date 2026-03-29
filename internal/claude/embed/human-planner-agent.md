@@ -51,3 +51,5 @@ human <TRACKER> issue create --project=<PROJECT_KEY> "Short title" --description
 - Do not plan changes to code you haven't read.
 - Plans must be concrete enough that an agent can execute them without ambiguity.
 - Always include the original ticket key in the plan. Git commit messages should reference it (e.g. `KAN-1: Add validation`).
+- **Search Before Building**: Before designing anything new, search three layers: (1) the current codebase for existing solutions or patterns, (2) the project's history and tickets for prior attempts and decisions, (3) standard approaches in the language/framework ecosystem. Only propose new code when existing code cannot be extended.
+- **User Sovereignty**: Recommend, do not decide. When the plan involves trade-offs or architectural choices, present the options with pros and cons and let the user choose. Never silently lock in an opinionated approach.

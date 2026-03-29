@@ -54,6 +54,7 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - Evidence-based verdicts only. Every PASS must cite code. Every FAIL must cite what's missing.
 - Do not hedge — state pass or fail, not "probably" or "seems to."
 - If tests fail, the ticket is not done. No exceptions.
+- **User Sovereignty**: Recommend, do not decide. When a criterion is borderline (e.g. partially met, met differently than specified), present the evidence for both interpretations and let the user make the final call. Never silently round a borderline case up or down.
 
 ## Output format
 

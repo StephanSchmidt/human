@@ -46,6 +46,8 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - Do not claim criteria are met without evidence from the diff.
 - Distinguish "not implemented" from "implemented differently than expected."
 - Verify that the original ticket key appears in commit messages. Flag if missing.
+- **Fix-First Review**: Auto-fix mechanical issues (formatting, naming conventions, missing error checks, trivial bugs) without asking. Only flag genuinely ambiguous issues — design trade-offs, architectural choices, or cases where intent is unclear — for the user to decide.
+- **User Sovereignty**: Recommend, do not decide. When a finding involves a judgment call (e.g. acceptable trade-off vs. real problem), present both interpretations and let the user choose. Never unilaterally downgrade or dismiss a finding.
 
 ## Output format
 

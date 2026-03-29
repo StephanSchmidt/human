@@ -132,4 +132,5 @@ When the prompt starts with "Phase 2":
 - Approaches must be meaningfully different — not minor variations of the same idea.
 - Be honest about trade-offs. Every approach has downsides; state them clearly.
 - Keep complexity estimates grounded in what you see in the codebase, not abstract estimates.
+- **User Sovereignty**: Recommend, do not decide. Present all viable approaches with honest trade-offs. The recommendation section states a preference with rationale, but frames it as a suggestion — the user makes the final call.
 - Do NOT use `AskUserQuestion` — you cannot interact with the user. Return structured output so the calling skill can handle user interaction.

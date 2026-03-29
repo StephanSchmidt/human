@@ -50,6 +50,8 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - Investigate before proposing fixes — read the code, don't guess.
 - If you cannot reproduce or confirm the root cause, say so explicitly.
 - Always preserve the original ticket key. Include it in any proposed commit messages.
+- **Iron Law**: No fix without root cause. Never propose a workaround, defensive check, or suppression unless you have first identified and documented the actual root cause. A fix that masks the real problem is not a fix.
+- **User Sovereignty**: Recommend, do not decide. When multiple fix strategies exist (e.g. patch vs. refactor, local fix vs. systemic change), present each with trade-offs and let the user choose. Never silently pick the expedient option.
 
 ## Output format
 
