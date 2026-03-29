@@ -232,6 +232,7 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 | `/human-done` | Runs tests and produces a pass/fail Definition of Done report |
 | `/human-findbugs` | Multi-agent pipeline to find logic errors, race conditions, and security issues |
 | `/human-security` | Deep security audit with attack chain analysis and OWASP Top 10 coverage |
+| `/human-gardening` | Multi-agent pipeline for codebase health analysis, refactoring triage, and automated fixes |
 
 ```bash
 # Full pipeline in one command
@@ -245,7 +246,7 @@ This writes skill and agent files to `.claude/` in the current directory. Re-run
 /human-done HUM-43                 # verify definition of done
 ```
 
-All outputs are saved to `.human/` (plans, reviews, done reports, bug analyses, security audits).
+All outputs are saved to `.human/` (plans, reviews, done reports, bug analyses, security audits, health reports).
 
 ## Configuration
 

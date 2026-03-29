@@ -70,6 +70,8 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 
 	skillPath := filepath.Join(".claude", "skills", "human-plan", "SKILL.md")
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
+	planVerifyCodeAgentPath := filepath.Join(".claude", "agents", "plan-verify-code.md")
+	planVerifyDocsAgentPath := filepath.Join(".claude", "agents", "plan-verify-docs.md")
 	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
 	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
 	bugPlanSkillPath := filepath.Join(".claude", "skills", "human-bug-plan", "SKILL.md")
@@ -101,9 +103,18 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	ideateSkillPath := filepath.Join(".claude", "skills", "human-ideate", "SKILL.md")
 	ideatorAgentPath := filepath.Join(".claude", "agents", "human-ideator.md")
 	sprintSkillPath := filepath.Join(".claude", "skills", "human-sprint", "SKILL.md")
+	gardeningSkillPath := filepath.Join(".claude", "skills", "human-gardening", "SKILL.md")
+	gardeningSurveyAgentPath := filepath.Join(".claude", "agents", "gardening-survey.md")
+	gardeningStructureAgentPath := filepath.Join(".claude", "agents", "gardening-structure.md")
+	gardeningDuplicationAgentPath := filepath.Join(".claude", "agents", "gardening-duplication.md")
+	gardeningComplexityAgentPath := filepath.Join(".claude", "agents", "gardening-complexity.md")
+	gardeningHygieneAgentPath := filepath.Join(".claude", "agents", "gardening-hygiene.md")
+	gardeningTriageAgentPath := filepath.Join(".claude", "agents", "gardening-triage.md")
 
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 	assert.Equal(t, string(agentContent), string(fw.files[agentPath]))
+	assert.Equal(t, string(planVerifyCodeAgentContent), string(fw.files[planVerifyCodeAgentPath]))
+	assert.Equal(t, string(planVerifyDocsAgentContent), string(fw.files[planVerifyDocsAgentPath]))
 	assert.Equal(t, string(readySkillContent), string(fw.files[readySkillPath]))
 	assert.Equal(t, string(readyAgentContent), string(fw.files[readyAgentPath]))
 	assert.Equal(t, string(bugPlanSkillContent), string(fw.files[bugPlanSkillPath]))
@@ -135,6 +146,13 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	assert.Equal(t, string(ideateSkillContent), string(fw.files[ideateSkillPath]))
 	assert.Equal(t, string(ideatorAgentContent), string(fw.files[ideatorAgentPath]))
 	assert.Equal(t, string(sprintSkillContent), string(fw.files[sprintSkillPath]))
+	assert.Equal(t, string(gardeningSkillContent), string(fw.files[gardeningSkillPath]))
+	assert.Equal(t, string(gardeningSurveyAgentContent), string(fw.files[gardeningSurveyAgentPath]))
+	assert.Equal(t, string(gardeningStructureAgentContent), string(fw.files[gardeningStructureAgentPath]))
+	assert.Equal(t, string(gardeningDuplicationAgentContent), string(fw.files[gardeningDuplicationAgentPath]))
+	assert.Equal(t, string(gardeningComplexityAgentContent), string(fw.files[gardeningComplexityAgentPath]))
+	assert.Equal(t, string(gardeningHygieneAgentContent), string(fw.files[gardeningHygieneAgentPath]))
+	assert.Equal(t, string(gardeningTriageAgentContent), string(fw.files[gardeningTriageAgentPath]))
 }
 
 func TestInstall_OverwritesIdenticalFiles(t *testing.T) {
@@ -185,6 +203,7 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	brainstormSkillDir := filepath.Join(".claude", "skills", "human-brainstorm")
 	ideateSkillDir := filepath.Join(".claude", "skills", "human-ideate")
 	sprintSkillDir := filepath.Join(".claude", "skills", "human-sprint")
+	gardeningSkillDir := filepath.Join(".claude", "skills", "human-gardening")
 	agentDir := filepath.Join(".claude", "agents")
 	assert.True(t, fw.dirs[skillDir], "expected plan skill parent directory to be created")
 	assert.True(t, fw.dirs[readySkillDir], "expected ready skill parent directory to be created")
@@ -197,6 +216,7 @@ func TestInstall_CreatesParentDirectories(t *testing.T) {
 	assert.True(t, fw.dirs[brainstormSkillDir], "expected brainstorm skill parent directory to be created")
 	assert.True(t, fw.dirs[ideateSkillDir], "expected ideate skill parent directory to be created")
 	assert.True(t, fw.dirs[sprintSkillDir], "expected sprint skill parent directory to be created")
+	assert.True(t, fw.dirs[gardeningSkillDir], "expected gardening skill parent directory to be created")
 	assert.True(t, fw.dirs[agentDir], "expected agent parent directory to be created")
 }
 

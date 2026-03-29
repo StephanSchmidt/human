@@ -16,6 +16,12 @@ var skillContent []byte
 //go:embed embed/human-planner-agent.md
 var agentContent []byte
 
+//go:embed embed/plan-verify-code-agent.md
+var planVerifyCodeAgentContent []byte
+
+//go:embed embed/plan-verify-docs-agent.md
+var planVerifyDocsAgentContent []byte
+
 //go:embed embed/human-ready-skill.md
 var readySkillContent []byte
 
@@ -109,6 +115,27 @@ var ideatorAgentContent []byte
 //go:embed embed/human-sprint-skill.md
 var sprintSkillContent []byte
 
+//go:embed embed/human-gardening-skill.md
+var gardeningSkillContent []byte
+
+//go:embed embed/gardening-survey-agent.md
+var gardeningSurveyAgentContent []byte
+
+//go:embed embed/gardening-structure-agent.md
+var gardeningStructureAgentContent []byte
+
+//go:embed embed/gardening-duplication-agent.md
+var gardeningDuplicationAgentContent []byte
+
+//go:embed embed/gardening-complexity-agent.md
+var gardeningComplexityAgentContent []byte
+
+//go:embed embed/gardening-hygiene-agent.md
+var gardeningHygieneAgentContent []byte
+
+//go:embed embed/gardening-triage-agent.md
+var gardeningTriageAgentContent []byte
+
 var userHomeDir = os.UserHomeDir
 
 // FileWriter abstracts filesystem operations for testability.
@@ -153,6 +180,8 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 	files := []embeddedFile{
 		{content: skillContent, relPath: filepath.Join("skills", "human-plan", "SKILL.md")},
 		{content: agentContent, relPath: filepath.Join("agents", "human-planner.md")},
+		{content: planVerifyCodeAgentContent, relPath: filepath.Join("agents", "plan-verify-code.md")},
+		{content: planVerifyDocsAgentContent, relPath: filepath.Join("agents", "plan-verify-docs.md")},
 		{content: readySkillContent, relPath: filepath.Join("skills", "human-ready", "SKILL.md")},
 		{content: readyAgentContent, relPath: filepath.Join("agents", "human-ready.md")},
 		{content: bugPlanSkillContent, relPath: filepath.Join("skills", "human-bug-plan", "SKILL.md")},
@@ -184,6 +213,13 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: ideateSkillContent, relPath: filepath.Join("skills", "human-ideate", "SKILL.md")},
 		{content: ideatorAgentContent, relPath: filepath.Join("agents", "human-ideator.md")},
 		{content: sprintSkillContent, relPath: filepath.Join("skills", "human-sprint", "SKILL.md")},
+		{content: gardeningSkillContent, relPath: filepath.Join("skills", "human-gardening", "SKILL.md")},
+		{content: gardeningSurveyAgentContent, relPath: filepath.Join("agents", "gardening-survey.md")},
+		{content: gardeningStructureAgentContent, relPath: filepath.Join("agents", "gardening-structure.md")},
+		{content: gardeningDuplicationAgentContent, relPath: filepath.Join("agents", "gardening-duplication.md")},
+		{content: gardeningComplexityAgentContent, relPath: filepath.Join("agents", "gardening-complexity.md")},
+		{content: gardeningHygieneAgentContent, relPath: filepath.Join("agents", "gardening-hygiene.md")},
+		{content: gardeningTriageAgentContent, relPath: filepath.Join("agents", "gardening-triage.md")},
 	}
 
 	for _, f := range files {
