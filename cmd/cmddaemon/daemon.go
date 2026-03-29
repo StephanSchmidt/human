@@ -8,13 +8,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
+
+	"github.com/StephanSchmidt/human/errors"
 
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/chrome"
@@ -58,7 +59,7 @@ func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobr
 		Long:  "Start the daemon on the host. AI agents inside devcontainers connect to this daemon to execute commands with the host's credentials.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if interactive && !foreground && os.Getenv(daemonChildEnv) == "" {
-				return fmt.Errorf("--interactive requires --foreground (needs stdin)")
+				return errors.WithDetails("--interactive requires --foreground (needs stdin)")
 			}
 
 			if foreground || os.Getenv(daemonChildEnv) != "" {
@@ -85,11 +86,11 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 
 	token, err := daemon.LoadOrCreateToken()
 	if err != nil {
-		return fmt.Errorf("failed to load/create token: %w", err)
+		return errors.WrapWithDetails(err, "failed to load/create token")
 	}
 
 	if err := WritePidFile(os.Getpid()); err != nil {
-		return fmt.Errorf("failed to write PID file: %w", err)
+		return errors.WrapWithDetails(err, "failed to write PID file")
 	}
 	defer RemovePidFile()
 
@@ -108,7 +109,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		PID:        os.Getpid(),
 	}
 	if err := daemon.WriteInfo(info); err != nil {
-		return fmt.Errorf("failed to write daemon info: %w", err)
+		return errors.WrapWithDetails(err, "failed to write daemon info")
 	}
 	defer daemon.RemoveInfo()
 
@@ -152,7 +153,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	// connections directly (harmless, may be useful later).
 	socketDir, sdErr := chrome.SocketDir()
 	if sdErr != nil {
-		return fmt.Errorf("resolving socket directory: %w", sdErr)
+		return errors.WrapWithDetails(sdErr, "resolving socket directory")
 	}
 
 	relay := chrome.NewSocketRelay(socketDir, logger)
@@ -244,13 +245,13 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	logPath := DaemonLogPath()
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) // #nosec G304 -- logPath is built by DaemonLogPath(), not user input
 	if err != nil {
-		return fmt.Errorf("opening log file: %w", err)
+		return errors.WrapWithDetails(err, "opening log file", "path", logPath)
 	}
 
 	exe, err := os.Executable()
 	if err != nil {
 		_ = logFile.Close()
-		return fmt.Errorf("resolving executable path: %w", err)
+		return errors.WrapWithDetails(err, "resolving executable path")
 	}
 
 	args := []string{"daemon", "start", "--foreground",
@@ -273,7 +274,7 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 
 	if err := child.Start(); err != nil {
 		_ = logFile.Close()
-		return fmt.Errorf("starting background process: %w", err)
+		return errors.WrapWithDetails(err, "starting background process")
 	}
 	_ = logFile.Close()
 
@@ -329,7 +330,7 @@ func buildDaemonTokenCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			token, err := daemon.LoadOrCreateToken()
 			if err != nil {
-				return fmt.Errorf("failed to load/create token: %w", err)
+				return errors.WrapWithDetails(err, "failed to load/create token")
 			}
 			_, _ = fmt.Fprintln(cmd.OutOrStdout(), token)
 			return nil
@@ -360,7 +361,7 @@ func buildDaemonStatusCmd() *cobra.Command {
 				} else {
 					_, _ = fmt.Fprintln(out, "Daemon is not running")
 				}
-				return fmt.Errorf("cannot connect to daemon: %w", err)
+				return errors.WrapWithDetails(err, "cannot connect to daemon", "addr", addr)
 			}
 			_ = conn.Close()
 
@@ -394,7 +395,7 @@ func buildDaemonStopCmd() *cobra.Command {
 
 			_, _ = fmt.Fprintf(out, "Stopping daemon (PID %d)...\n", pid)
 			if err := stopProcess(pid); err != nil {
-				return fmt.Errorf("failed to stop daemon: %w", err)
+				return errors.WrapWithDetails(err, "failed to stop daemon", "pid", pid)
 			}
 
 			// Poll for exit (up to 5s).
@@ -411,7 +412,7 @@ func buildDaemonStopCmd() *cobra.Command {
 			}
 
 			if isProcessAlive(pid) {
-				return fmt.Errorf("daemon (PID %d) did not exit within timeout", pid)
+				return errors.WithDetails("daemon did not exit within timeout", "pid", pid)
 			}
 
 			RemovePidFile()
@@ -422,56 +423,23 @@ func buildDaemonStopCmd() *cobra.Command {
 	}
 }
 
-// --- PID file helpers ---
+// --- PID file helpers (delegated to internal/daemon) ---
 
 // DaemonLogPath returns the path to the daemon log file.
-func DaemonLogPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".human", "daemon.log")
-	}
-	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
-	return filepath.Join(dir, "daemon.log")
-}
+func DaemonLogPath() string { return daemon.LogPath() }
 
 // DaemonPidPath returns the path to the daemon PID file.
-func DaemonPidPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".human", "daemon.pid")
-	}
-	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
-	return filepath.Join(dir, "daemon.pid")
-}
+func DaemonPidPath() string { return daemon.PidPath() }
 
 // WritePidFile writes the PID to the PID file.
-func WritePidFile(pid int) error {
-	return os.WriteFile(DaemonPidPath(), []byte(strconv.Itoa(pid)), 0o600)
-}
+func WritePidFile(pid int) error { return daemon.WritePidFile(pid) }
 
 // RemovePidFile removes the PID file.
-func RemovePidFile() {
-	_ = os.Remove(DaemonPidPath())
-}
+func RemovePidFile() { daemon.RemovePidFile() }
 
 // ReadAlivePid reads the PID file and checks if the process is alive.
 // Returns (0, false) if no PID file exists or the process is dead.
-func ReadAlivePid() (int, bool) {
-	data, err := os.ReadFile(DaemonPidPath()) // #nosec G304 -- path is built by DaemonPidPath(), not user input
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	if !isProcessAlive(pid) {
-		return pid, false
-	}
-	return pid, true
-}
+func ReadAlivePid() (int, bool) { return daemon.ReadAlivePid() }
 
 // resolveHostIP returns the preferred outbound IP of the host.
 // Falls back to "localhost" if detection fails.
@@ -608,7 +576,7 @@ func buildProxyServer(addr string, interactive bool, logger zerolog.Logger) (*pr
 	if proxyCfg != nil {
 		policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
 		if err != nil {
-			return nil, "", fmt.Errorf("invalid proxy policy: %w", err)
+			return nil, "", errors.WrapWithDetails(err, "invalid proxy policy")
 		}
 	} else {
 		policy = proxy.BlockAllPolicy()

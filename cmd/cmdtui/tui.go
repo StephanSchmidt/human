@@ -18,7 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
-	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
@@ -65,7 +64,7 @@ func runTUI() error {
 
 // ensureDaemon starts the daemon if it is not already running.
 func ensureDaemon() {
-	if _, alive := cmddaemon.ReadAlivePid(); alive {
+	if _, alive := daemon.ReadAlivePid(); alive {
 		return
 	}
 	exe, err := os.Executable()
@@ -761,15 +760,9 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+// formatTokens delegates to claude.FormatTokens for token count formatting.
 func formatTokens(n int) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1e6)
-	case n >= 1_000:
-		return fmt.Sprintf("%.1fK", float64(n)/1e3)
-	default:
-		return fmt.Sprintf("%d", n)
-	}
+	return claude.FormatTokens(n)
 }
 
 // --- log mode ---

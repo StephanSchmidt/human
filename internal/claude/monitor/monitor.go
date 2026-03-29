@@ -6,7 +6,6 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
@@ -37,7 +36,7 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	now := time.Now()
 	snap := &Snapshot{FetchedAt: now}
 
-	pid, alive := cmddaemon.ReadAlivePid()
+	pid, alive := daemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
 	if info, err := daemon.ReadInfo(); err == nil {
 		snap.Daemon.ProxyAddr = info.ProxyAddr
@@ -102,7 +101,7 @@ func (m *Monitor) FetchQuick(_ context.Context, prev *Snapshot) *Snapshot {
 	snap := *prev
 	snap.FetchedAt = time.Now()
 
-	pid, alive := cmddaemon.ReadAlivePid()
+	pid, alive := daemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
 	if info, err := daemon.ReadInfo(); err == nil {
 		snap.Daemon.ProxyAddr = info.ProxyAddr
