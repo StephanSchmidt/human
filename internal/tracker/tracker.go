@@ -168,15 +168,16 @@ func DetectKind(key string) string {
 // Issue is a provider-agnostic issue representation.
 type Issue struct {
 	Key         string    `json:"key"`
-	Project     string    `json:"project"` // project key, e.g. "KAN"
-	Type        string    `json:"type"`    // issue type, e.g. "Task", "Bug"
+	Project     string    `json:"project"`                    // project key, e.g. "KAN"
+	Type        string    `json:"type"`                       // issue type, e.g. "Task", "Bug"
 	Title       string    `json:"title"`
 	Status      string    `json:"status"`
+	StatusType  string    `json:"status_type,omitempty"`      // "unstarted", "started", "done", "closed", or ""
 	Priority    string    `json:"priority"`
 	Assignee    string    `json:"assignee"`
 	Reporter    string    `json:"reporter"`
-	Description string    `json:"description"` // markdown
-	UpdatedAt   time.Time `json:"updated_at"`  // last modification timestamp
+	Description string    `json:"description"`                // markdown
+	UpdatedAt   time.Time `json:"updated_at"`                 // last modification timestamp
 }
 
 // Comment is a provider-agnostic comment representation.

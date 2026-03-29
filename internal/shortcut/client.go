@@ -651,6 +651,11 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 		return tracker.Issue{}, err
 	}
 
+	// Resolve status type from the cached state types map.
+	c.statesMu.Lock()
+	statusType := c.stateTypes[story.WorkflowStateID]
+	c.statesMu.Unlock()
+
 	assignee := ""
 	if len(story.OwnerIDs) > 0 {
 		assignee, _ = c.resolveMemberName(ctx, story.OwnerIDs[0])
@@ -664,6 +669,7 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 		Type:        story.StoryType,
 		Title:       story.Name,
 		Status:      stateName,
+		StatusType:  statusType,
 		Assignee:    assignee,
 		Reporter:    reporter,
 		Description: story.Description,

@@ -76,11 +76,11 @@ func TestDoGraphQL_invalidBaseURL(t *testing.T) {
 func TestListIssues_happy(t *testing.T) {
 	issuesResponse := `{"data":{"issues":{"nodes":[
 		{"identifier":"ENG-1","title":"First issue","description":"desc1",
-		 "state":{"name":"In Progress"},"priorityLabel":"High",
+		 "state":{"name":"In Progress","type":"started"},"priorityLabel":"High",
 		 "assignee":{"name":"Alice"},"creator":{"name":"Bob"},
 		 "labels":{"nodes":[{"name":"bug"}]}},
 		{"identifier":"ENG-2","title":"Second issue","description":"desc2",
-		 "state":{"name":"Todo"},"priorityLabel":"Low",
+		 "state":{"name":"Todo","type":"backlog"},"priorityLabel":"Low",
 		 "assignee":null,"creator":{"name":"Charlie"},
 		 "labels":{"nodes":[]}}
 	]}}}`
@@ -110,12 +110,14 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "ENG", issues[0].Project)
 	assert.Equal(t, "First issue", issues[0].Title)
 	assert.Equal(t, "In Progress", issues[0].Status)
+	assert.Equal(t, "started", issues[0].StatusType)
 	assert.Equal(t, "High", issues[0].Priority)
 	assert.Equal(t, "Alice", issues[0].Assignee)
 	assert.Equal(t, "Bob", issues[0].Reporter)
 	assert.Equal(t, "bug", issues[0].Type)
 
 	assert.Equal(t, "ENG-2", issues[1].Key)
+	assert.Equal(t, "unstarted", issues[1].StatusType)
 	assert.Equal(t, "", issues[1].Assignee)
 	assert.Equal(t, "", issues[1].Type)
 }
@@ -128,10 +130,10 @@ func TestListIssues_all(t *testing.T) {
 				assert.Equal(t, "ENG", vars["teamKey"])
 				return `{"data":{"issues":{"nodes":[
 					{"identifier":"ENG-1","title":"Open issue","description":"",
-					 "state":{"name":"In Progress"},"priorityLabel":"",
+					 "state":{"name":"In Progress","type":"started"},"priorityLabel":"",
 					 "assignee":null,"creator":null,"labels":{"nodes":[]}},
 					{"identifier":"ENG-2","title":"Done issue","description":"",
-					 "state":{"name":"Done"},"priorityLabel":"",
+					 "state":{"name":"Done","type":"completed"},"priorityLabel":"",
 					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
 				]}}}`
 			},
@@ -214,7 +216,7 @@ func TestGetIssue_happy(t *testing.T) {
 				assert.Equal(t, "ENG-42", vars["id"])
 				return `{"data":{"issue":{
 					"identifier":"ENG-42","title":"The answer","description":"## Desc\n\nMarkdown.",
-					"state":{"name":"Done"},"priorityLabel":"Urgent",
+					"state":{"name":"Done","type":"completed"},"priorityLabel":"Urgent",
 					"assignee":{"name":"Alice"},"creator":{"name":"Bob"},
 					"labels":{"nodes":[{"name":"enhancement"},{"name":"frontend"}]}
 				}}}`
@@ -231,6 +233,7 @@ func TestGetIssue_happy(t *testing.T) {
 	assert.Equal(t, "ENG", issue.Project)
 	assert.Equal(t, "The answer", issue.Title)
 	assert.Equal(t, "Done", issue.Status)
+	assert.Equal(t, "done", issue.StatusType)
 	assert.Equal(t, "Urgent", issue.Priority)
 	assert.Equal(t, "Alice", issue.Assignee)
 	assert.Equal(t, "Bob", issue.Reporter)
@@ -450,7 +453,7 @@ func Test_toTrackerIssue(t *testing.T) {
 				Identifier:    "ENG-1",
 				Title:         "Title",
 				Description:   "Desc",
-				State:         nameNode{Name: "In Progress"},
+				State:         stateNode{Name: "In Progress", Type: "started"},
 				PriorityLabel: "High",
 				Assignee:      &nameNode{Name: "Alice"},
 				Creator:       &nameNode{Name: "Bob"},
@@ -459,7 +462,7 @@ func Test_toTrackerIssue(t *testing.T) {
 			project: "ENG",
 			want: tracker.Issue{
 				Key: "ENG-1", Project: "ENG", Title: "Title",
-				Status: "In Progress", Priority: "High",
+				Status: "In Progress", StatusType: "started", Priority: "High",
 				Assignee: "Alice", Reporter: "Bob", Type: "bug",
 				Description: "Desc",
 			},
@@ -469,12 +472,12 @@ func Test_toTrackerIssue(t *testing.T) {
 			input: linearIssue{
 				Identifier: "ENG-2",
 				Title:      "No people",
-				State:      nameNode{Name: "Todo"},
+				State:      stateNode{Name: "Todo", Type: "backlog"},
 			},
 			project: "ENG",
 			want: tracker.Issue{
 				Key: "ENG-2", Project: "ENG", Title: "No people",
-				Status: "Todo",
+				Status: "Todo", StatusType: "unstarted",
 			},
 		},
 		{
@@ -482,13 +485,13 @@ func Test_toTrackerIssue(t *testing.T) {
 			input: linearIssue{
 				Identifier: "ENG-3",
 				Title:      "No labels",
-				State:      nameNode{Name: "Done"},
+				State:      stateNode{Name: "Done", Type: "completed"},
 				Labels:     labelConnection{Nodes: []nameNode{}},
 			},
 			project: "ENG",
 			want: tracker.Issue{
 				Key: "ENG-3", Project: "ENG", Title: "No labels",
-				Status: "Done",
+				Status: "Done", StatusType: "done",
 			},
 		},
 	}
@@ -840,7 +843,7 @@ func TestEditIssue_happy(t *testing.T) {
 				// GetIssue call after edit
 				return `{"data":{"issue":{
 					"identifier":"ENG-42","title":"Updated Title","description":"",
-					"state":{"name":"In Progress"},"priorityLabel":"High",
+					"state":{"name":"In Progress","type":"started"},"priorityLabel":"High",
 					"assignee":null,"creator":null,"labels":{"nodes":[]}
 				}}}`
 			},

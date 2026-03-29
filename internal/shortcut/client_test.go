@@ -64,6 +64,7 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "1", issues[0].Key)
 	assert.Equal(t, "Bug report", issues[0].Title)
 	assert.Equal(t, "To Do", issues[0].Status)
+	assert.Equal(t, "unstarted", issues[0].StatusType)
 	assert.Equal(t, "bug", issues[0].Type)
 	assert.Equal(t, "Alice", issues[0].Assignee)
 	assert.Equal(t, "Bob", issues[0].Reporter)
@@ -71,6 +72,7 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "2", issues[1].Key)
 	assert.Equal(t, "Feature request", issues[1].Title)
 	assert.Equal(t, "In Progress", issues[1].Status)
+	assert.Equal(t, "started", issues[1].StatusType)
 	assert.Equal(t, "", issues[1].Assignee)
 	assert.Equal(t, "", issues[1].Reporter)
 }

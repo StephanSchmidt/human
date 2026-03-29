@@ -481,18 +481,20 @@ func TestRenderIssuesPanel_WithIssues(t *testing.T) {
 			TrackerKind: "linear",
 			Project:     "HUM",
 			Issues: []tracker.Issue{
-				{Key: "HUM-42", Status: "In Progress", Title: "Add issues to TUI"},
-				{Key: "HUM-41", Status: "Todo", Title: "Fix daemon reconnect"},
+				{Key: "HUM-42", Status: "In Progress", StatusType: "started", Title: "Add issues to TUI"},
+				{Key: "HUM-41", Status: "Todo", StatusType: "unstarted", Title: "Fix daemon reconnect"},
 			},
 		},
 	}
 	out := renderIssuesPanel(groups, time.Now(), 80)
-	assert.Contains(t, out, "Issues")
-	assert.Contains(t, out, "linear/HUM")
+	assert.Contains(t, out, "Pipeline")
+	assert.Contains(t, out, "Eng")
+	assert.Contains(t, out, "HUM")
 	assert.Contains(t, out, "HUM-42")
-	assert.Contains(t, out, "In Progress")
+	assert.Contains(t, out, "In Dev")
 	assert.Contains(t, out, "Add issues to TUI")
 	assert.Contains(t, out, "HUM-41")
+	assert.Contains(t, out, "Backlog")
 }
 
 func TestRenderIssuesPanel_Empty(t *testing.T) {
@@ -509,6 +511,7 @@ func TestRenderIssuesPanel_TrackerError(t *testing.T) {
 		},
 	}
 	out := renderIssuesPanel(groups, time.Now(), 80)
+	assert.Contains(t, out, "Pipeline")
 	assert.Contains(t, out, "jira/KAN")
 	assert.Contains(t, out, "fetch failed")
 }
@@ -524,13 +527,15 @@ func TestRenderIssuesPanel_MixedSuccess(t *testing.T) {
 			TrackerKind: "linear",
 			Project:     "HUM",
 			Issues: []tracker.Issue{
-				{Key: "HUM-1", Status: "Todo", Title: "Working issue"},
+				{Key: "HUM-1", Status: "Todo", StatusType: "unstarted", Title: "Working issue"},
 			},
 		},
 	}
 	out := renderIssuesPanel(groups, time.Now(), 80)
+	assert.Contains(t, out, "Pipeline")
 	assert.Contains(t, out, "fetch failed")
 	assert.Contains(t, out, "HUM-1")
+	assert.Contains(t, out, "Backlog")
 	assert.Contains(t, out, "Working issue")
 }
 
@@ -571,13 +576,50 @@ func TestModelView_WithIssues(t *testing.T) {
 			TrackerKind: "linear",
 			Project:     "HUM",
 			Issues: []tracker.Issue{
-				{Key: "HUM-99", Status: "Todo", Title: "Visible in view"},
+				{Key: "HUM-99", Status: "Todo", StatusType: "unstarted", Title: "Visible in view"},
 			},
 		},
 	}
 	m.issuesFetched = time.Now()
 	view := m.View()
-	assert.Contains(t, view, "Issues")
+	assert.Contains(t, view, "Pipeline")
 	assert.Contains(t, view, "HUM-99")
 	assert.Contains(t, view, "Visible in view")
+}
+
+func TestPipelineStage(t *testing.T) {
+	tests := []struct {
+		kind, status, statusType, want string
+	}{
+		{"shortcut", "To Do", "unstarted", "Ready for Plan"},
+		{"shortcut", "In Progress", "started", "Planning"},
+		{"shortcut", "Done", "done", "Planned"},
+		{"shortcut", "Custom", "", "Custom"},
+		{"linear", "Backlog", "unstarted", "Backlog"},
+		{"linear", "In Progress", "started", "In Dev"},
+		{"linear", "Done", "done", "Done"},
+		{"linear", "Canceled", "closed", "Closed"},
+		{"jira", "Open", "", "Open"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.kind+"/"+tt.statusType, func(t *testing.T) {
+			got := pipelineStage(tt.kind, tt.status, tt.statusType)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPipelineStageStyle(t *testing.T) {
+	// Verify the correct style is returned for each status type.
+	assert.Equal(t, subtleStyle, pipelineStageStyle("unstarted"))
+	assert.Equal(t, warningStyle, pipelineStageStyle("started"))
+	assert.Equal(t, specialStyle, pipelineStageStyle("done"))
+	assert.Equal(t, subtleStyle, pipelineStageStyle("closed"))
+	assert.Equal(t, subtleStyle, pipelineStageStyle(""))
+}
+
+func TestPipelineName(t *testing.T) {
+	assert.Contains(t, pipelineName("shortcut"), "PM")
+	assert.Contains(t, pipelineName("linear"), "Eng")
+	assert.Contains(t, pipelineName("jira"), "jira")
 }

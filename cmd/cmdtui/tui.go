@@ -869,6 +869,69 @@ func fromDaemonResults(results []daemon.TrackerIssuesResult) []trackerIssues {
 
 // --- render: issues ---
 
+// pipelineStage maps a tracker kind and status type to a human-readable
+// pipeline stage label. The pipeline model is:
+//
+//	PM (Shortcut):  Ready for Plan -> Planning -> Planned
+//	Eng (Linear):   Backlog -> In Dev -> Done -> Closed
+func pipelineStage(trackerKind, statusName, statusType string) string {
+	switch trackerKind {
+	case "shortcut":
+		switch statusType {
+		case "unstarted":
+			return "Ready for Plan"
+		case "started":
+			return "Planning"
+		case "done":
+			return "Planned"
+		default:
+			return statusName
+		}
+	case "linear":
+		switch statusType {
+		case "unstarted":
+			return "Backlog"
+		case "started":
+			return "In Dev"
+		case "done":
+			return "Done"
+		case "closed":
+			return "Closed"
+		default:
+			return statusName
+		}
+	default:
+		return statusName
+	}
+}
+
+// pipelineStageStyle returns a lipgloss style for the given status type,
+// reflecting progress through the pipeline.
+func pipelineStageStyle(statusType string) lipgloss.Style {
+	switch statusType {
+	case "started":
+		return warningStyle // yellow -- in progress
+	case "done":
+		return specialStyle // teal -- complete
+	case "unstarted", "closed":
+		return subtleStyle
+	default:
+		return subtleStyle
+	}
+}
+
+// pipelineName returns a display label for the tracker kind in pipeline context.
+func pipelineName(trackerKind string) string {
+	switch trackerKind {
+	case "shortcut":
+		return warningStyle.Render("PM")
+	case "linear":
+		return specialStyle.Render("Eng")
+	default:
+		return subtleStyle.Render(trackerKind)
+	}
+}
+
 func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) string {
 	if len(groups) == 0 {
 		return ""
@@ -876,7 +939,7 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 
 	var b strings.Builder
 
-	header := "  " + subtleStyle.Render("Issues")
+	header := "  " + subtleStyle.Render("Pipeline")
 	if !fetchedAt.IsZero() {
 		header += "  " + subtleStyle.Render(formatElapsed(time.Since(fetchedAt)) + " ago")
 	}
@@ -904,15 +967,20 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 			b.WriteByte('\n')
 		}
 		first = false
-		_, _ = fmt.Fprintf(&b, "    %s %s/%s\n",
+
+		pipelineLabel := pipelineName(g.TrackerKind)
+		_, _ = fmt.Fprintf(&b, "    %s %s %s\n",
 			subtleStyle.Render("▸"),
-			g.TrackerKind, g.Project)
+			pipelineLabel,
+			subtleStyle.Render(g.Project))
 
 		for _, issue := range g.Issues {
 			title := truncate(issue.Title, w-30)
+			stage := pipelineStage(g.TrackerKind, issue.Status, issue.StatusType)
+			stageStyled := pipelineStageStyle(issue.StatusType).Render(truncate(stage, 14))
 			_, _ = fmt.Fprintf(&b, "      %-12s %-14s %s\n",
 				titleStyle.Render(issue.Key),
-				subtleStyle.Render(truncate(issue.Status, 12)),
+				stageStyled,
 				title)
 		}
 	}

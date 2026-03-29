@@ -5,7 +5,7 @@ type linearIssue struct {
 	Identifier    string          `json:"identifier"`
 	Title         string          `json:"title"`
 	Description   string          `json:"description"`
-	State         nameNode        `json:"state"`
+	State         stateNode       `json:"state"`
 	PriorityLabel string          `json:"priorityLabel"`
 	Assignee      *nameNode       `json:"assignee"`
 	Creator       *nameNode       `json:"creator"`
@@ -15,6 +15,12 @@ type linearIssue struct {
 
 type nameNode struct {
 	Name string `json:"name"`
+}
+
+// stateNode holds a workflow state's name and type (e.g., "unstarted", "started", "completed").
+type stateNode struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type labelConnection struct {
