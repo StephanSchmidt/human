@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/chrome"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/daemon"
@@ -23,6 +24,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 const daemonChildEnv = "_HUMAN_DAEMON_CHILD"
@@ -143,6 +145,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		Logger:        logger,
 		ConnectedPIDs: connTracker,
 		HookEvents:    hookStore,
+		IssueFetcher:  fetchTrackerIssues,
 	}
 
 	// Start socket relay to accept Chrome native messaging
@@ -667,4 +670,44 @@ func replaceHost(addr, host string) string {
 		return net.JoinHostPort(host, port)
 	}
 	return addr
+}
+
+// fetchTrackerIssues loads tracker instances and fetches open issues from all
+// configured projects. Runs in the daemon process with its env and cwd.
+func fetchTrackerIssues() ([]daemon.TrackerIssuesResult, error) {
+	instances, err := cmdutil.LoadAllInstances(".")
+	if err != nil {
+		return nil, err
+	}
+	var results []daemon.TrackerIssuesResult
+	for _, inst := range instances {
+		projects := inst.Projects
+		if len(projects) == 0 {
+			projects = []string{""}
+		}
+		for _, project := range projects {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
+				Project:    project,
+				MaxResults: 20,
+				IncludeAll: false,
+			})
+			cancel()
+			label := project
+			if label == "" {
+				label = inst.Name
+			}
+			r := daemon.TrackerIssuesResult{
+				TrackerName: inst.Name,
+				TrackerKind: inst.Kind,
+				Project:     label,
+				Issues:      issues,
+			}
+			if fetchErr != nil {
+				r.Err = fetchErr.Error()
+			}
+			results = append(results, r)
+		}
+	}
+	return results, nil
 }

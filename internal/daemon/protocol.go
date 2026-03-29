@@ -1,5 +1,16 @@
 package daemon
 
+import "github.com/StephanSchmidt/human/internal/tracker"
+
+// TrackerIssuesResult is the wire type for a single tracker/project's issues.
+type TrackerIssuesResult struct {
+	TrackerName string          `json:"tracker_name"`
+	TrackerKind string          `json:"tracker_kind"`
+	Project     string          `json:"project"`
+	Issues      []tracker.Issue `json:"issues"`
+	Err         string          `json:"error,omitempty"`
+}
+
 // Request is sent from the client to the daemon (one JSON line per connection).
 type Request struct {
 	Version   string            `json:"version"`

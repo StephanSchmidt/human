@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 const dialTimeout = 5 * time.Second
@@ -150,6 +151,32 @@ func GetHookSnapshot(addr, token string) (map[string]hookevents.SessionSnapshot,
 		return nil, fmt.Errorf("invalid hook snapshot JSON: %w", err)
 	}
 	return snap, nil
+}
+
+// GetTrackerDiagnose fetches tracker credential status from the daemon.
+func GetTrackerDiagnose(addr, token string) ([]tracker.TrackerStatus, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"tracker-diagnose"})
+	if err != nil {
+		return nil, err
+	}
+	var statuses []tracker.TrackerStatus
+	if err := json.Unmarshal(out, &statuses); err != nil {
+		return nil, fmt.Errorf("invalid tracker diagnose JSON: %w", err)
+	}
+	return statuses, nil
+}
+
+// GetTrackerIssues fetches open issues from all configured tracker projects via the daemon.
+func GetTrackerIssues(addr, token string) ([]TrackerIssuesResult, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"tracker-issues"})
+	if err != nil {
+		return nil, err
+	}
+	var results []TrackerIssuesResult
+	if err := json.Unmarshal(out, &results); err != nil {
+		return nil, fmt.Errorf("invalid tracker issues JSON: %w", err)
+	}
+	return results, nil
 }
 
 // deliverCallback performs an HTTP GET to the callback URL, delivering the

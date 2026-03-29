@@ -13,7 +13,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/browser"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // defaultBrowserOpener wraps browser.DefaultOpener for production use.
@@ -33,6 +35,7 @@ type Server struct {
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
+	IssueFetcher  func() ([]TrackerIssuesResult, error) // injected; fetches issues from configured trackers
 
 	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
 }
@@ -176,6 +179,12 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 	case "hook-snapshot":
 		s.handleHookSnapshot(conn)
 		return true
+	case "tracker-diagnose":
+		s.handleTrackerDiagnose(conn)
+		return true
+	case "tracker-issues":
+		s.handleTrackerIssues(conn)
+		return true
 	}
 
 	// Intercept browser commands with OAuth redirect_uri for relay.
@@ -218,6 +227,42 @@ func (s *Server) handleHookSnapshot(conn net.Conn) {
 		out = "{}\n"
 	}
 	resp := Response{Stdout: out}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleTrackerDiagnose returns tracker credential status from the daemon's env.
+func (s *Server) handleTrackerDiagnose(conn net.Conn) {
+	statuses := tracker.DiagnoseTrackers(".", config.UnmarshalSection, os.Getenv)
+	data, err := json.Marshal(statuses)
+	if err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+	resp := Response{Stdout: string(data) + "\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleTrackerIssues returns open issues from all configured tracker projects.
+func (s *Server) handleTrackerIssues(conn net.Conn) {
+	if s.IssueFetcher == nil {
+		resp := Response{Stdout: "[]\n"}
+		enc := json.NewEncoder(conn)
+		_ = enc.Encode(resp)
+		return
+	}
+	results, err := s.IssueFetcher()
+	if err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+	data, err := json.Marshal(results)
+	if err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+	resp := Response{Stdout: string(data) + "\n"}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
 }

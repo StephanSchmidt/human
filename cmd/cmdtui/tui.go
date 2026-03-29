@@ -19,7 +19,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
-	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
@@ -805,40 +804,32 @@ func issueTickCmd() tea.Cmd {
 
 func fetchIssuesCmd() tea.Cmd {
 	return func() tea.Msg {
-		instances, err := cmdutil.LoadAllInstances(".")
+		addr, token := daemonAddr()
+		if addr == "" {
+			return issuesResultMsg{}
+		}
+		results, err := daemon.GetTrackerIssues(addr, token)
 		if err != nil {
 			return issuesResultMsg{}
 		}
-		var results []trackerIssues
-		for _, inst := range instances {
-			projects := inst.Projects
-			if len(projects) == 0 {
-				// No explicit projects — fetch across all (provider decides behaviour).
-				projects = []string{""}
-			}
-			for _, project := range projects {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-				issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
-					Project:    project,
-					MaxResults: 20,
-					IncludeAll: false,
-				})
-				cancel()
-				label := project
-				if label == "" {
-					label = inst.Name
-				}
-				results = append(results, trackerIssues{
-					TrackerName: inst.Name,
-					TrackerKind: inst.Kind,
-					Project:     label,
-					Issues:      issues,
-					Err:         fetchErr,
-				})
-			}
-		}
-		return issuesResultMsg{results: results}
+		return issuesResultMsg{results: fromDaemonResults(results)}
 	}
+}
+
+func fromDaemonResults(results []daemon.TrackerIssuesResult) []trackerIssues {
+	out := make([]trackerIssues, len(results))
+	for i, r := range results {
+		out[i] = trackerIssues{
+			TrackerName: r.TrackerName,
+			TrackerKind: r.TrackerKind,
+			Project:     r.Project,
+			Issues:      r.Issues,
+		}
+		if r.Err != "" {
+			out[i].Err = fmt.Errorf("%s", r.Err)
+		}
+	}
+	return out
 }
 
 // --- render: issues ---
@@ -857,8 +848,13 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 	b.WriteString(header)
 	b.WriteByte('\n')
 
+	first := true
 	for _, g := range groups {
 		if g.Err != nil {
+			if !first {
+				b.WriteByte('\n')
+			}
+			first = false
 			_, _ = fmt.Fprintf(&b, "    %s %s/%s: %s\n",
 				errorStyle.Render("!"),
 				g.TrackerKind, g.Project,
@@ -869,6 +865,10 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 			continue
 		}
 
+		if !first {
+			b.WriteByte('\n')
+		}
+		first = false
 		_, _ = fmt.Fprintf(&b, "    %s %s/%s\n",
 			subtleStyle.Render("▸"),
 			g.TrackerKind, g.Project)
