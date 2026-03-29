@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/StephanSchmidt/human/internal/claude"
@@ -562,23 +561,6 @@ func TestModelUpdate_IssueTickWhileLoading(t *testing.T) {
 	um := updated.(model)
 	assert.True(t, um.issuesLoading, "should remain loading")
 	assert.NotNil(t, cmd, "should reschedule tick")
-}
-
-func TestIssueStatusStyle(t *testing.T) {
-	// "In Progress" should get specialStyle (teal)
-	assert.Equal(t, specialStyle, issueStatusStyle("In Progress"))
-	assert.Equal(t, specialStyle, issueStatusStyle("Active"))
-	assert.Equal(t, specialStyle, issueStatusStyle("Started"))
-
-	// "Done" / "Closed" should get subtleStyle
-	assert.Equal(t, subtleStyle, issueStatusStyle("Done"))
-	assert.Equal(t, subtleStyle, issueStatusStyle("Closed"))
-
-	// "Blocked" should get warningStyle
-	assert.Equal(t, warningStyle, issueStatusStyle("Blocked"))
-
-	// Unknown gets default
-	assert.Equal(t, lipgloss.NewStyle(), issueStatusStyle("Todo"))
 }
 
 func TestModelView_WithIssues(t *testing.T) {

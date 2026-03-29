@@ -920,16 +920,3 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 	return b.String()
 }
 
-func issueStatusStyle(status string) lipgloss.Style {
-	lower := strings.ToLower(status)
-	switch {
-	case strings.Contains(lower, "progress") || strings.Contains(lower, "active") || strings.Contains(lower, "started"):
-		return specialStyle
-	case strings.Contains(lower, "done") || strings.Contains(lower, "closed") || strings.Contains(lower, "resolved"):
-		return subtleStyle
-	case strings.Contains(lower, "block"):
-		return warningStyle
-	default:
-		return lipgloss.NewStyle()
-	}
-}
