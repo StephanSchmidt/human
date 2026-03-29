@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+
+	"github.com/StephanSchmidt/human/internal/claude/logparser"
 )
 
 // Parse reads all event lines and returns the latest snapshot per session.
@@ -42,45 +44,56 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 	}
 	switch evt.EventName {
 	case "UserPromptSubmit", "SubagentStart":
-		snap.IsWorking = true
-		snap.IsBlocked = false
-		snap.HasError = false
-		snap.IsEnded = false
+		snap.Status = logparser.StatusWorking
+		snap.ErrorType = ""
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
+
+	case "PreToolUse":
+		snap.CurrentTool = evt.ToolName
+
+	case "PostToolUse", "PostToolUseFailure":
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
+		snap.Status = logparser.StatusWorking
 
 	case "Stop", "SubagentStop":
-		snap.IsWorking = false
-		snap.IsBlocked = false
-		// HasError intentionally not cleared — Stop after StopFailure keeps error visible
+		// Stop after StopFailure keeps error visible.
+		if snap.Status != logparser.StatusError {
+			snap.Status = logparser.StatusReady
+		}
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
 
 	case "StopFailure":
-		snap.IsWorking = false
-		snap.IsBlocked = false
-		snap.HasError = true
+		snap.Status = logparser.StatusError
+		snap.ErrorType = evt.ErrorType
+		snap.CurrentTool = ""
 
 	case "PermissionRequest":
-		snap.IsWorking = false
-		snap.IsBlocked = true
+		snap.Status = logparser.StatusBlocked
+		snap.BlockedTool = evt.ToolName
+		snap.CurrentTool = ""
 
 	case "Notification":
 		switch evt.NotificationType {
 		case "idle_prompt":
-			snap.IsWorking = false
-			snap.IsBlocked = false
+			snap.Status = logparser.StatusReady
+			snap.CurrentTool = ""
+			snap.BlockedTool = ""
 		case "permission_prompt":
-			snap.IsWorking = false
-			snap.IsBlocked = true
+			snap.Status = logparser.StatusBlocked
 		}
-		// Other notification types are ignored (no state change).
 
 	case "SessionStart":
-		snap.IsWorking = false
-		snap.IsBlocked = false
-		snap.HasError = false
-		snap.IsEnded = false
+		snap.Status = logparser.StatusReady
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
+		snap.ErrorType = ""
 
 	case "SessionEnd":
-		snap.IsWorking = false
-		snap.IsBlocked = false
-		snap.IsEnded = true
+		snap.Status = logparser.StatusEnded
+		snap.CurrentTool = ""
+		snap.BlockedTool = ""
 	}
 }

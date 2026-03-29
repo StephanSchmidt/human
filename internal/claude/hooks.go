@@ -1,7 +1,6 @@
 package claude
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,10 +10,7 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 )
 
-//go:embed embed/human-status-hook.sh
-var hookScriptContent []byte
-
-const hookCommand = "bash ~/.claude/hooks/human-status-hook.sh"
+const hookCommand = "human hook"
 
 // hookEvents lists the Claude Code hook events we register for.
 var hookEvents = []struct {
@@ -22,47 +18,28 @@ var hookEvents = []struct {
 	async   bool
 	matcher string // "" for default empty matcher; set for events like Notification
 }{
-	{"UserPromptSubmit", false, ""},  // blocking — must not be async
+	{"UserPromptSubmit", false, ""},    // blocking — must not be async
 	{"Stop", true, ""},
 	{"SubagentStart", true, ""},
 	{"SubagentStop", true, ""},
-	{"PermissionRequest", true, ""}, // blocked waiting for tool permission
-	{"Notification", true, ".*"},    // catches idle_prompt, permission_prompt, etc.
-	{"StopFailure", true, ""},       // API error or crash
-	{"SessionStart", true, ""},      // new session began
-	{"SessionEnd", true, ""},        // session ended (e.g. /clear)
+	{"PreToolUse", true, ""},           // tool about to execute — current activity indicator
+	{"PostToolUse", true, ""},          // tool completed — transitions waiting/blocked → working
+	{"PostToolUseFailure", true, ""},   // tool failed
+	{"PermissionRequest", true, ""},    // blocked waiting for tool permission
+	{"Notification", true, ".*"},       // catches idle_prompt, permission_prompt, etc.
+	{"StopFailure", true, ""},          // API error or crash
+	{"SessionStart", true, ""},         // new session began
+	{"SessionEnd", true, ""},           // session ended (e.g. /clear)
 }
 
-// InstallHooks writes the hook script and registers hooks in ~/.claude/settings.json.
+// InstallHooks registers hooks in ~/.claude/settings.json.
+// The hooks invoke `human hook` directly — no script file needed.
 func InstallHooks(w io.Writer, fw FileWriter) error {
 	home, err := userHomeDir()
 	if err != nil {
 		return errors.WrapWithDetails(err, "resolving home directory")
 	}
 
-	// Write hook script.
-	scriptDir := filepath.Join(home, ".claude", "hooks")
-	scriptPath := filepath.Join(scriptDir, "human-status-hook.sh")
-
-	if err := fw.MkdirAll(scriptDir, 0o755); err != nil {
-		return errors.WrapWithDetails(err, "creating hooks directory", "path", scriptDir)
-	}
-
-	existing, readErr := fw.ReadFile(scriptPath)
-	if readErr == nil && string(existing) == string(hookScriptContent) {
-		_, _ = fmt.Fprintf(w, "  unchanged %s\n", scriptPath)
-	} else {
-		action := "created"
-		if readErr == nil {
-			action = "updated"
-		}
-		if err := fw.WriteFile(scriptPath, hookScriptContent, 0o755); err != nil {
-			return errors.WrapWithDetails(err, "writing hook script", "path", scriptPath)
-		}
-		_, _ = fmt.Fprintf(w, "  %s %s\n", action, scriptPath)
-	}
-
-	// Update settings.json.
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
 	if err := mergeHooksIntoSettings(w, fw, settingsPath); err != nil {
 		return err

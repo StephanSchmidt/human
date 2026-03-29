@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,12 +269,24 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	proxyCmd.GroupID = "utility"
 	rootCmd.AddCommand(proxyCmd)
 
-	// hook-event is a no-op when daemon isn't running. When the daemon is
-	// running, isLocalSubcommand returns false so the command is forwarded
-	// to the daemon where routeIntercept handles it.
+	// hook reads Claude Code hook JSON from stdin, extracts event fields,
+	// and forwards them to the daemon as hook-event args. Runs locally
+	// (listed in isLocalSubcommand) so stdin is available.
+	hookCmd := &cobra.Command{
+		Use:    "hook",
+		Short:  "Forward a Claude Code hook event (reads JSON from stdin)",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE:   buildHookRunE(),
+	}
+	rootCmd.AddCommand(hookCmd)
+
+	// hook-event is kept for backwards compatibility with older hook scripts.
+	// When the daemon is running, isLocalSubcommand returns false so it is
+	// forwarded to the daemon where routeIntercept handles it.
 	hookEventCmd := &cobra.Command{
 		Use:    "hook-event [event] [session-id] [cwd] [notification-type]",
-		Short:  "Send a Claude Code hook event to the daemon",
+		Short:  "Send a Claude Code hook event to the daemon (legacy)",
 		Hidden: true,
 		Args:   cobra.MaximumNArgs(4),
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -311,6 +325,63 @@ func buildInstallCmd() *cobra.Command {
 	return cmd
 }
 
+// hookInput is the JSON structure Claude Code sends to hook scripts via stdin.
+type hookInput struct {
+	EventName        string `json:"hook_event_name"`
+	SessionID        string `json:"session_id"`
+	Cwd              string `json:"cwd"`
+	NotificationType string `json:"notification_type"`
+	ToolName         string `json:"tool_name"`
+	ErrorType        string `json:"error"`
+}
+
+// buildHookRunE returns the RunE for the "hook" command. It reads Claude Code
+// hook JSON from stdin and forwards it to the daemon as hook-event args.
+func buildHookRunE() func(*cobra.Command, []string) error {
+	return func(_ *cobra.Command, _ []string) error {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil // stdin unavailable — silently ignore
+		}
+		var input hookInput
+		if err := json.Unmarshal(data, &input); err != nil {
+			return nil // malformed JSON — silently ignore
+		}
+		if input.EventName == "" {
+			return nil
+		}
+
+		// Forward to daemon if available.
+		addr := os.Getenv("HUMAN_DAEMON_ADDR")
+		token := os.Getenv("HUMAN_DAEMON_TOKEN")
+		if addr == "" {
+			addr, token = discoverDaemon(token)
+		}
+		if addr == "" {
+			return nil // no daemon — silently ignore
+		}
+
+		args := []string{"hook-event", input.EventName, input.SessionID, input.Cwd, input.NotificationType, input.ToolName, input.ErrorType}
+		_, _ = daemon.RunRemote(addr, token, args, version)
+		return nil
+	}
+}
+
+// localSubcommands lists commands that must execute locally rather than
+// being forwarded to the daemon.
+var localSubcommands = map[string]bool{
+	"daemon":       true,
+	"chrome-bridge": true,
+	"install":      true,
+	"init":         true,
+	"usage":        true,
+	"index":        true,
+	"tui":          true,
+	"ping":         true,
+	"proxy":        true,
+	"hook":         true,
+}
+
 // isLocalSubcommand returns true if args represent a command that must
 // execute locally rather than being forwarded to the daemon.
 func isLocalSubcommand(args []string) bool {
@@ -325,7 +396,7 @@ func isLocalSubcommand(args []string) bool {
 		if len(a) > 0 && a[0] == '-' {
 			continue // skip other flags
 		}
-		return a == "daemon" || a == "chrome-bridge" || a == "install" || a == "init" || a == "usage" || a == "index" || a == "tui" || a == "ping" || a == "proxy"
+		return localSubcommands[a]
 	}
 	return false
 }

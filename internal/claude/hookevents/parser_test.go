@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/StephanSchmidt/human/internal/claude/logparser"
 )
 
 func TestParse_Empty(t *testing.T) {
@@ -21,7 +23,7 @@ func TestParse_SinglePromptSubmit(t *testing.T) {
 	got := Parse(data)
 	require.Len(t, got, 1)
 	snap := got["s1"]
-	assert.True(t, snap.IsWorking)
+	assert.Equal(t, logparser.StatusWorking, snap.Status)
 	assert.Equal(t, "/proj", snap.Cwd)
 	assert.Equal(t, "s1", snap.SessionID)
 }
@@ -33,7 +35,7 @@ func TestParse_PromptThenStop(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusReady, got["s1"].Status)
 }
 
 func TestParse_SubagentStartAndStop(t *testing.T) {
@@ -43,7 +45,7 @@ func TestParse_SubagentStartAndStop(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusReady, got["s1"].Status)
 }
 
 func TestParse_MultipleSessions(t *testing.T) {
@@ -53,8 +55,8 @@ func TestParse_MultipleSessions(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 2)
-	assert.True(t, got["s1"].IsWorking)
-	assert.False(t, got["s2"].IsWorking)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
+	assert.Equal(t, logparser.StatusReady, got["s2"].Status)
 }
 
 func TestParse_MalformedLinesSkipped(t *testing.T) {
@@ -65,7 +67,7 @@ func TestParse_MalformedLinesSkipped(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.True(t, got["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
 }
 
 func TestParse_EmptySessionIDSkipped(t *testing.T) {
@@ -101,7 +103,7 @@ func TestParse_EmptyLines(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.True(t, got["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
 }
 
 func TestParse_PermissionRequest(t *testing.T) {
@@ -111,8 +113,7 @@ func TestParse_PermissionRequest(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
-	assert.True(t, got["s1"].IsBlocked)
+	assert.Equal(t, logparser.StatusBlocked, got["s1"].Status)
 }
 
 func TestParse_StopFailure(t *testing.T) {
@@ -122,8 +123,7 @@ func TestParse_StopFailure(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
-	assert.True(t, got["s1"].HasError)
+	assert.Equal(t, logparser.StatusError, got["s1"].Status)
 }
 
 func TestParse_StopFailureClearedByPrompt(t *testing.T) {
@@ -133,8 +133,7 @@ func TestParse_StopFailureClearedByPrompt(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.True(t, got["s1"].IsWorking)
-	assert.False(t, got["s1"].HasError)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
 }
 
 func TestParse_NotificationIdlePrompt(t *testing.T) {
@@ -144,8 +143,7 @@ func TestParse_NotificationIdlePrompt(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
-	assert.False(t, got["s1"].IsBlocked)
+	assert.Equal(t, logparser.StatusReady, got["s1"].Status)
 }
 
 func TestParse_NotificationPermissionPrompt(t *testing.T) {
@@ -155,8 +153,7 @@ func TestParse_NotificationPermissionPrompt(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
-	assert.True(t, got["s1"].IsBlocked)
+	assert.Equal(t, logparser.StatusBlocked, got["s1"].Status)
 }
 
 func TestParse_NotificationUnknownTypeIgnored(t *testing.T) {
@@ -166,7 +163,7 @@ func TestParse_NotificationUnknownTypeIgnored(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.True(t, got["s1"].IsWorking, "unknown notification should not change working state")
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status, "unknown notification should not change state")
 }
 
 func TestParse_SessionStartResetsState(t *testing.T) {
@@ -176,9 +173,7 @@ func TestParse_SessionStartResetsState(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].HasError)
-	assert.False(t, got["s1"].IsWorking)
-	assert.False(t, got["s1"].IsEnded)
+	assert.Equal(t, logparser.StatusReady, got["s1"].Status)
 }
 
 func TestParse_SessionEnd(t *testing.T) {
@@ -188,18 +183,131 @@ func TestParse_SessionEnd(t *testing.T) {
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.False(t, got["s1"].IsWorking)
-	assert.True(t, got["s1"].IsEnded)
+	assert.Equal(t, logparser.StatusEnded, got["s1"].Status)
 }
 
 func TestParse_StopPreservesError(t *testing.T) {
-	// StopFailure followed by Stop should keep HasError true.
+	// StopFailure followed by Stop should keep error status.
 	data := []byte(
 		`{"event":"StopFailure","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
 			`{"event":"Stop","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:01Z"}`,
 	)
 	got := Parse(data)
 	require.Len(t, got, 1)
-	assert.True(t, got["s1"].HasError, "Stop should not clear HasError")
-	assert.False(t, got["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusError, got["s1"].Status, "Stop should not clear error")
+}
+
+func TestApplyEvent_PreToolUseSetsCurrentTool(t *testing.T) {
+	snap := &SessionSnapshot{Status: logparser.StatusWorking}
+	ApplyEvent(snap, &Event{EventName: "PreToolUse", ToolName: "Bash"})
+	assert.Equal(t, "Bash", snap.CurrentTool)
+	assert.Equal(t, logparser.StatusWorking, snap.Status, "PreToolUse should not change status")
+}
+
+func TestApplyEvent_PostToolUseClearsAndSetsWorking(t *testing.T) {
+	// Simulates: AskUserQuestion answered → PostToolUse fires
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusWaiting,
+		CurrentTool: "AskUserQuestion",
+		BlockedTool: "",
+	}
+	ApplyEvent(snap, &Event{EventName: "PostToolUse", ToolName: "AskUserQuestion"})
+	assert.Equal(t, logparser.StatusWorking, snap.Status)
+	assert.Empty(t, snap.CurrentTool)
+	assert.Empty(t, snap.BlockedTool)
+}
+
+func TestApplyEvent_PostToolUseFailureSetsWorking(t *testing.T) {
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusWorking,
+		CurrentTool: "Bash",
+	}
+	ApplyEvent(snap, &Event{EventName: "PostToolUseFailure", ToolName: "Bash"})
+	assert.Equal(t, logparser.StatusWorking, snap.Status)
+	assert.Empty(t, snap.CurrentTool)
+}
+
+func TestApplyEvent_PermissionRequestSetsBlockedTool(t *testing.T) {
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusWorking,
+		CurrentTool: "Bash",
+	}
+	ApplyEvent(snap, &Event{EventName: "PermissionRequest", ToolName: "Bash"})
+	assert.Equal(t, logparser.StatusBlocked, snap.Status)
+	assert.Equal(t, "Bash", snap.BlockedTool)
+	assert.Empty(t, snap.CurrentTool)
+}
+
+func TestApplyEvent_StopFailureSetsErrorType(t *testing.T) {
+	snap := &SessionSnapshot{Status: logparser.StatusWorking, CurrentTool: "Bash"}
+	ApplyEvent(snap, &Event{EventName: "StopFailure", ErrorType: "rate_limit"})
+	assert.Equal(t, logparser.StatusError, snap.Status)
+	assert.Equal(t, "rate_limit", snap.ErrorType)
+	assert.Empty(t, snap.CurrentTool)
+}
+
+func TestApplyEvent_UserPromptClearsAll(t *testing.T) {
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusError,
+		ErrorType:   "rate_limit",
+		BlockedTool: "Bash",
+		CurrentTool: "Read",
+	}
+	ApplyEvent(snap, &Event{EventName: "UserPromptSubmit"})
+	assert.Equal(t, logparser.StatusWorking, snap.Status)
+	assert.Empty(t, snap.ErrorType)
+	assert.Empty(t, snap.BlockedTool)
+	assert.Empty(t, snap.CurrentTool)
+}
+
+func TestApplyEvent_StopClearsToolFields(t *testing.T) {
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusWorking,
+		CurrentTool: "Bash",
+		BlockedTool: "Edit",
+	}
+	ApplyEvent(snap, &Event{EventName: "Stop"})
+	assert.Equal(t, logparser.StatusReady, snap.Status)
+	assert.Empty(t, snap.CurrentTool)
+	assert.Empty(t, snap.BlockedTool)
+}
+
+func TestApplyEvent_SessionStartClearsAll(t *testing.T) {
+	snap := &SessionSnapshot{
+		Status:      logparser.StatusError,
+		ErrorType:   "billing_error",
+		CurrentTool: "Bash",
+		BlockedTool: "Write",
+	}
+	ApplyEvent(snap, &Event{EventName: "SessionStart"})
+	assert.Equal(t, logparser.StatusReady, snap.Status)
+	assert.Empty(t, snap.ErrorType)
+	assert.Empty(t, snap.CurrentTool)
+	assert.Empty(t, snap.BlockedTool)
+}
+
+func TestParse_FullToolLifecycle(t *testing.T) {
+	// PreToolUse → PostToolUse should show and clear current tool.
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"PreToolUse","session_id":"s1","cwd":"/proj","tool_name":"Bash","timestamp":"2026-03-25T10:00:01Z"}` + "\n" +
+			`{"event":"PostToolUse","session_id":"s1","cwd":"/proj","tool_name":"Bash","timestamp":"2026-03-25T10:00:02Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
+	assert.Empty(t, got["s1"].CurrentTool, "PostToolUse should clear CurrentTool")
+}
+
+func TestParse_BlockedThenPostToolUseResumes(t *testing.T) {
+	// PermissionRequest → PostToolUse (permission granted, tool ran).
+	data := []byte(
+		`{"event":"UserPromptSubmit","session_id":"s1","cwd":"/proj","timestamp":"2026-03-25T10:00:00Z"}` + "\n" +
+			`{"event":"PermissionRequest","session_id":"s1","cwd":"/proj","tool_name":"Bash","timestamp":"2026-03-25T10:00:01Z"}` + "\n" +
+			`{"event":"PostToolUse","session_id":"s1","cwd":"/proj","tool_name":"Bash","timestamp":"2026-03-25T10:00:05Z"}`,
+	)
+	got := Parse(data)
+	require.Len(t, got, 1)
+	assert.Equal(t, logparser.StatusWorking, got["s1"].Status)
+	assert.Empty(t, got["s1"].BlockedTool)
 }

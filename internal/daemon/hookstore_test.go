@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
+	"github.com/StephanSchmidt/human/internal/claude/logparser"
 )
 
 func TestHookEventStore_AppendAndSnapshot(t *testing.T) {
@@ -28,7 +29,7 @@ func TestHookEventStore_AppendAndSnapshot(t *testing.T) {
 
 	snap := store.Snapshot()
 	require.Len(t, snap, 1)
-	assert.False(t, snap["s1"].IsWorking)
+	assert.Equal(t, logparser.StatusReady, snap["s1"].Status)
 	assert.Equal(t, "/proj", snap["s1"].Cwd)
 }
 
@@ -48,8 +49,8 @@ func TestHookEventStore_MultipleSessions(t *testing.T) {
 
 	snap := store.Snapshot()
 	require.Len(t, snap, 2)
-	assert.True(t, snap["s1"].IsWorking)
-	assert.True(t, snap["s2"].IsBlocked)
+	assert.Equal(t, logparser.StatusWorking, snap["s1"].Status)
+	assert.Equal(t, logparser.StatusBlocked, snap["s2"].Status)
 }
 
 func TestHookEventStore_RingBufferTrim(t *testing.T) {
@@ -88,4 +89,59 @@ func TestParseHookEventArgs_Empty(t *testing.T) {
 	evt := ParseHookEventArgs(nil)
 	assert.Empty(t, evt.EventName)
 	assert.Empty(t, evt.SessionID)
+}
+
+func TestHookEventStore_Subscribe(t *testing.T) {
+	store := NewHookEventStore()
+	ch := store.Subscribe()
+
+	store.Append(hookevents.Event{
+		EventName: "UserPromptSubmit",
+		SessionID: "s1",
+		Timestamp: time.Now(),
+	})
+
+	select {
+	case <-ch:
+		// expected
+	case <-time.After(time.Second):
+		t.Fatal("subscriber should have been notified")
+	}
+}
+
+func TestHookEventStore_SubscribeCoalesces(t *testing.T) {
+	store := NewHookEventStore()
+	ch := store.Subscribe()
+
+	// Append twice before reading — only one notification should be buffered.
+	store.Append(hookevents.Event{EventName: "Stop", SessionID: "s1", Timestamp: time.Now()})
+	store.Append(hookevents.Event{EventName: "Stop", SessionID: "s1", Timestamp: time.Now()})
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("expected notification")
+	}
+
+	// Channel should be empty now.
+	select {
+	case <-ch:
+		t.Fatal("expected no second notification (should coalesce)")
+	default:
+	}
+}
+
+func TestHookEventStore_Unsubscribe(t *testing.T) {
+	store := NewHookEventStore()
+	ch := store.Subscribe()
+	store.Unsubscribe(ch)
+
+	store.Append(hookevents.Event{EventName: "Stop", SessionID: "s1", Timestamp: time.Now()})
+
+	select {
+	case _, ok := <-ch:
+		assert.False(t, ok, "channel should be closed after unsubscribe")
+	default:
+		// Channel closed and empty — also fine.
+	}
 }

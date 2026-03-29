@@ -8,6 +8,7 @@ const (
 	StateBusy
 	StateReady
 	StateBlocked // waiting for permission approval
+	StateWaiting // waiting for user input (AskUserQuestion, ExitPlanMode)
 	StateError   // stopped due to API error or failure
 )
 
@@ -19,6 +20,8 @@ func (s InstanceState) String() string {
 		return "🟢"
 	case StateBlocked:
 		return "🟡"
+	case StateWaiting:
+		return "🔵"
 	case StateError:
 		return "⚠️"
 	default:

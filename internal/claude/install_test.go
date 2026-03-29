@@ -66,7 +66,7 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	err := Install(&buf, fw, false)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "created")
+	assert.Contains(t, buf.String(), "Created")
 
 	skillPath := filepath.Join(".claude", "skills", "human-plan", "SKILL.md")
 	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
@@ -131,77 +131,19 @@ func TestInstall_CreatesNewFiles(t *testing.T) {
 	assert.Equal(t, string(brainstormerAgentContent), string(fw.files[brainstormerAgentPath]))
 }
 
-func TestInstall_SkipsUnchangedFiles(t *testing.T) {
+func TestInstall_OverwritesIdenticalFiles(t *testing.T) {
 	fw := newMockFileWriter()
 
+	// Pre-populate with identical content — should still be overwritten.
 	skillPath := filepath.Join(".claude", "skills", "human-plan", "SKILL.md")
-	agentPath := filepath.Join(".claude", "agents", "human-planner.md")
-	readySkillPath := filepath.Join(".claude", "skills", "human-ready", "SKILL.md")
-	readyAgentPath := filepath.Join(".claude", "agents", "human-ready.md")
-	bugPlanSkillPath := filepath.Join(".claude", "skills", "human-bug-plan", "SKILL.md")
-	bugAnalyzerAgentPath := filepath.Join(".claude", "agents", "human-bug-analyzer.md")
 	fw.files[skillPath] = skillContent
-	fw.files[agentPath] = agentContent
-	fw.files[readySkillPath] = readySkillContent
-	fw.files[readyAgentPath] = readyAgentContent
-	fw.files[bugPlanSkillPath] = bugPlanSkillContent
-	fw.files[bugAnalyzerAgentPath] = bugAnalyzerAgentContent
-	reviewSkillPath := filepath.Join(".claude", "skills", "human-review", "SKILL.md")
-	reviewerAgentPath := filepath.Join(".claude", "agents", "human-reviewer.md")
-	doneSkillPath := filepath.Join(".claude", "skills", "human-done", "SKILL.md")
-	doneAgentPath := filepath.Join(".claude", "agents", "human-done.md")
-	executeSkillPath := filepath.Join(".claude", "skills", "human-execute", "SKILL.md")
-	executorAgentPath := filepath.Join(".claude", "agents", "human-executor.md")
-	fw.files[reviewSkillPath] = reviewSkillContent
-	fw.files[reviewerAgentPath] = reviewerAgentContent
-	fw.files[doneSkillPath] = doneSkillContent
-	fw.files[doneAgentPath] = doneAgentContent
-	fw.files[executeSkillPath] = executeSkillContent
-	fw.files[executorAgentPath] = executorAgentContent
-	findbugsSkillPath := filepath.Join(".claude", "skills", "human-findbugs", "SKILL.md")
-	findbugsReconAgentPath := filepath.Join(".claude", "agents", "findbugs-recon.md")
-	findbugsLogicAgentPath := filepath.Join(".claude", "agents", "findbugs-logic.md")
-	findbugsErrorsAgentPath := filepath.Join(".claude", "agents", "findbugs-errors.md")
-	findbugsConcurrencyAgentPath := filepath.Join(".claude", "agents", "findbugs-concurrency.md")
-	findbugsAPIAgentPath := filepath.Join(".claude", "agents", "findbugs-api.md")
-	findbugsTriageAgentPath := filepath.Join(".claude", "agents", "findbugs-triage.md")
-	fw.files[findbugsSkillPath] = findbugsSkillContent
-	fw.files[findbugsReconAgentPath] = findbugsReconAgentContent
-	fw.files[findbugsLogicAgentPath] = findbugsLogicAgentContent
-	fw.files[findbugsErrorsAgentPath] = findbugsErrorsAgentContent
-	fw.files[findbugsConcurrencyAgentPath] = findbugsConcurrencyAgentContent
-	fw.files[findbugsAPIAgentPath] = findbugsAPIAgentContent
-	fw.files[findbugsTriageAgentPath] = findbugsTriageAgentContent
-	securitySkillPath := filepath.Join(".claude", "skills", "human-security", "SKILL.md")
-	securitySurfaceAgentPath := filepath.Join(".claude", "agents", "security-surface.md")
-	securityInjectionAgentPath := filepath.Join(".claude", "agents", "security-injection.md")
-	securityAuthAgentPath := filepath.Join(".claude", "agents", "security-auth.md")
-	securitySecretsAgentPath := filepath.Join(".claude", "agents", "security-secrets.md")
-	securityDepsAgentPath := filepath.Join(".claude", "agents", "security-deps.md")
-	securityInfraAgentPath := filepath.Join(".claude", "agents", "security-infra.md")
-	securityChainsAgentPath := filepath.Join(".claude", "agents", "security-chains.md")
-	securityTriageAgentPath := filepath.Join(".claude", "agents", "security-triage.md")
-	fw.files[securitySkillPath] = securitySkillContent
-	fw.files[securitySurfaceAgentPath] = securitySurfaceAgentContent
-	fw.files[securityInjectionAgentPath] = securityInjectionAgentContent
-	fw.files[securityAuthAgentPath] = securityAuthAgentContent
-	fw.files[securitySecretsAgentPath] = securitySecretsAgentContent
-	fw.files[securityDepsAgentPath] = securityDepsAgentContent
-	fw.files[securityInfraAgentPath] = securityInfraAgentContent
-	fw.files[securityChainsAgentPath] = securityChainsAgentContent
-	fw.files[securityTriageAgentPath] = securityTriageAgentContent
-	brainstormSkillPath := filepath.Join(".claude", "skills", "human-brainstorm", "SKILL.md")
-	brainstormerAgentPath := filepath.Join(".claude", "agents", "human-brainstormer.md")
-	fw.files[brainstormSkillPath] = brainstormSkillContent
-	fw.files[brainstormerAgentPath] = brainstormerAgentContent
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "unchanged")
-	assert.NotContains(t, buf.String(), "created")
-	assert.NotContains(t, buf.String(), "updated")
+	assert.Contains(t, buf.String(), "Overwriting "+skillPath)
+	assert.NotContains(t, buf.String(), "unchanged")
 }
 
 func TestInstall_OverwritesChangedFiles(t *testing.T) {
@@ -214,7 +156,7 @@ func TestInstall_OverwritesChangedFiles(t *testing.T) {
 	err := Install(&buf, fw, false)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "updated "+skillPath)
+	assert.Contains(t, buf.String(), "Overwriting "+skillPath)
 	assert.Equal(t, string(skillContent), string(fw.files[skillPath]))
 }
 
@@ -271,7 +213,7 @@ func TestInstall_PersonalMode(t *testing.T) {
 	err := Install(&buf, fw, true)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "created")
+	assert.Contains(t, buf.String(), "Created")
 
 	// Verify files are written under the home directory, not ".claude"
 	for path := range fw.files {
@@ -282,32 +224,24 @@ func TestInstall_PersonalMode(t *testing.T) {
 	// Verify hooks were installed in personal mode.
 	assert.Contains(t, buf.String(), "Installing Claude Code hooks")
 
-	var hasHookScript, hasSettings bool
+	var hasSettings bool
 	for path := range fw.files {
-		if filepath.Base(path) == "human-status-hook.sh" {
-			hasHookScript = true
-		}
 		if filepath.Base(path) == "settings.json" {
 			hasSettings = true
 		}
 	}
-	assert.True(t, hasHookScript, "hook script should be installed in personal mode")
 	assert.True(t, hasSettings, "settings.json should be updated in personal mode")
 }
 
-func TestInstall_NonPersonalMode_NoHooks(t *testing.T) {
+func TestInstall_NonPersonalMode_StillInstallsHooks(t *testing.T) {
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
 	err := Install(&buf, fw, false)
 
 	require.NoError(t, err)
-	assert.NotContains(t, buf.String(), "Installing Claude Code hooks")
-
-	for path := range fw.files {
-		assert.NotEqual(t, "human-status-hook.sh", filepath.Base(path),
-			"hook script should NOT be installed in non-personal mode")
-	}
+	// Hooks are global (~/.claude/settings.json) so they install in all modes.
+	assert.Contains(t, buf.String(), "Installing Claude Code hooks")
 }
 
 func TestInstall_WrapsWriteError(t *testing.T) {
@@ -385,7 +319,7 @@ func TestInstall_ReadFileError_TreatedAsNew(t *testing.T) {
 	err := Install(&buf, fw, false)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "created")
-	assert.NotContains(t, buf.String(), "updated")
+	assert.Contains(t, buf.String(), "Created")
+	assert.NotContains(t, buf.String(), "Overwriting")
 	assert.NotContains(t, buf.String(), "unchanged")
 }

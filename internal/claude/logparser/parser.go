@@ -181,13 +181,17 @@ func (p *FileParser) processAssistant(entry *jsonlEntry, ts time.Time) {
 
 	// Status detection from stop_reason.
 	if entry.Message.StopReason == nil {
-		p.state.IsWorking = true
+		p.state.Status = StatusWorking
 	} else {
 		switch *entry.Message.StopReason {
 		case "end_turn":
-			p.state.IsWorking = false
+			p.state.Status = StatusReady
 		default: // "tool_use" etc.
-			p.state.IsWorking = true
+			if isUserBlockingToolUse(entry) {
+				p.state.Status = StatusWaiting
+			} else {
+				p.state.Status = StatusWorking
+			}
 		}
 	}
 
@@ -208,24 +212,45 @@ func (p *FileParser) processAssistant(entry *jsonlEntry, ts time.Time) {
 	}
 }
 
+// isUserBlockingToolUse returns true when the assistant message contains only
+// tools that block on user input (e.g. AskUserQuestion, ExitPlanMode).
+func isUserBlockingToolUse(entry *jsonlEntry) bool {
+	if entry.Message == nil {
+		return false
+	}
+	hasToolUse := false
+	for i := range entry.Message.Content {
+		c := &entry.Message.Content[i]
+		if c.Type != "tool_use" {
+			continue
+		}
+		hasToolUse = true
+		switch c.Name {
+		case "AskUserQuestion", "ExitPlanMode":
+			// user-blocking — continue checking
+		default:
+			return false // non-blocking tool present
+		}
+	}
+	return hasToolUse
+}
+
 func (p *FileParser) processUser(entry *jsonlEntry, ts time.Time) {
 	if entry.Message == nil {
 		return
 	}
 
-	hasToolResult := false
 	for i := range entry.Message.Content {
 		c := &entry.Message.Content[i]
 		if c.Type == "tool_result" && c.ToolUseID != "" {
-			hasToolResult = true
 			p.handleToolResult(c.ToolUseID, entry.ToolUseResult)
 		}
 	}
 
-	// User text prompt (not a tool result) means Claude is about to work.
-	if !hasToolResult {
-		p.state.IsWorking = true
-	}
+	// Any user message (text prompt or tool_result) means Claude is about to work.
+	// This is critical for AskUserQuestion/ExitPlanMode: without this, the status
+	// stays StatusWaiting after the user answers because tool_results were excluded.
+	p.state.Status = StatusWorking
 }
 
 func (p *FileParser) processProgress(entry *jsonlEntry) {

@@ -1,6 +1,10 @@
 package hookevents
 
-import "time"
+import (
+	"time"
+
+	"github.com/StephanSchmidt/human/internal/claude/logparser"
+)
 
 // Event represents a single hook event line from events.jsonl.
 type Event struct {
@@ -9,15 +13,17 @@ type Event struct {
 	Cwd              string    `json:"cwd"`
 	Timestamp        time.Time `json:"timestamp"`
 	NotificationType string    `json:"notification_type,omitempty"`
+	ToolName         string    `json:"tool_name,omitempty"`
+	ErrorType        string    `json:"error_type,omitempty"`
 }
 
 // SessionSnapshot holds the derived working/idle state for one session.
 type SessionSnapshot struct {
-	SessionID   string
-	Cwd         string
-	IsWorking   bool
-	IsBlocked   bool // waiting for permission approval
-	HasError    bool // stopped due to API error or failure
-	IsEnded     bool // session has ended
-	LastEventAt time.Time
+	SessionID   string                  `json:"session_id"`
+	Cwd         string                  `json:"cwd"`
+	Status      logparser.SessionStatus `json:"status"`
+	LastEventAt time.Time               `json:"last_event_at"`
+	CurrentTool string                  `json:"current_tool,omitempty"`
+	BlockedTool string                  `json:"blocked_tool,omitempty"`
+	ErrorType   string                  `json:"error_type,omitempty"`
 }

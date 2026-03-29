@@ -182,15 +182,10 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 				"path", filepath.Dir(dest))
 		}
 
-		existing, err := fw.ReadFile(dest)
-		if err == nil && string(existing) == string(f.content) {
-			_, _ = fmt.Fprintf(w, "  unchanged %s\n", dest)
-			continue
-		}
-
-		action := "created"
+		_, err := fw.ReadFile(dest)
+		action := "Created"
 		if err == nil {
-			action = "updated"
+			action = "Overwriting"
 		}
 
 		if err := fw.WriteFile(dest, f.content, 0o644); err != nil {
@@ -201,12 +196,10 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		_, _ = fmt.Fprintf(w, "  %s %s\n", action, dest)
 	}
 
-	// Install hooks (only in personal mode — hooks are global).
-	if personal {
-		_, _ = fmt.Fprintln(w, "\nInstalling Claude Code hooks...")
-		if err := InstallHooks(w, fw); err != nil {
-			return err
-		}
+	// Install hooks into ~/.claude/settings.json (always — hooks are global).
+	_, _ = fmt.Fprintln(w, "\nInstalling Claude Code hooks...")
+	if err := InstallHooks(w, fw); err != nil {
+		return err
 	}
 
 	return nil

@@ -28,10 +28,10 @@ func (s *stubFinder) FindInstances(_ context.Context) ([]claude.Instance, error)
 
 func TestOverlayHookState_NoHooks(t *testing.T) {
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking},
 	}
 	overlayHookState(byPath, nil)
-	assert.True(t, byPath["/a.jsonl"].IsWorking, "should remain unchanged")
+	assert.Equal(t, logparser.StatusWorking, byPath["/a.jsonl"].Status, "should remain unchanged")
 }
 
 func TestOverlayHookState_HookNewer(t *testing.T) {
@@ -39,15 +39,15 @@ func TestOverlayHookState_HookNewer(t *testing.T) {
 	hookTime := time.Date(2026, 3, 25, 10, 0, 5, 0, time.UTC)
 
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true, LastActivity: jsonlTime},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking, LastActivity: jsonlTime},
 	}
 	hooks := map[string]hookevents.SessionSnapshot{
-		"s1": {SessionID: "s1", IsWorking: false, LastEventAt: hookTime},
+		"s1": {SessionID: "s1", Status: logparser.StatusReady, LastEventAt: hookTime},
 	}
 	overlayHookState(byPath, hooks)
 
 	sess := byPath["/a.jsonl"]
-	assert.False(t, sess.IsWorking, "hook says idle")
+	assert.Equal(t, logparser.StatusReady, sess.Status, "hook says idle")
 	assert.Equal(t, hookTime, sess.LastActivity)
 }
 
@@ -56,19 +56,17 @@ func TestOverlayHookState_BlockedAndError(t *testing.T) {
 	hookTime := time.Date(2026, 3, 25, 10, 0, 5, 0, time.UTC)
 
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true, LastActivity: jsonlTime},
-		"/b.jsonl": {SessionID: "s2", IsWorking: true, LastActivity: jsonlTime},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking, LastActivity: jsonlTime},
+		"/b.jsonl": {SessionID: "s2", Status: logparser.StatusWorking, LastActivity: jsonlTime},
 	}
 	hooks := map[string]hookevents.SessionSnapshot{
-		"s1": {SessionID: "s1", IsBlocked: true, LastEventAt: hookTime},
-		"s2": {SessionID: "s2", HasError: true, LastEventAt: hookTime},
+		"s1": {SessionID: "s1", Status: logparser.StatusBlocked, LastEventAt: hookTime},
+		"s2": {SessionID: "s2", Status: logparser.StatusError, LastEventAt: hookTime},
 	}
 	overlayHookState(byPath, hooks)
 
-	assert.True(t, byPath["/a.jsonl"].IsBlocked, "should be blocked")
-	assert.False(t, byPath["/a.jsonl"].IsWorking, "should not be working")
-	assert.True(t, byPath["/b.jsonl"].HasError, "should have error")
-	assert.False(t, byPath["/b.jsonl"].IsWorking, "should not be working")
+	assert.Equal(t, logparser.StatusBlocked, byPath["/a.jsonl"].Status)
+	assert.Equal(t, logparser.StatusError, byPath["/b.jsonl"].Status)
 }
 
 func TestOverlayHookState_HookOlder(t *testing.T) {
@@ -76,13 +74,74 @@ func TestOverlayHookState_HookOlder(t *testing.T) {
 	hookTime := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
 
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true, LastActivity: jsonlTime},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking, LastActivity: jsonlTime},
 	}
 	hooks := map[string]hookevents.SessionSnapshot{
-		"s1": {SessionID: "s1", IsWorking: false, LastEventAt: hookTime},
+		"s1": {SessionID: "s1", Status: logparser.StatusReady, LastEventAt: hookTime},
 	}
 	overlayHookState(byPath, hooks)
-	assert.True(t, byPath["/a.jsonl"].IsWorking, "JSONL is newer, should keep")
+
+	sess := byPath["/a.jsonl"]
+	assert.Equal(t, logparser.StatusReady, sess.Status, "hook is authoritative regardless of timestamp")
+	assert.Equal(t, jsonlTime, sess.LastActivity, "LastActivity keeps the newer timestamp")
+}
+
+// --- fillMissingFromHooks tests ---
+
+func TestFillMissingFromHooks_MatchesByCwd(t *testing.T) {
+	hookTime := time.Date(2026, 3, 25, 10, 0, 0, 0, time.UTC)
+
+	instances := []claude.Instance{
+		{FilePath: "/a.jsonl", Cwd: "/home/user/project"},
+	}
+	byPath := map[string]logparser.SessionState{} // no JSONL session
+	hooks := map[string]hookevents.SessionSnapshot{
+		"s-new": {SessionID: "s-new", Cwd: "/home/user/project", Status: logparser.StatusReady, LastEventAt: hookTime},
+	}
+
+	fillMissingFromHooks(instances, byPath, hooks)
+
+	require.Contains(t, byPath, "/a.jsonl")
+	sess := byPath["/a.jsonl"]
+	assert.Equal(t, "s-new", sess.SessionID)
+	assert.Equal(t, logparser.StatusReady, sess.Status)
+	assert.Equal(t, "/home/user/project", sess.Cwd)
+}
+
+func TestFillMissingFromHooks_SkipsAlreadyMatched(t *testing.T) {
+	instances := []claude.Instance{
+		{FilePath: "/a.jsonl", Cwd: "/home/user/project"},
+	}
+	byPath := map[string]logparser.SessionState{
+		"/a.jsonl": {SessionID: "s-old", Status: logparser.StatusWorking},
+	}
+	hooks := map[string]hookevents.SessionSnapshot{
+		"s-new": {SessionID: "s-new", Cwd: "/home/user/project", Status: logparser.StatusReady},
+	}
+
+	fillMissingFromHooks(instances, byPath, hooks)
+
+	assert.Equal(t, "s-old", byPath["/a.jsonl"].SessionID, "existing session should not be overwritten")
+	assert.Equal(t, logparser.StatusWorking, byPath["/a.jsonl"].Status)
+}
+
+func TestFillMissingFromHooks_NoHooks(t *testing.T) {
+	instances := []claude.Instance{{FilePath: "/a.jsonl", Cwd: "/proj"}}
+	byPath := map[string]logparser.SessionState{}
+
+	fillMissingFromHooks(instances, byPath, nil)
+	assert.Empty(t, byPath)
+}
+
+func TestFillMissingFromHooks_NoCwd(t *testing.T) {
+	instances := []claude.Instance{{FilePath: "/a.jsonl"}} // no Cwd
+	byPath := map[string]logparser.SessionState{}
+	hooks := map[string]hookevents.SessionSnapshot{
+		"s1": {SessionID: "s1", Cwd: "/proj", Status: logparser.StatusReady},
+	}
+
+	fillMissingFromHooks(instances, byPath, hooks)
+	assert.Empty(t, byPath, "instance without cwd should not match")
 }
 
 // --- matchInstances tests ---
@@ -92,7 +151,7 @@ func TestMatchInstances_WithSession(t *testing.T) {
 		{Instance: claude.Instance{FilePath: "/a.jsonl"}},
 	}
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking},
 	}
 	views := matchInstances(usages, byPath)
 	require.Len(t, views, 1)
@@ -114,7 +173,7 @@ func TestMatchInstances_NoSession(t *testing.T) {
 func TestMatchPaneStates_ByPID(t *testing.T) {
 	panes := []claude.TmuxPane{{ClaudePID: 100}}
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", IsWorking: true},
+		"/a.jsonl": {SessionID: "s1", Status: logparser.StatusWorking},
 	}
 	instances := []claude.Instance{{PID: 100, FilePath: "/a.jsonl"}}
 
@@ -125,7 +184,7 @@ func TestMatchPaneStates_ByPID(t *testing.T) {
 func TestMatchPaneStates_ByCwd(t *testing.T) {
 	panes := []claude.TmuxPane{{Cwd: "/proj"}}
 	byPath := map[string]logparser.SessionState{
-		"/a.jsonl": {SessionID: "s1", Cwd: "/proj", IsWorking: false, LastActivity: time.Now()},
+		"/a.jsonl": {SessionID: "s1", Cwd: "/proj", Status: logparser.StatusReady, LastActivity: time.Now()},
 	}
 
 	matchPaneStates(panes, byPath, nil)
@@ -188,15 +247,12 @@ func TestAggregateUsage(t *testing.T) {
 // --- sessionToState tests ---
 
 func TestSessionToState(t *testing.T) {
-	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true}))
-	assert.Equal(t, claude.StateReady, sessionToState(logparser.SessionState{IsWorking: false}))
-	assert.Equal(t, claude.StateBlocked, sessionToState(logparser.SessionState{IsBlocked: true}))
-	assert.Equal(t, claude.StateError, sessionToState(logparser.SessionState{HasError: true}))
-	// Working takes precedence over everything.
-	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true, IsBlocked: true}))
-	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{IsWorking: true, HasError: true}))
-	// Error takes precedence over blocked.
-	assert.Equal(t, claude.StateError, sessionToState(logparser.SessionState{HasError: true, IsBlocked: true}))
+	assert.Equal(t, claude.StateBusy, sessionToState(logparser.SessionState{Status: logparser.StatusWorking}))
+	assert.Equal(t, claude.StateReady, sessionToState(logparser.SessionState{Status: logparser.StatusReady}))
+	assert.Equal(t, claude.StateBlocked, sessionToState(logparser.SessionState{Status: logparser.StatusBlocked}))
+	assert.Equal(t, claude.StateWaiting, sessionToState(logparser.SessionState{Status: logparser.StatusWaiting}))
+	assert.Equal(t, claude.StateError, sessionToState(logparser.SessionState{Status: logparser.StatusError}))
+	assert.Equal(t, claude.StateReady, sessionToState(logparser.SessionState{Status: logparser.StatusEnded}))
 }
 
 // --- fetchDaemonHookSnapshots tests ---
@@ -259,6 +315,27 @@ func TestFetchQuick_CarriesForwardPanes(t *testing.T) {
 	require.NotNil(t, snap)
 	require.Len(t, snap.Panes, 1, "panes should be carried forward")
 	assert.Equal(t, "main", snap.Panes[0].SessionName)
+}
+
+// --- parseSessions pruning tests ---
+
+func TestParseSessions_PrunesStaleParser(t *testing.T) {
+	// When an instance's FilePath changes (e.g. JSONL resolution corrects
+	// after startup race), the old parser should be pruned.
+	mon := New(&stubFinder{}, nil)
+
+	// Simulate first cycle: instance resolves to old JSONL.
+	mon.parsers["/old.jsonl"] = logparser.NewFileParser()
+
+	// Second cycle: instance now resolves to correct JSONL.
+	// parseSessions won't reference /old.jsonl anymore.
+	instances := []claude.Instance{
+		{FilePath: "/new.jsonl"},
+	}
+	mon.parseSessions(instances)
+
+	assert.NotContains(t, mon.parsers, "/old.jsonl", "stale parser should be pruned")
+	assert.Contains(t, mon.parsers, "/new.jsonl", "active parser should exist")
 }
 
 // --- extractInstances tests ---

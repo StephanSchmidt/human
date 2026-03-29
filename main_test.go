@@ -1056,6 +1056,8 @@ func TestIsLocalSubcommand(t *testing.T) {
 		{[]string{"--verbose", "install"}, true},
 		{[]string{"init"}, true},
 		{[]string{"--verbose", "init"}, true},
+		{[]string{"hook"}, true},
+		{[]string{"--verbose", "hook"}, true},
 	}
 	for _, tt := range tests {
 		got := isLocalSubcommand(tt.args)

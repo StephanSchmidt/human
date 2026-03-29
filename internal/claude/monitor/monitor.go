@@ -67,9 +67,10 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	// JSONL session parsing.
 	sessionByPath := m.parseSessions(instances)
 
-	// Hook events from daemon in-memory store.
+	// Hook events from daemon in-memory store (authoritative for state).
 	hookSnaps := fetchDaemonHookSnapshots(snap.Daemon.Alive)
 	overlayHookState(sessionByPath, hookSnaps)
+	fillMissingFromHooks(instances, sessionByPath, hookSnaps)
 
 	// Match sessions to instances, then mark daemon-connected ones.
 	snap.Instances = matchInstances(usages, sessionByPath)
@@ -117,6 +118,7 @@ func (m *Monitor) FetchQuick(_ context.Context, prev *Snapshot) *Snapshot {
 			byPath[k] = v
 		}
 		overlayHookState(byPath, hookSnaps)
+		fillMissingFromHooks(extractInstances(prev.Instances), byPath, hookSnaps)
 		snap.sessionByPath = byPath
 
 		// Rebuild instance views with updated sessions.
@@ -150,10 +152,12 @@ func (m *Monitor) findPanes(ctx context.Context, instances []claude.Instance) []
 func (m *Monitor) parseSessions(instances []claude.Instance) map[string]logparser.SessionState {
 	byPath := make(map[string]logparser.SessionState)
 	reader := logparser.OSFileReader{}
+	active := make(map[string]bool, len(instances))
 	for _, inst := range instances {
 		if inst.FilePath == "" {
 			continue
 		}
+		active[inst.FilePath] = true
 		parser, ok := m.parsers[inst.FilePath]
 		if !ok {
 			parser = logparser.NewFileParser()
@@ -166,6 +170,14 @@ func (m *Monitor) parseSessions(instances []claude.Instance) map[string]logparse
 		}
 		if state.SessionID != "" {
 			byPath[inst.FilePath] = state
+		}
+	}
+	// Prune parsers for files no longer referenced by any instance.
+	// This prevents stale state from lingering when a PID's JSONL path
+	// changes (e.g. after resolveJSONLPath corrects a startup race).
+	for path := range m.parsers {
+		if !active[path] {
+			delete(m.parsers, path)
 		}
 	}
 	return byPath
@@ -198,8 +210,10 @@ func fetchDaemonHookSnapshots(daemonAlive bool) map[string]hookevents.SessionSna
 	return snap
 }
 
-// overlayHookState updates sessions in byPath from hook snapshots when the
-// hook event is more recent than the JSONL-parsed LastActivity.
+// overlayHookState updates sessions in byPath from hook snapshots.
+// Hook state is authoritative — when a hook snapshot exists for a session,
+// it unconditionally overrides the JSONL-derived working/blocked/error flags.
+// JSONL parsing is only the source of truth when no hook data exists.
 func overlayHookState(byPath map[string]logparser.SessionState, hooks map[string]hookevents.SessionSnapshot) {
 	if len(hooks) == 0 {
 		return
@@ -209,12 +223,55 @@ func overlayHookState(byPath map[string]logparser.SessionState, hooks map[string
 		if !ok {
 			continue
 		}
+		sess.Status = snap.Status
+		sess.CurrentTool = snap.CurrentTool
+		sess.BlockedTool = snap.BlockedTool
+		sess.ErrorType = snap.ErrorType
 		if snap.LastEventAt.After(sess.LastActivity) {
-			sess.IsWorking = snap.IsWorking
-			sess.IsBlocked = snap.IsBlocked
-			sess.HasError = snap.HasError
 			sess.LastActivity = snap.LastEventAt
-			byPath[path] = sess
+		}
+		byPath[path] = sess
+	}
+}
+
+// fillMissingFromHooks creates session state from hook snapshots for instances
+// that have no JSONL session yet (e.g. freshly started Claude waiting for input).
+func fillMissingFromHooks(instances []claude.Instance, byPath map[string]logparser.SessionState, hooks map[string]hookevents.SessionSnapshot) {
+	if len(hooks) == 0 {
+		return
+	}
+	// Collect session IDs already matched via JSONL.
+	matched := make(map[string]bool, len(byPath))
+	for _, sess := range byPath {
+		matched[sess.SessionID] = true
+	}
+	// Index unmatched hooks by cwd for instance matching.
+	byCwd := make(map[string]hookevents.SessionSnapshot)
+	for _, snap := range hooks {
+		if !matched[snap.SessionID] && snap.Cwd != "" {
+			byCwd[snap.Cwd] = snap
+		}
+	}
+	// Match instances without a session to hook snapshots by cwd.
+	for _, inst := range instances {
+		if inst.FilePath == "" || inst.Cwd == "" {
+			continue
+		}
+		if _, hasSession := byPath[inst.FilePath]; hasSession {
+			continue
+		}
+		snap, ok := byCwd[inst.Cwd]
+		if !ok {
+			continue
+		}
+		byPath[inst.FilePath] = logparser.SessionState{
+			SessionID:    snap.SessionID,
+			Cwd:          snap.Cwd,
+			Status:       snap.Status,
+			LastActivity: snap.LastEventAt,
+			CurrentTool:  snap.CurrentTool,
+			BlockedTool:  snap.BlockedTool,
+			ErrorType:    snap.ErrorType,
 		}
 	}
 }
@@ -284,16 +341,18 @@ func matchPaneStates(panes []claude.TmuxPane, byPath map[string]logparser.Sessio
 }
 
 func sessionToState(s logparser.SessionState) claude.InstanceState {
-	if s.IsWorking {
+	switch s.Status {
+	case logparser.StatusWorking:
 		return claude.StateBusy
-	}
-	if s.HasError {
+	case logparser.StatusError:
 		return claude.StateError
-	}
-	if s.IsBlocked {
+	case logparser.StatusBlocked:
 		return claude.StateBlocked
+	case logparser.StatusWaiting:
+		return claude.StateWaiting
+	default:
+		return claude.StateReady
 	}
-	return claude.StateReady
 }
 
 func aggregateUsage(usages []claude.InstanceUsage) *claude.UsageSummary {

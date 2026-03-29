@@ -111,7 +111,7 @@ func TestFileParser_EmptyFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", state.SessionID)
 	assert.True(t, state.StartedAt.IsZero())
-	assert.False(t, state.IsWorking)
+	assert.Equal(t, StatusReady, state.Status)
 	assert.Empty(t, state.Subagents)
 	assert.Empty(t, state.Tasks)
 }
@@ -128,7 +128,7 @@ func TestFileParser_BasicSession(t *testing.T) {
 	assert.Equal(t, "/home/user/project", state.Cwd)
 	assert.Equal(t, "cool-slug", state.Slug)
 	assert.Equal(t, ts(t, "2026-03-25T10:00:00.000Z"), state.StartedAt)
-	assert.True(t, state.IsWorking) // user entry means Claude will work
+	assert.Equal(t, StatusWorking, state.Status) // user entry means Claude will work
 }
 
 func TestFileParser_Incremental(t *testing.T) {
@@ -140,7 +140,7 @@ func TestFileParser_Incremental(t *testing.T) {
 	state, err := p.UpdateBytes(data1)
 	require.NoError(t, err)
 	assert.Equal(t, "sess-1", state.SessionID)
-	assert.True(t, state.IsWorking)
+	assert.Equal(t, StatusWorking, state.Status)
 
 	// Second batch: assistant with end_turn.
 	endTurn := strPtr("end_turn")
@@ -151,7 +151,7 @@ func TestFileParser_Incremental(t *testing.T) {
 
 	state, err = p.UpdateBytes(data2)
 	require.NoError(t, err)
-	assert.False(t, state.IsWorking) // end_turn → idle
+	assert.Equal(t, StatusReady, state.Status) // end_turn → idle
 }
 
 func TestFileParser_SubagentLifecycle(t *testing.T) {
@@ -265,7 +265,7 @@ func TestFileParser_StatusTransitions(t *testing.T) {
 	line1 := makeUserEntry(t, "sess-1", "/project", "", "do stuff", "2026-03-25T10:00:00.000Z")
 	data1 := joinLines(line1)
 	state, _ := p.UpdateBytes(data1)
-	assert.True(t, state.IsWorking, "user prompt should set IsWorking")
+	assert.Equal(t, StatusWorking, state.Status, "user prompt should set IsWorking")
 
 	// Assistant with tool_use stop_reason → still working.
 	toolUse := strPtr("tool_use")
@@ -274,7 +274,7 @@ func TestFileParser_StatusTransitions(t *testing.T) {
 	})
 	data2 := joinLines(line2)
 	state, _ = p.UpdateBytes(data2)
-	assert.True(t, state.IsWorking, "tool_use stop_reason should keep IsWorking")
+	assert.Equal(t, StatusWorking, state.Status, "tool_use stop_reason should keep IsWorking")
 
 	// Assistant with end_turn → idle.
 	endTurn := strPtr("end_turn")
@@ -283,13 +283,37 @@ func TestFileParser_StatusTransitions(t *testing.T) {
 	})
 	data3 := joinLines(line3)
 	state, _ = p.UpdateBytes(data3)
-	assert.False(t, state.IsWorking, "end_turn should clear IsWorking")
+	assert.Equal(t, StatusReady, state.Status, "end_turn should set StatusReady")
 
 	// New user prompt → working again.
 	line4 := makeUserEntry(t, "sess-1", "/project", "", "more work", "2026-03-25T10:01:00.000Z")
 	data4 := joinLines(line4)
 	state, _ = p.UpdateBytes(data4)
-	assert.True(t, state.IsWorking, "new user prompt should set IsWorking again")
+	assert.Equal(t, StatusWorking, state.Status, "new user prompt should set IsWorking again")
+}
+
+func TestFileParser_ToolResultSetsWorking(t *testing.T) {
+	p := NewFileParser()
+
+	// AskUserQuestion tool_use → StatusWaiting.
+	toolUse := strPtr("tool_use")
+	askLine := makeAssistantEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", toolUse, []map[string]interface{}{
+		{
+			"type":  "tool_use",
+			"id":    "toolu_ask1",
+			"name":  "AskUserQuestion",
+			"input": map[string]interface{}{"question": "which approach?"},
+		},
+	})
+	data := joinLines(askLine)
+	state, _ := p.UpdateBytes(data)
+	assert.Equal(t, StatusWaiting, state.Status, "AskUserQuestion should set StatusWaiting")
+
+	// User answers with tool_result → StatusWorking.
+	answerLine := makeToolResultEntry(t, "sess-1", "2026-03-25T10:00:10.000Z", "toolu_ask1", nil)
+	data2 := joinLines(answerLine)
+	state, _ = p.UpdateBytes(data2)
+	assert.Equal(t, StatusWorking, state.Status, "tool_result should transition to StatusWorking")
 }
 
 func TestFileParser_MultipleSubagents(t *testing.T) {

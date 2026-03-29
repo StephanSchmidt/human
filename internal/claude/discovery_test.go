@@ -168,6 +168,12 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 	if instances[1].PID != 67890 {
 		t.Errorf("PID = %d, want 67890", instances[1].PID)
 	}
+	if instances[0].Cwd != "/home/testuser/projects/alpha" {
+		t.Errorf("Cwd = %q, want /home/testuser/projects/alpha", instances[0].Cwd)
+	}
+	if instances[1].Cwd != "/home/testuser/projects/beta" {
+		t.Errorf("Cwd = %q, want /home/testuser/projects/beta", instances[1].Cwd)
+	}
 }
 
 func TestHostFinder_IgnoresNonClaude(t *testing.T) {
@@ -311,8 +317,10 @@ func TestHostFinder_SessionResolvesToJSONL(t *testing.T) {
 	}
 }
 
-func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
-	// Session resolves to a missing JSONL (stale). Should fall back to newest.
+func TestHostFinder_SessionExistsButJSONLMissing_NoFallback(t *testing.T) {
+	// Session file resolves to a session ID whose JSONL doesn't exist yet
+	// (startup race). Should NOT fall back to newest — return empty FilePath
+	// so hook-based state is used instead.
 	homeDir := t.TempDir()
 	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
 	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
@@ -320,7 +328,46 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a JSONL for a different (newer) session.
+	// Create a JSONL for a different (older) session — should NOT be picked up.
+	oldFile := filepath.Join(root, "old-session.jsonl")
+	if err := os.WriteFile(oldFile, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
+	// Session file points to a JSONL that doesn't exist yet.
+	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: "new-session-pending"}}
+
+	finder := &HostFinder{
+		Runner:          runner,
+		HomeDir:         homeDir,
+		CwdResolver:     resolver,
+		SessionResolver: sessResolver,
+		CommChecker:     alwaysClaude,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if instances[0].FilePath != "" {
+		t.Errorf("FilePath = %q, want empty (no fallback when session file exists)", instances[0].FilePath)
+	}
+}
+
+func TestHostFinder_NoSessionFile_FallsBackToNewest(t *testing.T) {
+	// No session file exists (e.g. old Claude version). Should fall back to newest JSONL.
+	homeDir := t.TempDir()
+	projectDir := CwdToProjectDir("/home/testuser/projects/alpha")
+	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	newestFile := filepath.Join(root, "newest-session.jsonl")
 	if err := os.WriteFile(newestFile, []byte("{\"type\":\"assistant\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -328,8 +375,8 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 
 	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
-	// Session points to a JSONL that doesn't exist.
-	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: "stale-gone-session"}}
+	// No session for this PID — simulates missing session file.
+	sessResolver := &mockSessionResolver{sessions: map[int]string{}}
 
 	finder := &HostFinder{
 		Runner:          runner,
@@ -347,7 +394,7 @@ func TestHostFinder_StaleSessionFallsBackToNewest(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(instances))
 	}
 	if instances[0].FilePath != newestFile {
-		t.Errorf("FilePath = %q, want %q (fallback to newest)", instances[0].FilePath, newestFile)
+		t.Errorf("FilePath = %q, want %q (fallback to newest when no session file)", instances[0].FilePath, newestFile)
 	}
 }
 

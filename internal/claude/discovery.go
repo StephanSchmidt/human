@@ -34,6 +34,7 @@ type Instance struct {
 	Memory          *MemoryInfo // memory usage (containers only)
 	ContainerID     string      // full Docker container ID (containers only)
 	PID             int         // host PID of the claude process (0 for containers)
+	Cwd             string      // working directory of the Claude process
 	FilePath        string      // resolved JSONL path for fsnotify (host instances only)
 	ProxyConfigured bool        // true if the instance is configured to use the daemon's HTTPS proxy
 	DaemonConnected bool        // true if the instance has recently communicated with the daemon
@@ -135,15 +136,26 @@ func (r FileSessionResolver) ResolveSessionID(pid int) (string, error) {
 
 // resolveJSONLPath finds the active JSONL for a PID.
 // It tries the session file first (needed when multiple Claudes share a project dir),
-// then falls back to the newest JSONL by mtime when the session is stale or missing —
+// then falls back to the newest JSONL by mtime only when no session file exists —
 // Claude creates new conversations without updating the session file.
+//
+// When the session file resolves a session ID but the JSONL doesn't exist yet
+// (startup race — JSONL is created seconds after the session file), we return ""
+// rather than falling back to the newest JSONL, which would be the previous
+// session's file and cause stale subagents/tasks to appear.
 func resolveJSONLPath(sess SessionResolver, pid int, root string) string {
-	if sessionID, err := sess.ResolveSessionID(pid); err == nil {
+	sessionID, err := sess.ResolveSessionID(pid)
+	if err == nil {
 		sessionPath := filepath.Clean(filepath.Join(root, sessionID+".jsonl"))
 		if _, fErr := os.Stat(sessionPath); fErr == nil { // #nosec G703 -- root is the Claude config dir, sessionID from local session file
 			return sessionPath
 		}
+		// Session file exists and points to a known session ID, but the JSONL
+		// hasn't been created yet. Return empty — the hook-based state from
+		// fillMissingFromHooks will provide status until the JSONL appears.
+		return ""
 	}
+	// No session file at all (e.g. old Claude version). Fall back to newest JSONL.
 	if newest, err := findNewestJSONL(root); err == nil && newest != "" {
 		return newest
 	}
@@ -265,6 +277,7 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			Walker:   OSDirWalker{},
 			Root:     root,
 			PID:      pidNum,
+			Cwd:      cwd,
 			FilePath: filePath,
 		})
 	}

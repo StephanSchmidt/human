@@ -247,7 +247,7 @@ func (m model) View() string {
 // --- commands ---
 
 func fastTickCmd() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return fastTickMsg(t) })
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return fastTickMsg(t) })
 }
 
 func fullTickCmd() tea.Cmd {
@@ -351,6 +351,9 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 	if iv.Session != nil && iv.Session.Slug != "" {
 		header += "  " + slugStyle.Render(iv.Session.Slug)
 	}
+	if ctx := sessionContext(iv.Session); ctx != "" {
+		header += "  " + ctx
+	}
 	b.WriteString(header)
 	b.WriteByte('\n')
 
@@ -359,7 +362,7 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 
 	// Subagents + tasks.
 	if iv.Session != nil {
-		m.renderSubagents(b, iv.Session.Subagents, iv.Session.IsWorking, iv.Session.LastActivity)
+		m.renderSubagents(b, iv.Session.Subagents, iv.Session.Status == logparser.StatusWorking, iv.Session.LastActivity)
 		renderTaskSummary(b, iv.Session.Tasks)
 	}
 }
@@ -575,6 +578,8 @@ func renderPanes(panes []claude.TmuxPane) string {
 			icon = specialStyle.Render("●")
 		case claude.StateBlocked:
 			icon = warningStyle.Render("●")
+		case claude.StateWaiting:
+			icon = waitingStyle.Render("●")
 		case claude.StateError:
 			icon = accentStyle.Render("⚠")
 		default:
@@ -610,35 +615,57 @@ func sessionLabelStyle(sess *logparser.SessionState) lipgloss.Style {
 	if sess == nil {
 		return idleInstanceStyle
 	}
-	if sess.IsWorking {
+	switch sess.Status {
+	case logparser.StatusWorking:
 		return busyInstanceStyle
-	}
-	if sess.HasError {
+	case logparser.StatusError:
 		return errorStyle
-	}
-	if sess.IsBlocked {
+	case logparser.StatusBlocked:
 		return warningStyle
+	case logparser.StatusWaiting:
+		return specialStyle
+	default:
+		return idleInstanceStyle
 	}
-	return idleInstanceStyle
+}
+
+// sessionContext returns a styled string with contextual info from hook events:
+// current tool being executed, blocked tool name, or error type.
+func sessionContext(sess *logparser.SessionState) string {
+	if sess == nil {
+		return ""
+	}
+	switch {
+	case sess.Status == logparser.StatusError && sess.ErrorType != "":
+		return errorStyle.Render(sess.ErrorType)
+	case sess.Status == logparser.StatusBlocked && sess.BlockedTool != "":
+		return warningStyle.Render("⚠ " + sess.BlockedTool)
+	case sess.CurrentTool != "":
+		return subtleStyle.Render("[" + sess.CurrentTool + "]")
+	default:
+		return ""
+	}
 }
 
 func (m model) sessionIcon(sess *logparser.SessionState) string {
 	if sess == nil {
 		return subtleStyle.Render("○")
 	}
-	if sess.IsWorking {
+	switch sess.Status {
+	case logparser.StatusWorking:
 		return m.spinner.View()
-	}
-	if sess.HasError {
+	case logparser.StatusError:
 		return accentStyle.Render("⚠")
-	}
-	if sess.IsBlocked {
+	case logparser.StatusBlocked:
 		return warningStyle.Render("●")
+	case logparser.StatusWaiting:
+		return waitingStyle.Render("●")
+	default:
+		if !sess.LastActivity.IsZero() {
+			return specialStyle.Render("●")
+		}
+		return subtleStyle.Render("○")
 	}
-	if !sess.LastActivity.IsZero() {
-		return specialStyle.Render("●")
-	}
-	return subtleStyle.Render("○")
 }
 
 // --- utilities ---

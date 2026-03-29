@@ -56,6 +56,18 @@ type Task struct {
 	UpdatedAt time.Time
 }
 
+// SessionStatus represents the current state of a Claude Code session.
+type SessionStatus int
+
+const (
+	StatusReady   SessionStatus = iota // idle — default zero value
+	StatusWorking                      // Claude actively generating
+	StatusBlocked                      // waiting for permission approval
+	StatusWaiting                      // waiting for user input (AskUserQuestion, ExitPlanMode)
+	StatusError                        // API error or crash
+	StatusEnded                        // session ended (/clear)
+)
+
 // SessionState holds the parsed state for a single JSONL session file.
 type SessionState struct {
 	SessionID    string
@@ -63,9 +75,10 @@ type SessionState struct {
 	Slug         string
 	StartedAt    time.Time
 	LastActivity time.Time
-	IsWorking    bool // true = Claude actively generating, false = idle/waiting
-	IsBlocked    bool // true = waiting for permission approval
-	HasError     bool // true = stopped due to API error or failure
+	Status       SessionStatus
 	Subagents    []Subagent
 	Tasks        []Task
+	CurrentTool  string // from hook: tool currently executing (PreToolUse)
+	BlockedTool  string // from hook: tool waiting for permission (PermissionRequest)
+	ErrorType    string // from hook: error category (StopFailure)
 }

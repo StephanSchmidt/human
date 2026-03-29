@@ -25,7 +25,6 @@ func TestInstallHooks_NewSettings(t *testing.T) {
 	err := InstallHooks(&buf, fw)
 
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "created")
 	assert.Contains(t, buf.String(), "hooks registered")
 
 	// Verify settings.json was written with hooks.
@@ -52,16 +51,11 @@ func TestInstallHooks_NewSettings(t *testing.T) {
 		assert.Len(t, matchers, 1)
 	}
 
-	// Verify hook script was written.
-	var scriptPath string
+	// No hook script file should be written — hooks invoke `human hook` directly.
 	for path := range fw.files {
-		if filepath.Base(path) == "human-status-hook.sh" {
-			scriptPath = path
-			break
-		}
+		assert.NotEqual(t, "human-status-hook.sh", filepath.Base(path),
+			"hook script should NOT be written")
 	}
-	require.NotEmpty(t, scriptPath, "hook script should be written")
-	assert.Equal(t, string(hookScriptContent), string(fw.files[scriptPath]))
 }
 
 func TestInstallHooks_ExistingSettings(t *testing.T) {
@@ -219,7 +213,7 @@ func TestInstallHooks_MergesWithUserHooks(t *testing.T) {
 	assert.Len(t, promptMatchers, 1)
 }
 
-func TestInstallHooks_WritesScript(t *testing.T) {
+func TestInstallHooks_NoScriptFile(t *testing.T) {
 	fw := newMockFileWriter()
 	fw.readFn = func(_ string) ([]byte, error) {
 		return nil, os.ErrNotExist
@@ -228,19 +222,11 @@ func TestInstallHooks_WritesScript(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, InstallHooks(&buf, fw))
 
-	var scriptPath string
+	// Only settings.json should be written — no script file.
 	for path := range fw.files {
-		if filepath.Base(path) == "human-status-hook.sh" {
-			scriptPath = path
-			break
-		}
+		assert.Equal(t, "settings.json", filepath.Base(path),
+			"only settings.json should be written, got: %s", path)
 	}
-	require.NotEmpty(t, scriptPath)
-
-	content := string(fw.files[scriptPath])
-	assert.Contains(t, content, "#!/bin/bash")
-	assert.Contains(t, content, "hook_event_name")
-	assert.Contains(t, content, "human hook-event")
 }
 
 func TestInstallHooks_NotificationMatcher(t *testing.T) {
