@@ -811,10 +811,12 @@ func fetchIssuesCmd() tea.Cmd {
 		}
 		var results []trackerIssues
 		for _, inst := range instances {
-			if len(inst.Projects) == 0 {
-				continue
+			projects := inst.Projects
+			if len(projects) == 0 {
+				// No explicit projects — fetch across all (provider decides behaviour).
+				projects = []string{""}
 			}
-			for _, project := range inst.Projects {
+			for _, project := range projects {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
 					Project:    project,
@@ -822,10 +824,14 @@ func fetchIssuesCmd() tea.Cmd {
 					IncludeAll: false,
 				})
 				cancel()
+				label := project
+				if label == "" {
+					label = inst.Name
+				}
 				results = append(results, trackerIssues{
 					TrackerName: inst.Name,
 					TrackerKind: inst.Kind,
-					Project:     project,
+					Project:     label,
 					Issues:      issues,
 					Err:         fetchErr,
 				})
