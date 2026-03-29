@@ -123,12 +123,14 @@ type model struct {
 	issues        []trackerIssues // issues from configured tracker projects
 	issuesLoading bool            // true while issue fetch is in flight
 	issuesFetched time.Time       // when issues were last successfully fetched
+
+	prevStatuses map[string]logparser.SessionStatus // previous session statuses for idle detection
 }
 
 func newModel(mon *monitor.Monitor) model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(humanRed)
-	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true, logMode: "off"}
+	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true, logMode: "off", prevStatuses: make(map[string]logparser.SessionStatus)}
 }
 
 // --- messages ---
@@ -191,6 +193,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.snap = msg.snap
 		m.fetching = false
+		m.checkIdleTransitions()
 	case issueTickMsg:
 		return m.handleIssueTick()
 	case issuesResultMsg:
@@ -203,6 +206,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// checkIdleTransitions plays a notification sound when any instance
+// transitions from working/blocked/waiting to ready (idle).
+func (m model) checkIdleTransitions() {
+	if m.snap == nil {
+		return
+	}
+	bing := false
+	current := make(map[string]logparser.SessionStatus, len(m.snap.Instances))
+	for _, iv := range m.snap.Instances {
+		if iv.Session == nil {
+			continue
+		}
+		sid := iv.Session.SessionID
+		cur := iv.Session.Status
+		current[sid] = cur
+		prev, known := m.prevStatuses[sid]
+		if !known {
+			continue
+		}
+		if cur == logparser.StatusReady && (prev == logparser.StatusWorking || prev == logparser.StatusBlocked || prev == logparser.StatusWaiting) {
+			bing = true
+		}
+	}
+	for k := range m.prevStatuses {
+		delete(m.prevStatuses, k)
+	}
+	for k, v := range current {
+		m.prevStatuses[k] = v
+	}
+	if bing {
+		playNotificationSound()
+	}
 }
 
 func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
@@ -874,8 +911,8 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 		for _, issue := range g.Issues {
 			title := truncate(issue.Title, w-30)
 			_, _ = fmt.Fprintf(&b, "      %-12s %-14s %s\n",
-				subtleStyle.Render(issue.Key),
-				issueStatusStyle(issue.Status).Render(truncate(issue.Status, 12)),
+				titleStyle.Render(issue.Key),
+				subtleStyle.Render(truncate(issue.Status, 12)),
 				title)
 		}
 	}
