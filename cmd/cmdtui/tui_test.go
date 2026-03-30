@@ -9,11 +9,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 	"github.com/StephanSchmidt/human/internal/tracker"
+
+	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
 type stubFinder struct {
@@ -467,7 +470,7 @@ func TestModelUpdate_LogModeMsg(t *testing.T) {
 }
 
 func TestRenderFooter_ShowsLogMode(t *testing.T) {
-	footer := renderFooter(80, "meta", "")
+	footer := renderFooter(80, "meta", "", false)
 	assert.Contains(t, footer, "log:meta")
 	assert.Contains(t, footer, "l log")
 	assert.Contains(t, footer, "q quit")
@@ -864,13 +867,13 @@ func TestRenderIssuesPanelCursor(t *testing.T) {
 }
 
 func TestRenderFooter_ShowsDispatchStatus(t *testing.T) {
-	footer := renderFooter(120, "off", "Sent HUM-42 → work:0.1")
+	footer := renderFooter(120, "off", "Sent HUM-42 → work:0.1", false)
 	assert.Contains(t, footer, "Sent HUM-42")
 	assert.Contains(t, footer, "⏎ send")
 }
 
 func TestRenderFooter_ShowsNavKeys(t *testing.T) {
-	footer := renderFooter(120, "", "")
+	footer := renderFooter(120, "", "", false)
 	assert.Contains(t, footer, "j/k nav")
 	assert.Contains(t, footer, "⏎ send")
 }
@@ -886,4 +889,351 @@ func TestDispatch_SnapNil(t *testing.T) {
 	um := updated.(model)
 	assert.Equal(t, "No idle panes", um.dispatchStatus)
 	assert.Nil(t, cmd)
+}
+
+// --- open in browser tests ---
+
+func TestOpenBrowser_NoIssues(t *testing.T) {
+	m := testModel()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	um := updated.(model)
+	assert.Equal(t, "", um.dispatchStatus)
+	assert.Nil(t, cmd)
+}
+
+func TestOpenBrowser_NoURL(t *testing.T) {
+	m := testModel()
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	um := updated.(model)
+	assert.Equal(t, "No URL for HUM-1", um.dispatchStatus)
+	assert.Nil(t, cmd)
+}
+
+func TestOpenBrowser_HasURL(t *testing.T) {
+	m := testModel()
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1", URL: "https://linear.app/hum/issue/HUM-1/title"},
+		}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	um := updated.(model)
+	assert.Equal(t, "", um.dispatchStatus) // no status until async cmd completes
+	assert.NotNil(t, cmd)                  // async command to open browser
+}
+
+func TestOpenBrowserMsg_Success(t *testing.T) {
+	m := testModel()
+	updated, _ := m.Update(openBrowserMsg{issueKey: "HUM-1"})
+	um := updated.(model)
+	assert.Equal(t, "Opened HUM-1", um.dispatchStatus)
+	assert.False(t, um.dispatchAt.IsZero())
+}
+
+func TestOpenBrowserMsg_Error(t *testing.T) {
+	m := testModel()
+	updated, _ := m.Update(openBrowserMsg{issueKey: "HUM-1", err: fmt.Errorf("no browser")})
+	um := updated.(model)
+	assert.Contains(t, um.dispatchStatus, "Open failed")
+	assert.Contains(t, um.dispatchStatus, "no browser")
+}
+
+func TestRenderFooter_ShowsOpenKey(t *testing.T) {
+	footer := renderFooter(120, "", "", false)
+	assert.Contains(t, footer, "o open")
+}
+
+func TestRenderFooter_ShowsTabHint(t *testing.T) {
+	footer := renderFooter(120, "", "", true)
+	assert.Contains(t, footer, "Tab switch")
+}
+
+func TestRenderFooter_NoTabHint(t *testing.T) {
+	footer := renderFooter(120, "", "", false)
+	assert.NotContains(t, footer, "Tab switch")
+}
+
+// --- project tab tests ---
+
+func TestTabs_NoProjects(t *testing.T) {
+	m := testModel()
+	assert.Nil(t, m.tabs())
+}
+
+func TestTabs_SingleProject(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{{Name: "cli", Dir: "/home/user/cli"}}
+	tabs := m.tabs()
+	require.Len(t, tabs, 1, "single project should show one tab")
+	assert.Equal(t, "cli", tabs[0].Name)
+}
+
+func TestTabs_MultipleProjects(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	tabs := m.tabs()
+	assert.Len(t, tabs, 2)
+	assert.Equal(t, "cli", tabs[0].Name)
+	assert.Equal(t, "web", tabs[1].Name)
+}
+
+func TestTabs_OtherTabShownForUnmatched(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Instances = []monitor.InstanceView{
+			{Usage: claude.InstanceUsage{Instance: claude.Instance{Cwd: "/home/user/other"}}},
+		}
+	})
+	tabs := m.tabs()
+	assert.Len(t, tabs, 3)
+	assert.Equal(t, "Other", tabs[2].Name)
+	assert.Equal(t, "", tabs[2].Dir)
+}
+
+func TestTabs_NoOtherTabWhenAllMatched(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Instances = []monitor.InstanceView{
+			{Usage: claude.InstanceUsage{Instance: claude.Instance{Cwd: "/home/user/cli/subdir"}}},
+		}
+	})
+	tabs := m.tabs()
+	assert.Len(t, tabs, 2)
+}
+
+func TestFilterInstances_NoTabs(t *testing.T) {
+	m := testModel()
+	instances := []monitor.InstanceView{
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Cwd: "/a"}}},
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Cwd: "/b"}}},
+	}
+	assert.Len(t, m.filterInstances(instances), 2, "no tabs means all instances returned")
+}
+
+func TestFilterInstances_ByProject(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot()
+	m.activeTab = 0
+
+	instances := []monitor.InstanceView{
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "cli-1", Cwd: "/home/user/cli"}}},
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "cli-2", Cwd: "/home/user/cli/subdir"}}},
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "web-1", Cwd: "/home/user/web"}}},
+	}
+	filtered := m.filterInstances(instances)
+	assert.Len(t, filtered, 2)
+	assert.Equal(t, "cli-1", filtered[0].Usage.Instance.Label)
+	assert.Equal(t, "cli-2", filtered[1].Usage.Instance.Label)
+
+	m.activeTab = 1
+	filtered = m.filterInstances(instances)
+	assert.Len(t, filtered, 1)
+	assert.Equal(t, "web-1", filtered[0].Usage.Instance.Label)
+}
+
+func TestFilterInstances_OtherTab(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	instances := []monitor.InstanceView{
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "cli-1", Cwd: "/home/user/cli"}}},
+		{Usage: claude.InstanceUsage{Instance: claude.Instance{Label: "other-1", Cwd: "/home/user/other"}}},
+	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Instances = instances
+	})
+	// "Other" tab should be index 2.
+	m.activeTab = 2
+	filtered := m.filterInstances(instances)
+	assert.Len(t, filtered, 1)
+	assert.Equal(t, "other-1", filtered[0].Usage.Instance.Label)
+}
+
+func TestTabSwitching_Tab(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	um := updated.(model)
+	assert.Equal(t, 1, um.activeTab)
+
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyTab})
+	um = updated.(model)
+	assert.Equal(t, 0, um.activeTab, "should wrap around")
+}
+
+func TestTabSwitching_ShiftTab(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot()
+	m.activeTab = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	um := updated.(model)
+	assert.Equal(t, 1, um.activeTab, "should wrap to last tab")
+}
+
+func TestTabSwitching_NumberKeys(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+		{Name: "api", Dir: "/home/user/api"},
+	}
+	m.snap = testSnapshot()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	um := updated.(model)
+	assert.Equal(t, 1, um.activeTab)
+
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")})
+	um = updated.(model)
+	assert.Equal(t, 2, um.activeTab)
+
+	// Out of range: should not change.
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("9")})
+	um = updated.(model)
+	assert.Equal(t, 2, um.activeTab, "out of range number should not change tab")
+}
+
+func TestTabSwitching_NoTabsIgnored(t *testing.T) {
+	m := testModel()
+	// No projects, so no tabs. Tab key should be a no-op.
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	um := updated.(model)
+	assert.Equal(t, 0, um.activeTab)
+	assert.Nil(t, cmd)
+}
+
+func TestProjectsMsg(t *testing.T) {
+	m := testModel()
+	projects := []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+
+	updated, _ := m.Update(projectsMsg(projects))
+	um := updated.(model)
+	assert.Len(t, um.projects, 2)
+	assert.Equal(t, "cli", um.projects[0].Name)
+}
+
+func TestProjectsMsg_ClampsActiveTab(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+		{Name: "api", Dir: "/home/user/api"},
+	}
+	m.activeTab = 2
+
+	// Now reduce projects to 2 — activeTab 2 is out of bounds.
+	newProjects := []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	updated, _ := m.Update(projectsMsg(newProjects))
+	um := updated.(model)
+	assert.Equal(t, 0, um.activeTab, "activeTab should be clamped to 0")
+}
+
+func TestRenderTabBar_Empty(t *testing.T) {
+	assert.Equal(t, "", renderTabBar(nil, 0, 80))
+}
+
+func TestRenderTabBar_TwoTabs(t *testing.T) {
+	tabs := []tab{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	out := renderTabBar(tabs, 0, 80)
+	assert.Contains(t, out, "1:cli")
+	assert.Contains(t, out, "2:web")
+}
+
+func TestRenderTabBar_OtherTab(t *testing.T) {
+	tabs := []tab{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+		{Name: "Other"},
+	}
+	out := renderTabBar(tabs, 2, 80)
+	assert.Contains(t, out, "3:Other")
+}
+
+func TestMatchesAnyProject(t *testing.T) {
+	projects := []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	assert.True(t, matchesAnyProject("/home/user/cli", projects))
+	assert.True(t, matchesAnyProject("/home/user/cli/subdir", projects))
+	assert.True(t, matchesAnyProject("/home/user/web", projects))
+	assert.False(t, matchesAnyProject("/home/user/other", projects))
+	assert.False(t, matchesAnyProject("/completely/different", projects))
+	assert.False(t, matchesAnyProject("", projects))
+}
+
+func TestModelView_WithTabBar(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+		{Name: "web", Dir: "/home/user/web"},
+	}
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Instances = []monitor.InstanceView{
+			{
+				Usage: claude.InstanceUsage{
+					Instance: claude.Instance{Label: "Host (PID 100)", Source: "host", Cwd: "/home/user/cli"},
+					Summary:  &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}},
+					State:    claude.StateUnknown,
+				},
+			},
+		}
+		s.TotalUsage = &claude.UsageSummary{Models: map[string]*claude.ModelUsage{}}
+	})
+	view := m.View()
+	assert.Contains(t, view, "1:cli")
+	assert.Contains(t, view, "2:web")
+	assert.Contains(t, view, "Tab switch")
+}
+
+func TestModelView_TabBarSingleProject(t *testing.T) {
+	m := testModel()
+	m.projects = []daemon.ProjectInfo{
+		{Name: "cli", Dir: "/home/user/cli"},
+	}
+	m.snap = testSnapshot()
+	view := m.View()
+	assert.Contains(t, view, "1:cli")
+	assert.Contains(t, view, "Tab switch")
 }

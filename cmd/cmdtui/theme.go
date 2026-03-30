@@ -34,6 +34,8 @@ var (
 	errorStyle        = lipgloss.NewStyle().Foreground(humanPink)
 	ruleStyle         = lipgloss.NewStyle().Foreground(humanPurple)
 	selectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold).Background(lipgloss.Color("#333355"))
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(humanPurple)
 )
 
 func modelColor(name string) string {

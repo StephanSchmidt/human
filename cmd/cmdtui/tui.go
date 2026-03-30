@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/internal/browser"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
@@ -60,22 +61,25 @@ func flattenIssues(groups []trackerIssues) []flatIssue {
 
 // BuildTuiCmd creates the "tui" command.
 func BuildTuiCmd() *cobra.Command {
-	return &cobra.Command{
+	var projectDirs []string
+	cmd := &cobra.Command{
 		Use:   "tui",
 		Short: "Interactive dashboard for Claude Code usage",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runTUI()
+			return runTUI(projectDirs)
 		},
 	}
+	cmd.Flags().StringArrayVar(&projectDirs, "project", nil, "Project directory to register (repeatable; forwarded to daemon)")
+	return cmd
 }
 
-func runTUI() error {
+func runTUI(projectDirs []string) error {
 	// Suppress log output while the TUI owns the terminal.
 	prev := zerolog.GlobalLevel()
 	zerolog.SetGlobalLevel(zerolog.Disabled)
 	defer zerolog.SetGlobalLevel(prev)
 
-	ensureDaemon()
+	ensureDaemon(projectDirs)
 	finder, dc := buildFinder()
 	mon := monitor.New(finder, dc)
 	m := newModel(mon)
@@ -85,7 +89,8 @@ func runTUI() error {
 }
 
 // ensureDaemon starts the daemon if it is not already running.
-func ensureDaemon() {
+// When projectDirs is non-empty, the --project flags are forwarded to the daemon.
+func ensureDaemon(projectDirs []string) {
 	if _, alive := daemon.ReadAlivePid(); alive {
 		return
 	}
@@ -93,7 +98,11 @@ func ensureDaemon() {
 	if err != nil {
 		return
 	}
-	child := exec.Command(exe, "daemon", "start") // #nosec G204 -- re-exec of own binary via os.Executable()
+	args := []string{"daemon", "start"}
+	for _, dir := range projectDirs {
+		args = append(args, "--project", dir)
+	}
+	child := exec.Command(exe, args...) // #nosec G204 -- re-exec of own binary via os.Executable()
 	child.Stdout = nil
 	child.Stderr = nil
 	_ = child.Start()
@@ -151,6 +160,9 @@ type model struct {
 	dispatchAt     time.Time // when status was set; auto-cleared after 3s
 
 	prevStatuses map[string]logparser.SessionStatus // previous session statuses for idle detection
+
+	projects  []daemon.ProjectInfo // registered projects from daemon info
+	activeTab int                  // index into tabs(); 0 = first project or "All"
 }
 
 func newModel(mon *monitor.Monitor) model {
@@ -169,7 +181,8 @@ type snapshotMsg struct {
 	gen  uint64
 }
 
-type logModeMsg string // result of log-mode set/get from daemon
+type logModeMsg    string              // result of log-mode set/get from daemon
+type projectsMsg   []daemon.ProjectInfo // projects loaded from daemon info
 
 type issueTickMsg  time.Time
 type issuesResultMsg struct {
@@ -179,7 +192,7 @@ type issuesResultMsg struct {
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd())
+	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd(), fetchProjectsCmd())
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -204,6 +217,27 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "enter":
 		return m.handleDispatch()
+	case "o":
+		return m.handleOpenBrowser()
+	case "tab":
+		tabs := m.tabs()
+		if len(tabs) > 1 {
+			m.activeTab = (m.activeTab + 1) % len(tabs)
+		}
+		return m, nil
+	case "shift+tab":
+		tabs := m.tabs()
+		if len(tabs) > 1 {
+			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
+		}
+		return m, nil
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		idx := int(msg.Runes[0]-'0') - 1 // "1" → 0
+		tabs := m.tabs()
+		if idx < len(tabs) {
+			m.activeTab = idx
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -212,26 +246,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case projectsMsg:
+		m.applyProjects(msg)
 	case logModeMsg:
 		m.logMode = string(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 	case fastTickMsg:
-		m.clearExpiredDispatchStatus()
-		if m.fetching {
-			return m, fastTickCmd()
-		}
-		m.fetching = true
-		m.fetchGen++
-		return m, tea.Batch(fetchQuick(m.mon, m.snap, m.fetchGen), fastTickCmd())
+		return m.handleFastTick()
 	case fullTickMsg:
 		if m.fetching {
 			return m, fullTickCmd()
 		}
 		m.fetching = true
 		m.fetchGen++
-		return m, tea.Batch(fetchFull(m.mon, m.fetchGen), fullTickCmd())
+		return m, tea.Batch(fetchFull(m.mon, m.fetchGen), fullTickCmd(), fetchProjectsCmd())
 	case snapshotMsg:
 		if msg.gen != m.fetchGen {
 			return m, nil // stale result, discard
@@ -248,6 +278,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case dispatchResultMsg:
 		m.handleDispatchResult(msg)
+	case openBrowserMsg:
+		m.handleOpenBrowserResult(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -287,6 +319,25 @@ func (m model) checkIdleTransitions() {
 	}
 	if bing {
 		playNotificationSound()
+	}
+}
+
+// handleFastTick processes the fast (100ms) tick for quick snapshot refreshes.
+func (m model) handleFastTick() (tea.Model, tea.Cmd) {
+	m.clearExpiredDispatchStatus()
+	if m.fetching {
+		return m, fastTickCmd()
+	}
+	m.fetching = true
+	m.fetchGen++
+	return m, tea.Batch(fetchQuick(m.mon, m.snap, m.fetchGen), fastTickCmd())
+}
+
+// applyProjects updates the project list and clamps the active tab.
+func (m *model) applyProjects(projects projectsMsg) {
+	m.projects = []daemon.ProjectInfo(projects)
+	if m.activeTab >= len(m.tabs()) {
+		m.activeTab = 0
 	}
 }
 
@@ -382,6 +433,43 @@ func dispatchIssueCmd(pane claude.TmuxPane, prompt, issueKey string) tea.Cmd {
 	}
 }
 
+// --- open in browser ---
+
+type openBrowserMsg struct {
+	issueKey string
+	err      error
+}
+
+func (m model) handleOpenBrowser() (tea.Model, tea.Cmd) {
+	flat := flattenIssues(m.issues)
+	if len(flat) == 0 || m.issueCursor >= len(flat) {
+		return m, nil
+	}
+	sel := flat[m.issueCursor]
+	if sel.Issue.URL == "" {
+		m.dispatchStatus = "No URL for " + sel.Issue.Key
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+	return m, openBrowserCmd(sel.Issue.URL, sel.Issue.Key)
+}
+
+func (m *model) handleOpenBrowserResult(msg openBrowserMsg) {
+	if msg.err != nil {
+		m.dispatchStatus = fmt.Sprintf("Open failed: %s", msg.err)
+	} else {
+		m.dispatchStatus = fmt.Sprintf("Opened %s", msg.issueKey)
+	}
+	m.dispatchAt = time.Now()
+}
+
+func openBrowserCmd(url, issueKey string) tea.Cmd {
+	return func() tea.Msg {
+		err := browser.DefaultOpener{}.Open(url)
+		return openBrowserMsg{issueKey: issueKey, err: err}
+	}
+}
+
 func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
 	if m.issuesLoading {
 		return m, issueTickCmd()
@@ -420,6 +508,12 @@ func (m model) View() string {
 		b.WriteByte('\n')
 	}
 
+	// Tab bar (only when 2+ projects).
+	if tabBar := renderTabBar(m.tabs(), m.activeTab, w); tabBar != "" {
+		b.WriteString(tabBar)
+		b.WriteByte('\n')
+	}
+
 	b.WriteByte('\n')
 
 	if m.snap.Err != nil {
@@ -428,12 +522,13 @@ func (m model) View() string {
 		return b.String()
 	}
 
-	// Instances.
-	if len(m.snap.Instances) == 0 {
+	// Instances (filtered by active tab).
+	filtered := m.filterInstances(m.snap.Instances)
+	if len(filtered) == 0 {
 		b.WriteString(subtleStyle.Render("  No active instances"))
 		b.WriteByte('\n')
 	} else {
-		for _, iv := range m.snap.Instances {
+		for _, iv := range filtered {
 			m.renderInstance(&b, iv, w)
 		}
 		renderTotalLine(&b, m.snap.TotalUsage, w)
@@ -453,7 +548,7 @@ func (m model) View() string {
 
 	// Footer.
 	b.WriteByte('\n')
-	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus))
+	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
 	b.WriteByte('\n')
 
 	return b.String()
@@ -809,7 +904,7 @@ func renderPanes(panes []claude.TmuxPane) string {
 
 // --- render: footer ---
 
-func renderFooter(w int, logMode, dispatchStatus string) string {
+func renderFooter(w int, logMode, dispatchStatus string, showTabs bool) string {
 	left := subtleStyle.Render("  ↻ live")
 	if logMode != "" {
 		left += "  " + subtleStyle.Render("log:"+logMode)
@@ -817,7 +912,11 @@ func renderFooter(w int, logMode, dispatchStatus string) string {
 	if dispatchStatus != "" {
 		left += "  " + specialStyle.Render(dispatchStatus)
 	}
-	right := subtleStyle.Render("j/k nav  ⏎ send  l log  q quit")
+	keys := "j/k nav  ⏎ send  o open  l log  q quit"
+	if showTabs {
+		keys = "Tab switch  " + keys
+	}
+	right := subtleStyle.Render(keys)
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
@@ -907,6 +1006,121 @@ func truncate(s string, maxLen int) string {
 // formatTokens delegates to claude.FormatTokens for token count formatting.
 func formatTokens(n int) string {
 	return claude.FormatTokens(n)
+}
+
+// --- project tabs ---
+
+// tab represents a single project tab in the TUI.
+type tab struct {
+	Name string // display name
+	Dir  string // project directory (empty for "Other" tab)
+}
+
+// tabs builds the list of visible tabs from registered projects.
+// Returns nil when no projects are registered.
+func (m model) tabs() []tab {
+	if len(m.projects) == 0 {
+		return nil
+	}
+	out := make([]tab, 0, len(m.projects)+1)
+	for _, p := range m.projects {
+		out = append(out, tab{Name: p.Name, Dir: p.Dir})
+	}
+	// Append "Other" tab only if there are unmatched instances.
+	if m.snap != nil && hasUnmatchedInstances(m.snap.Instances, m.projects) {
+		out = append(out, tab{Name: "Other"})
+	}
+	return out
+}
+
+// filterInstances returns the instances that belong to the active tab.
+// When there are no tabs (single project or none), all instances are returned.
+func (m model) filterInstances(instances []monitor.InstanceView) []monitor.InstanceView {
+	tabs := m.tabs()
+	if len(tabs) == 0 {
+		return instances
+	}
+	if m.activeTab >= len(tabs) {
+		return instances
+	}
+	active := tabs[m.activeTab]
+	if active.Dir == "" {
+		// "Other" tab: instances not matching any project.
+		return unmatchedInstances(instances, m.projects)
+	}
+	var out []monitor.InstanceView
+	for _, iv := range instances {
+		if strings.HasPrefix(iv.Usage.Instance.Cwd, active.Dir) {
+			out = append(out, iv)
+		}
+	}
+	return out
+}
+
+// hasUnmatchedInstances returns true if any instance does not match a registered project.
+func hasUnmatchedInstances(instances []monitor.InstanceView, projects []daemon.ProjectInfo) bool {
+	for _, iv := range instances {
+		if !matchesAnyProject(iv.Usage.Instance.Cwd, projects) {
+			return true
+		}
+	}
+	return false
+}
+
+// unmatchedInstances returns instances whose Cwd does not match any project dir.
+func unmatchedInstances(instances []monitor.InstanceView, projects []daemon.ProjectInfo) []monitor.InstanceView {
+	var out []monitor.InstanceView
+	for _, iv := range instances {
+		if !matchesAnyProject(iv.Usage.Instance.Cwd, projects) {
+			out = append(out, iv)
+		}
+	}
+	return out
+}
+
+// matchesAnyProject returns true if cwd starts with any project's Dir.
+func matchesAnyProject(cwd string, projects []daemon.ProjectInfo) bool {
+	for _, p := range projects {
+		if strings.HasPrefix(cwd, p.Dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// renderTabBar renders a horizontal tab bar. Returns "" when tabs are not applicable.
+func renderTabBar(tabs []tab, active int, w int) string {
+	if len(tabs) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for i, t := range tabs {
+		label := fmt.Sprintf(" %d:%s ", i+1, t.Name)
+		if i == active {
+			parts = append(parts, activeTabStyle.Render(label))
+		} else {
+			parts = append(parts, inactiveTabStyle.Render(label))
+		}
+	}
+	line := "  " + strings.Join(parts, " ")
+	// Pad or truncate to width.
+	visible := lipgloss.Width(line)
+	if visible < w-2 {
+		line += strings.Repeat(" ", w-2-visible)
+	}
+	return line
+}
+
+// fetchProjectsCmd loads project info from the daemon info file.
+func fetchProjectsCmd() tea.Cmd {
+	return func() tea.Msg {
+		info, err := daemon.ReadInfo()
+		if err != nil {
+			return projectsMsg(nil)
+		}
+		return projectsMsg(info.Projects)
+	}
 }
 
 // --- log mode ---
