@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
@@ -48,7 +49,7 @@ type AutoResult struct {
 // ResolveProvider loads instances, applies CLI flag overrides, and resolves
 // the provider for the given kind using the tracker name from persistent flags.
 func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provider, func(), error) {
-	instances, err := deps.LoadInstances(".")
+	instances, err := deps.LoadInstances(config.DirProject)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,7 +107,7 @@ func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps D
 	}
 
 	// 1. Check existing config for a matching instance.
-	instances, err := deps.LoadInstances(".")
+	instances, err := deps.LoadInstances(config.DirProject)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +140,7 @@ func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps D
 
 // resolveFromKey is the original key-based resolution logic.
 func resolveFromKey(ctx context.Context, cmd *cobra.Command, keyHint string, allowFindFallback bool, deps Deps) (*AutoResult, error) {
-	instances, err := deps.LoadInstances(".")
+	instances, err := deps.LoadInstances(config.DirProject)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +224,7 @@ func urlsCompatible(a, b string) bool {
 // PolicyProvider if policies are defined. Errors are reported as warnings
 // to errW; the original provider is returned unchanged on error.
 func applyPolicyWrapper(p tracker.Provider, instanceName string, errW io.Writer) tracker.Provider {
-	cfg, err := tracker.LoadPolicyConfig(".")
+	cfg, err := tracker.LoadPolicyConfig(config.ResolveDir(config.DirProject))
 	if err != nil {
 		_, _ = fmt.Fprintln(errW, "warning: policy config error:", err)
 		return p
@@ -266,9 +267,9 @@ func loadDestructiveNotifier() tracker.DestructiveNotifier {
 	var chatID int64
 
 	// Load Telegram
-	telegramInstances, _ := telegram.LoadInstances(".")
+	telegramInstances, _ := telegram.LoadInstances(config.ResolveDir(config.DirProject))
 	if len(telegramInstances) > 0 {
-		configs, _ := telegram.LoadConfigs(".")
+		configs, _ := telegram.LoadConfigs(config.ResolveDir(config.DirProject))
 		for _, cfg := range configs {
 			if cfg.NotifyChatID != 0 {
 				chatID = cfg.NotifyChatID
@@ -285,7 +286,7 @@ func loadDestructiveNotifier() tracker.DestructiveNotifier {
 	}
 
 	// Load Slack
-	slackInstances, _ := slack.LoadInstances(".")
+	slackInstances, _ := slack.LoadInstances(config.ResolveDir(config.DirProject))
 	if len(slackInstances) > 0 {
 		notifiers = append(notifiers, &dispatch.SlackNotifier{Client: slackInstances[0].Client})
 	}

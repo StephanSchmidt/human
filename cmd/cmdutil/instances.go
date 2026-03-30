@@ -45,7 +45,10 @@ var allLoadersWithLookup = []instanceLoaderWithLookup{
 }
 
 // LoadAllInstances collects tracker instances from all provider configs.
+// The dir parameter accepts config.DirProject (resolved via HUMAN_PROJECT_DIR
+// in daemon context) or config.DirCwd (".") for direct CLI usage.
 func LoadAllInstances(dir string) ([]tracker.Instance, error) {
+	dir = config.ResolveDir(dir)
 	var all []tracker.Instance
 	for _, load := range allLoaders {
 		instances, err := load(dir)
@@ -60,6 +63,7 @@ func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 // LoadAllInstancesWithLookup collects tracker instances using a custom env
 // lookup function. This enables per-project token scoping in the daemon.
 func LoadAllInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
+	dir = config.ResolveDir(dir)
 	var all []tracker.Instance
 	for _, load := range allLoadersWithLookup {
 		instances, err := load(dir, lookup)

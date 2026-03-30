@@ -31,6 +31,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -42,16 +43,16 @@ var (
 )
 
 // helpInstanceLoader is the function used by the root help template to load
-// tracker instances.  It defaults to LoadAllInstances(".") and can be
+// tracker instances.  It defaults to LoadAllInstances(DirCwd) and can be
 // overridden in tests.
 var helpInstanceLoader = func() ([]tracker.Instance, error) {
-	return cmdutil.LoadAllInstances(".")
+	return cmdutil.LoadAllInstances(config.DirCwd)
 }
 
 // autoInstanceLoader is used by auto-detect commands to load tracker instances.
-// It defaults to LoadAllInstances(".") and can be overridden in tests.
+// It defaults to LoadAllInstances(DirCwd) and can be overridden in tests.
 var autoInstanceLoader = func() ([]tracker.Instance, error) {
-	return cmdutil.LoadAllInstances(".")
+	return cmdutil.LoadAllInstances(config.DirCwd)
 }
 
 // --- newRootCmd builds the Cobra command tree ---

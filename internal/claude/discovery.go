@@ -365,6 +365,15 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		proxyExit, _, _ := d.Client.Exec(ctx, ctr.ID, []string{"printenv", "HUMAN_PROXY_ADDR"})
 		proxyConfigured := proxyExit == 0
 
+		// Resolve Claude's working directory inside the container.
+		var containerCwd string
+		cwdExit, cwdReader, _ := d.Client.Exec(ctx, ctr.ID, []string{"sh", "-c", "readlink /proc/$(pgrep -x claude)/cwd"})
+		if cwdExit == 0 && cwdReader != nil {
+			if cwdBytes, readErr := io.ReadAll(cwdReader); readErr == nil {
+				containerCwd = strings.TrimSpace(string(cwdBytes))
+			}
+		}
+
 		instances = append(instances, Instance{
 			Label:           fmt.Sprintf("Container %q (%s)", name, shortID),
 			Source:          "container",
@@ -372,6 +381,7 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			Root:            "/container/" + shortID,
 			Memory:          mem,
 			ContainerID:     ctr.ID,
+			Cwd:             containerCwd,
 			ProxyConfigured: proxyConfigured,
 		})
 	}

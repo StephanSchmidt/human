@@ -115,16 +115,21 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 
 	// Apply client environment variables (e.g. NO_COLOR, TERM, COLUMNS)
-	// and switch to the project directory for the duration of this request.
-	// Mutex ensures concurrent requests don't corrupt each other's env/cwd.
+	// and set HUMAN_PROJECT_DIR so config.ResolveDir maps DirProject
+	// to the correct directory for this request.
+	// Mutex ensures concurrent requests don't corrupt each other's env.
 	s.envMu.Lock()
 	origEnv := applyEnv(req.Env)
-	origDir, _ := os.Getwd()
+	prevProjectDir, hadProjectDir := os.LookupEnv("HUMAN_PROJECT_DIR")
 	if projectDir != "." {
-		_ = os.Chdir(projectDir)
+		_ = os.Setenv("HUMAN_PROJECT_DIR", projectDir)
 	}
 	defer func() {
-		_ = os.Chdir(origDir)
+		if hadProjectDir {
+			_ = os.Setenv("HUMAN_PROJECT_DIR", prevProjectDir)
+		} else {
+			_ = os.Unsetenv("HUMAN_PROJECT_DIR")
+		}
 		restoreEnv(origEnv)
 		s.envMu.Unlock()
 	}()
