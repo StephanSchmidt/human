@@ -1,37 +1,61 @@
 ---
 name: human-brainstorm
-description: Brainstorm approaches for a ticket or topic before planning
-argument-hint: <ticket-key or topic>
+description: Discover missing features by analyzing the project's code and completed work using a multi-agent pipeline
+argument-hint: [focus-area]
 ---
 
-Follow these steps in order:
+# Missing Feature Discovery
 
-1. **Parse** `$ARGUMENTS`:
-   - If it looks like a ticket key (e.g. `KAN-1`, `ENG-123`, `123`), treat it as a ticket key and set `<identifier>` to the lowercased key.
-   - Otherwise treat it as a freeform topic and set `<identifier>` to a slugified version (lowercase, spaces to hyphens, strip special chars).
+Analyze this project's codebase and completed work to discover missing features using a 4-phase agent pipeline: ask tracker, recon, analysis, and triage.
 
-2. **Create** the output directory: `mkdir -p .human/brainstorms`
+## Phase 0: Ask Tracker
 
-3. **Phase 1 — Context gathering**: Delegate to the **human-brainstormer** agent:
+Ask the user which tracker and project to pull done tickets from using `AskUserQuestion`:
 
-```
-Task(subagent_type="human-brainstormer", prompt="Phase 1: Gather context for $ARGUMENTS. If this is a ticket key, fetch it with the human CLI. Explore the codebase for relevant code, existing patterns, and any .human/ artifacts. Return a context summary and 3-5 suggested clarifying questions.")
-```
+"Which tracker and project should I pull completed tickets from? (e.g., 'linear --project=HUM' or 'shortcut --project=MyTeam'). Type 'skip' to analyze code only without tracker data."
 
-4. **Present** the agent's context summary to the user.
+Store the answer as `<tracker-info>`.
 
-5. **Ask clarifying questions** one at a time using `AskUserQuestion`. Ask each of the agent's suggested questions individually (max 5). Collect all answers.
+## Phase 1: Reconnaissance
 
-6. **Phase 2 — Generate approaches**: Delegate to the **human-brainstormer** agent with the collected answers:
+Create the output directory, then run the recon agent:
 
-```
-Task(subagent_type="human-brainstormer", prompt="Phase 2: Generate approaches for $ARGUMENTS. Clarification answers: <paste all Q&A pairs>. Generate 2-3 approaches with trade-offs, pros/cons, complexity estimates, and a recommendation.")
+```bash
+mkdir -p .human/brainstorms
 ```
 
-7. **Present** the 2-3 approaches to the user with their trade-offs.
+```
+Task(subagent_type="brainstorm-recon", prompt="Survey this project's codebase and fetch completed tickets. Tracker info from user: <tracker-info>. Focus area (if any): $ARGUMENTS. Write your recon report to .human/brainstorms/.brainstorm-recon.md")
+```
 
-8. **Ask** the user which approach to proceed with using `AskUserQuestion`.
+Wait for the recon agent to finish before proceeding.
 
-9. **Write** the complete brainstorm document to `.human/brainstorms/<identifier>.md` using the agent's structured output, adding the chosen approach.
+## Phase 2: Analysis (parallel)
 
-10. **Tell** the user: `Brainstorm written to .human/brainstorms/<identifier>.md — run /human-plan $ARGUMENTS to create an implementation plan.`
+Launch all 3 analysis agents **in a single message** so they run in parallel:
+
+```
+Task(subagent_type="brainstorm-codebase", prompt="Read the recon report at .human/brainstorms/.brainstorm-recon.md, then analyze the codebase to identify missing features the architecture could support. Write findings to .human/brainstorms/.brainstorm-codebase.md")
+
+Task(subagent_type="brainstorm-trajectory", prompt="Read the recon report at .human/brainstorms/.brainstorm-recon.md, then analyze completed tickets and git history to identify missing features based on development patterns. Write findings to .human/brainstorms/.brainstorm-trajectory.md")
+
+Task(subagent_type="brainstorm-opportunities", prompt="Read the recon report at .human/brainstorms/.brainstorm-recon.md, then scan for developer signals (TODOs, FIXMEs) and common-pattern gaps to identify missing features. Write findings to .human/brainstorms/.brainstorm-opportunities.md")
+```
+
+Wait for all 3 agents to finish before proceeding.
+
+## Phase 3: Triage
+
+Run the triage agent to deduplicate, merge, and produce the final ranked list:
+
+```
+Task(subagent_type="brainstorm-triage", prompt="Read all analysis reports from .human/brainstorms/.brainstorm-*.md, validate findings against actual code, deduplicate, rank, and write the final missing features report to .human/brainstorms/")
+```
+
+## After completion
+
+Tell the user:
+- How many missing features were identified (by priority)
+- The top 3-5 missing features with one-line descriptions
+- The path to the full report
+- Suggest: "Run `/human-ideate <feature>` to create a ticket for any of these features."

@@ -100,8 +100,20 @@ var securityTriageAgentContent []byte
 //go:embed embed/human-brainstorm-skill.md
 var brainstormSkillContent []byte
 
-//go:embed embed/human-brainstormer-agent.md
-var brainstormerAgentContent []byte
+//go:embed embed/brainstorm-recon-agent.md
+var brainstormReconAgentContent []byte
+
+//go:embed embed/brainstorm-codebase-agent.md
+var brainstormCodebaseAgentContent []byte
+
+//go:embed embed/brainstorm-trajectory-agent.md
+var brainstormTrajectoryAgentContent []byte
+
+//go:embed embed/brainstorm-opportunities-agent.md
+var brainstormOpportunitiesAgentContent []byte
+
+//go:embed embed/brainstorm-triage-agent.md
+var brainstormTriageAgentContent []byte
 
 //go:embed embed/human-ideate-skill.md
 var ideateSkillContent []byte
@@ -205,7 +217,11 @@ func Install(w io.Writer, fw FileWriter, personal bool) error {
 		{content: securityChainsAgentContent, relPath: filepath.Join("agents", "security-chains.md")},
 		{content: securityTriageAgentContent, relPath: filepath.Join("agents", "security-triage.md")},
 		{content: brainstormSkillContent, relPath: filepath.Join("skills", "human-brainstorm", "SKILL.md")},
-		{content: brainstormerAgentContent, relPath: filepath.Join("agents", "human-brainstormer.md")},
+		{content: brainstormReconAgentContent, relPath: filepath.Join("agents", "brainstorm-recon.md")},
+		{content: brainstormCodebaseAgentContent, relPath: filepath.Join("agents", "brainstorm-codebase.md")},
+		{content: brainstormTrajectoryAgentContent, relPath: filepath.Join("agents", "brainstorm-trajectory.md")},
+		{content: brainstormOpportunitiesAgentContent, relPath: filepath.Join("agents", "brainstorm-opportunities.md")},
+		{content: brainstormTriageAgentContent, relPath: filepath.Join("agents", "brainstorm-triage.md")},
 		{content: ideateSkillContent, relPath: filepath.Join("skills", "human-ideate", "SKILL.md")},
 		{content: ideatorAgentContent, relPath: filepath.Join("agents", "human-ideator.md")},
 		{content: sprintSkillContent, relPath: filepath.Join("skills", "human-sprint", "SKILL.md")},
