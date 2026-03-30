@@ -172,6 +172,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Project:     issue.Project,
 		Title:       result.Title,
 		Description: result.Body,
+		URL:         fmt.Sprintf("https://github.com/%s/%s/issues/%d", owner, repo, result.Number),
 	}, nil
 }
 
@@ -423,6 +424,7 @@ func toTrackerIssue(owner, repo string, gi ghIssue) tracker.Issue {
 		Title:       gi.Title,
 		Status:      gi.State,
 		Description: gi.Body,
+		URL:         gi.HTMLURL,
 	}
 
 	if gi.UpdatedAt != "" {

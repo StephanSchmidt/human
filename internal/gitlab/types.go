@@ -44,6 +44,7 @@ type createResponse struct {
 	IID         int    `json:"iid"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	WebURL      string `json:"web_url"`
 }
 
 type noteRequest struct {

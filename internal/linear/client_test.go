@@ -451,6 +451,7 @@ func Test_toTrackerIssue(t *testing.T) {
 			name: "full issue",
 			input: linearIssue{
 				Identifier:    "ENG-1",
+				URL:           "https://linear.app/eng/issue/ENG-1/title",
 				Title:         "Title",
 				Description:   "Desc",
 				State:         stateNode{Name: "In Progress", Type: "started"},
@@ -465,6 +466,7 @@ func Test_toTrackerIssue(t *testing.T) {
 				Status: "In Progress", StatusType: "started", Priority: "High",
 				Assignee: "Alice", Reporter: "Bob", Type: "bug",
 				Description: "Desc",
+				URL:         "https://linear.app/eng/issue/ENG-1/title",
 			},
 		},
 		{

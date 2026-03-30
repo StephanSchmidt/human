@@ -106,7 +106,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		if p == "" {
 			p = wi.Fields.TeamProject
 		}
-		issues = append(issues, toTrackerIssue(wi, p))
+		issues = append(issues, c.toTrackerIssue(wi, p))
 	}
 	return issues, nil
 }
@@ -128,7 +128,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 		return nil, err
 	}
 
-	issue := toTrackerIssue(wi, project)
+	issue := c.toTrackerIssue(wi, project)
 	return &issue, nil
 }
 
@@ -166,6 +166,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Project:     project,
 		Title:       wi.Fields.Title,
 		Description: wi.Fields.Description,
+		URL:         fmt.Sprintf("https://dev.azure.com/%s/%s/_workitems/edit/%d", c.org, project, wi.ID),
 	}, nil
 }
 
@@ -322,7 +323,7 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 		return nil, err
 	}
 
-	issue := toTrackerIssue(wi, project)
+	issue := c.toTrackerIssue(wi, project)
 	return &issue, nil
 }
 
@@ -455,7 +456,7 @@ func parseIssueKey(key string) (string, int, error) {
 }
 
 // toTrackerIssue converts an Azure DevOps work item to a tracker.Issue.
-func toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
+func (c *Client) toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 	issue := tracker.Issue{
 		Key:         fmt.Sprintf("%s/%d", project, wi.ID),
 		Project:     project,
@@ -463,6 +464,7 @@ func toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 		Title:       wi.Fields.Title,
 		Status:      wi.Fields.State,
 		Description: wi.Fields.Description,
+		URL:         fmt.Sprintf("https://dev.azure.com/%s/%s/_workitems/edit/%d", c.org, project, wi.ID),
 	}
 
 	if wi.Fields.ChangedDate != "" {

@@ -3,6 +3,7 @@ package github
 // ghIssue is the GitHub API representation of an issue.
 type ghIssue struct {
 	Number      int       `json:"number"`
+	HTMLURL     string    `json:"html_url"`
 	Title       string    `json:"title"`
 	Body        string    `json:"body"`
 	State       string    `json:"state"`

@@ -177,6 +177,7 @@ type Issue struct {
 	Assignee    string    `json:"assignee"`
 	Reporter    string    `json:"reporter"`
 	Description string    `json:"description"`                // markdown
+	URL         string    `json:"url,omitempty"`              // web URL for opening in browser
 	UpdatedAt   time.Time `json:"updated_at"`                 // last modification timestamp
 }
 

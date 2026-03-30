@@ -3,6 +3,7 @@ package linear
 // linearIssue is the Linear API representation of an issue.
 type linearIssue struct {
 	Identifier    string          `json:"identifier"`
+	URL           string          `json:"url"`
 	Title         string          `json:"title"`
 	Description   string          `json:"description"`
 	State         stateNode       `json:"state"`

@@ -68,11 +68,13 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "Alice", issues[0].Assignee)
 	assert.Equal(t, "Bob", issues[0].Reporter)
 	assert.Equal(t, "2", issues[0].Priority)
+	assert.Equal(t, "https://dev.azure.com/myorg/Human/_workitems/edit/1", issues[0].URL)
 
 	assert.Equal(t, "Human/2", issues[1].Key)
 	assert.Equal(t, "Feature request", issues[1].Title)
 	assert.Equal(t, "", issues[1].Assignee)
 	assert.Equal(t, "", issues[1].Priority) // Priority 0 means not set
+	assert.Equal(t, "https://dev.azure.com/myorg/Human/_workitems/edit/2", issues[1].URL)
 }
 
 func TestListIssues_all(t *testing.T) {
@@ -171,6 +173,7 @@ func TestGetIssue_happy(t *testing.T) {
 	assert.Equal(t, "Alice", issue.Assignee)
 	assert.Equal(t, "Bob", issue.Reporter)
 	assert.Equal(t, "## Description\n\nThis is markdown.", issue.Description)
+	assert.Equal(t, "https://dev.azure.com/myorg/Human/_workitems/edit/42", issue.URL)
 }
 
 func TestGetIssue_httpError(t *testing.T) {

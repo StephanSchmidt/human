@@ -83,6 +83,7 @@ func TestCreateIssue_happy(t *testing.T) {
 	assert.Equal(t, "Task", issue.Type)
 	assert.Equal(t, "Test issue", issue.Title)
 	assert.Equal(t, "Some description", issue.Description)
+	assert.Equal(t, srv.URL+"/browse/KAN-42", issue.URL)
 
 	assert.Equal(t, "KAN", gotBody.Fields.Project.Key)
 	assert.Equal(t, "Task", gotBody.Fields.IssueType.Name)
@@ -159,10 +160,12 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "KAN-1", issues[0].Key)
 	assert.Equal(t, "First issue", issues[0].Title)
 	assert.Equal(t, "To Do", issues[0].Status)
+	assert.Equal(t, srv.URL+"/browse/KAN-1", issues[0].URL)
 
 	assert.Equal(t, "KAN-2", issues[1].Key)
 	assert.Equal(t, "Second issue", issues[1].Title)
 	assert.Equal(t, "In Progress", issues[1].Status)
+	assert.Equal(t, srv.URL+"/browse/KAN-2", issues[1].URL)
 }
 
 func TestListIssues_all(t *testing.T) {

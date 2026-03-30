@@ -251,6 +251,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Title:       story.Name,
 		Description: story.Description,
 		Type:        story.StoryType,
+		URL:         story.AppURL,
 	}, nil
 }
 
@@ -673,6 +674,7 @@ func (c *Client) toTrackerIssue(ctx context.Context, story scStory, project stri
 		Assignee:    assignee,
 		Reporter:    reporter,
 		Description: story.Description,
+		URL:         story.AppURL,
 	}
 	if story.UpdatedAt != "" {
 		issue.UpdatedAt, _ = time.Parse(time.RFC3339, story.UpdatedAt)

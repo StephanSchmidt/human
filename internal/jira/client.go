@@ -21,7 +21,8 @@ var _ tracker.Provider = (*Client)(nil)
 
 // Client is a Jira REST API client that implements tracker.Lister and tracker.Getter.
 type Client struct {
-	api *apiclient.Client
+	api     *apiclient.Client
+	baseURL string
 }
 
 // New creates a Jira client with the given base URL, user email, and API key.
@@ -32,6 +33,7 @@ func New(baseURL, user, key string) *Client {
 			apiclient.WithHeader("Accept", "application/json"),
 			apiclient.WithProviderName("jira"),
 		),
+		baseURL: baseURL,
 	}
 }
 
@@ -80,6 +82,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 			Project: projectFromKey(iss.Key),
 			Title:   iss.Fields.Summary,
 			Status:  iss.Fields.Status.Name,
+			URL:     c.baseURL + "/browse/" + iss.Key,
 		}
 		if iss.Fields.Updated != "" {
 			issues[i].UpdatedAt, _ = time.Parse("2006-01-02T15:04:05.000-0700", iss.Fields.Updated)
@@ -123,6 +126,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 		Assignee:    nameOrEmpty(f.Assignee),
 		Reporter:    nameOrEmpty(f.Reporter),
 		Description: desc,
+		URL:         c.baseURL + "/browse/" + detail.Key,
 	}, nil
 }
 
@@ -158,6 +162,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Type:        issue.Type,
 		Title:       issue.Title,
 		Description: issue.Description,
+		URL:         c.baseURL + "/browse/" + result.Key,
 	}, nil
 }
 

@@ -26,9 +26,9 @@ func TestListIssues_happy(t *testing.T) {
 
 		// Return 2 issues + 1 PR (should be filtered).
 		_, _ = fmt.Fprint(w, `[
-			{"number":1,"title":"Bug report","body":"desc1","state":"open","user":{"login":"alice"},"assignee":{"login":"bob"},"labels":[{"name":"bug"}]},
-			{"number":2,"title":"Feature request","body":"desc2","state":"open","user":{"login":"alice"},"labels":[]},
-			{"number":3,"title":"A pull request","body":"pr body","state":"open","user":{"login":"charlie"},"pull_request":{}}
+			{"number":1,"html_url":"https://github.com/octocat/hello-world/issues/1","title":"Bug report","body":"desc1","state":"open","user":{"login":"alice"},"assignee":{"login":"bob"},"labels":[{"name":"bug"}]},
+			{"number":2,"html_url":"https://github.com/octocat/hello-world/issues/2","title":"Feature request","body":"desc2","state":"open","user":{"login":"alice"},"labels":[]},
+			{"number":3,"html_url":"https://github.com/octocat/hello-world/pull/3","title":"A pull request","body":"pr body","state":"open","user":{"login":"charlie"},"pull_request":{}}
 		]`)
 	}))
 	defer srv.Close()
@@ -48,10 +48,12 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "bug", issues[0].Type)
 	assert.Equal(t, "bob", issues[0].Assignee)
 	assert.Equal(t, "alice", issues[0].Reporter)
+	assert.Equal(t, "https://github.com/octocat/hello-world/issues/1", issues[0].URL)
 
 	assert.Equal(t, "octocat/hello-world#2", issues[1].Key)
 	assert.Equal(t, "", issues[1].Type) // no labels
 	assert.Equal(t, "", issues[1].Assignee)
+	assert.Equal(t, "https://github.com/octocat/hello-world/issues/2", issues[1].URL)
 }
 
 func TestListIssues_all(t *testing.T) {

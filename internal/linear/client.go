@@ -15,28 +15,28 @@ var _ tracker.Provider = (*Client)(nil)
 
 const listIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	issues(filter: { team: { key: { eq: $teamKey } } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listOpenIssuesQuery = `query($teamKey: String!, $first: Int!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { team: { key: { eq: $teamKey } }, state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
@@ -44,35 +44,35 @@ const listOpenIssuesUpdatedSinceQuery = `query($teamKey: String!, $first: Int!, 
 // All-teams query variants (no team filter — used when --project is omitted).
 const listAllIssuesQuery = `query($first: Int!) {
 	issues(first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listAllOpenIssuesQuery = `query($first: Int!) {
 	issues(filter: { state: { type: { nin: ["completed", "canceled"] } } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listAllIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const listAllOpenIssuesUpdatedSinceQuery = `query($first: Int!, $since: DateTimeOrDuration!) {
 	issues(filter: { state: { type: { nin: ["completed", "canceled"] } }, updatedAt: { gte: $since } }, first: $first, orderBy: createdAt) {
-		nodes { identifier title description updatedAt state { name type } priorityLabel
+		nodes { identifier url title description updatedAt state { name type } priorityLabel
 			assignee { name } creator { name } labels { nodes { name } } }
 	}
 }`
 
 const getIssueQuery = `query($id: String!) {
 	issue(id: $id) {
-		identifier title description state { name type } priorityLabel
+		identifier url title description state { name type } priorityLabel
 		assignee { name } creator { name } labels { nodes { name } }
 	}
 }`
@@ -121,7 +121,7 @@ const deleteIssueMutation = `mutation($id: String!) {
 const createIssueMutation = `mutation($teamId: String!, $title: String!, $description: String, $projectId: String) {
 	issueCreate(input: { teamId: $teamId, title: $title, description: $description, projectId: $projectId }) {
 		success
-		issue { identifier title description }
+		issue { identifier url title description }
 	}
 }`
 
@@ -625,6 +625,7 @@ func toTrackerIssue(li linearIssue, project string) tracker.Issue {
 		StatusType:  linearStateType(li.State.Type),
 		Priority:    li.PriorityLabel,
 		Description: li.Description,
+		URL:         li.URL,
 	}
 
 	if li.UpdatedAt != "" {

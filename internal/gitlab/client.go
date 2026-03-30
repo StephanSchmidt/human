@@ -148,6 +148,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		Project:     issue.Project,
 		Title:       result.Title,
 		Description: result.Description,
+		URL:         result.WebURL,
 	}, nil
 }
 
@@ -441,6 +442,7 @@ func toTrackerIssue(project string, gi glIssue) tracker.Issue {
 		Title:       gi.Title,
 		Status:      gi.State,
 		Description: gi.Description,
+		URL:         gi.WebURL,
 	}
 
 	if gi.UpdatedAt != "" {
