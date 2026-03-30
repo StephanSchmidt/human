@@ -390,12 +390,13 @@ func (m model) handleDispatch() (tea.Model, tea.Cmd) {
 	}
 	sel := flat[m.issueCursor]
 
-	// Find first idle pane. Guard against m.snap == nil.
+	// Find first idle pane scoped to the active project tab.
 	var target *claude.TmuxPane
 	if m.snap != nil {
-		for i := range m.snap.Panes {
-			if m.snap.Panes[i].State == claude.StateReady {
-				target = &m.snap.Panes[i]
+		panes := m.filterPanes(m.snap.Panes)
+		for i := range panes {
+			if panes[i].State == claude.StateReady {
+				target = &panes[i]
 				break
 			}
 		}
@@ -1073,6 +1074,40 @@ func unmatchedInstances(instances []monitor.InstanceView, projects []daemon.Proj
 	for _, iv := range instances {
 		if !matchesAnyProject(iv.Usage.Instance.Cwd, projects) {
 			out = append(out, iv)
+		}
+	}
+	return out
+}
+
+// filterPanes returns the panes that belong to the active tab.
+// When there are no tabs (single project or none), all panes are returned.
+func (m model) filterPanes(panes []claude.TmuxPane) []claude.TmuxPane {
+	tabs := m.tabs()
+	if len(tabs) == 0 {
+		return panes
+	}
+	if m.activeTab >= len(tabs) {
+		return panes
+	}
+	active := tabs[m.activeTab]
+	if active.Dir == "" {
+		return unmatchedPanes(panes, m.projects)
+	}
+	var out []claude.TmuxPane
+	for _, p := range panes {
+		if strings.HasPrefix(p.Cwd, active.Dir) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// unmatchedPanes returns panes whose Cwd does not match any project dir.
+func unmatchedPanes(panes []claude.TmuxPane, projects []daemon.ProjectInfo) []claude.TmuxPane {
+	var out []claude.TmuxPane
+	for _, p := range panes {
+		if !matchesAnyProject(p.Cwd, projects) {
+			out = append(out, p)
 		}
 	}
 	return out
