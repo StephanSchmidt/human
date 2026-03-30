@@ -3,6 +3,7 @@ package cmddaemon
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -52,6 +53,7 @@ func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobr
 	var safe bool
 	var debug bool
 	var foreground bool
+	var projectDirs []string
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -63,9 +65,9 @@ func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobr
 			}
 
 			if foreground || os.Getenv(daemonChildEnv) != "" {
-				return runDaemonForeground(cmd, addr, chromeAddr, proxyAddr, interactive, safe, debug, cmdFactory, version)
+				return runDaemonForeground(cmd, addr, chromeAddr, proxyAddr, interactive, safe, debug, projectDirs, cmdFactory, version)
 			}
-			return runDaemonBackground(cmd, addr, chromeAddr, proxyAddr, safe, debug)
+			return runDaemonBackground(cmd, addr, chromeAddr, proxyAddr, safe, debug, projectDirs)
 		},
 	}
 
@@ -76,12 +78,13 @@ func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobr
 	cmd.Flags().BoolVar(&safe, "safe", os.Getenv("HUMAN_SAFE") == "1", "Block destructive operations for all daemon requests")
 	cmd.Flags().BoolVar(&debug, "debug", false, "Enable debug logging")
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "Run in foreground (don't daemonize)")
+	cmd.Flags().StringArrayVar(&projectDirs, "project", nil, "Project directory to register (repeatable; defaults to cwd)")
 	return cmd
 }
 
 // runDaemonForeground runs the daemon in the current process (blocking).
 // It writes a PID file on start and removes it on shutdown.
-func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool, cmdFactory func() *cobra.Command, version string) error {
+func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool, projectDirs []string, cmdFactory func() *cobra.Command, version string) error {
 	_ = version // reserved for future use
 
 	token, err := daemon.LoadOrCreateToken()
@@ -93,6 +96,11 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		return errors.WrapWithDetails(err, "failed to write PID file")
 	}
 	defer RemovePidFile()
+
+	projectRegistry, projectInfos, err := buildProjectRegistry(projectDirs)
+	if err != nil {
+		return errors.WrapWithDetails(err, "failed to build project registry")
+	}
 
 	out := cmd.OutOrStdout()
 	hostIP := resolveHostIP()
@@ -107,32 +115,19 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		ProxyAddr:  proxyFullAddr,
 		Token:      token,
 		PID:        os.Getpid(),
+		Projects:   projectInfos,
 	}
 	if err := daemon.WriteInfo(info); err != nil {
 		return errors.WrapWithDetails(err, "failed to write daemon info")
 	}
 	defer daemon.RemoveInfo()
 
-	_, _ = fmt.Fprintln(out, "Token:", token)
-	_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
-	_, _ = fmt.Fprintln(out, "Listening on:", addr)
-	_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
-	_, _ = fmt.Fprintln(out, "HTTPS proxy on:", proxyAddr)
-	_, _ = fmt.Fprintln(out)
-	_, _ = fmt.Fprintln(out, "Run in the container:")
-	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
-		daemonAddr, token, chromeFullAddr, proxyFullAddr)
-	_, _ = fmt.Fprintf(out, "  export BROWSER=human-browser\n")
-	_, _ = fmt.Fprintln(out, "  ln -sf $(which human) /usr/local/bin/human-browser  # if not already installed")
+	printStartBanner(out, token, addr, chromeAddr, proxyAddr, daemonAddr, chromeFullAddr, proxyFullAddr, projectInfos)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	level := zerolog.InfoLevel
-	if debug {
-		level = zerolog.DebugLevel
-	}
-	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger().Level(level)
+	logger := newDaemonLogger(debug)
 
 	connTracker := daemon.NewConnectedTracker()
 
@@ -147,6 +142,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		ConnectedPIDs: connTracker,
 		HookEvents:    hookStore,
 		IssueFetcher:  fetchTrackerIssues,
+		Projects:      projectRegistry,
 	}
 
 	// Start socket relay to accept Chrome native messaging
@@ -233,7 +229,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 }
 
 // runDaemonBackground re-execs the current binary as a detached child process.
-func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, debug bool) error {
+func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, debug bool, projectDirs []string) error {
 	out := cmd.OutOrStdout()
 
 	// Check if already running.
@@ -264,6 +260,9 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 	if debug {
 		args = append(args, "--debug")
+	}
+	for _, dir := range projectDirs {
+		args = append(args, "--project", dir)
 	}
 
 	child := exec.Command(exe, args...) // #nosec G204 -- re-exec of own binary via os.Executable()
@@ -370,6 +369,15 @@ func buildDaemonStatusCmd() *cobra.Command {
 			} else {
 				_, _ = fmt.Fprintln(out, "Daemon is reachable at", addr)
 			}
+
+			// Show registered projects if available.
+			if info, err := daemon.ReadInfo(); err == nil && len(info.Projects) > 0 {
+				_, _ = fmt.Fprintf(out, "Projects: %d\n", len(info.Projects))
+				for _, p := range info.Projects {
+					_, _ = fmt.Fprintf(out, "  %s (%s)\n", p.Name, p.Dir)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -630,6 +638,56 @@ func buildInterceptor(proxyCfg *proxy.Config, logger zerolog.Logger) (proxy.Inte
 
 	return interceptor, fmt.Sprintf("MITM intercept: %v\n  CA cert: %s\n  Traffic logs: %s",
 		proxyCfg.Intercept, filepath.Join(humanDir, "ca.crt"), logDir)
+}
+
+// newDaemonLogger creates a zerolog console logger at the appropriate level.
+func newDaemonLogger(debug bool) zerolog.Logger {
+	level := zerolog.InfoLevel
+	if debug {
+		level = zerolog.DebugLevel
+	}
+	return zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger().Level(level)
+}
+
+// printStartBanner prints the daemon startup information.
+func printStartBanner(out io.Writer, token, addr, chromeAddr, proxyAddr, daemonAddr, chromeFullAddr, proxyFullAddr string, projects []daemon.ProjectInfo) {
+	_, _ = fmt.Fprintln(out, "Token:", token)
+	_, _ = fmt.Fprintln(out, "Token file:", daemon.TokenPath())
+	_, _ = fmt.Fprintln(out, "Listening on:", addr)
+	_, _ = fmt.Fprintln(out, "Chrome proxy on:", chromeAddr)
+	_, _ = fmt.Fprintln(out, "HTTPS proxy on:", proxyAddr)
+	if len(projects) > 0 {
+		_, _ = fmt.Fprintf(out, "Projects: %d\n", len(projects))
+		for _, p := range projects {
+			_, _ = fmt.Fprintf(out, "  %s (%s)\n", p.Name, p.Dir)
+		}
+	}
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Run in the container:")
+	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
+		daemonAddr, token, chromeFullAddr, proxyFullAddr)
+	_, _ = fmt.Fprintf(out, "  export BROWSER=human-browser\n")
+	_, _ = fmt.Fprintln(out, "  ln -sf $(which human) /usr/local/bin/human-browser  # if not already installed")
+}
+
+// buildProjectRegistry creates a ProjectRegistry from the given dirs,
+// defaulting to cwd when no dirs are specified.
+func buildProjectRegistry(dirs []string) (*daemon.ProjectRegistry, []daemon.ProjectInfo, error) {
+	if len(dirs) == 0 {
+		cwd, _ := os.Getwd()
+		dirs = []string{cwd}
+	}
+
+	reg, err := daemon.NewProjectRegistry(dirs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var infos []daemon.ProjectInfo
+	for _, e := range reg.Entries() {
+		infos = append(infos, daemon.ProjectInfo(e))
+	}
+	return reg, infos, nil
 }
 
 // replaceHost replaces an empty or wildcard host in addr with the given host.

@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -36,6 +38,7 @@ type Server struct {
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
 	IssueFetcher  func() ([]TrackerIssuesResult, error) // injected; fetches issues from configured trackers
+	Projects      *ProjectRegistry  // multi-project routing; nil means single-project mode
 
 	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
 }
@@ -94,13 +97,20 @@ func (s *Server) handleConn(conn net.Conn) {
 		s.ConnectedPIDs.Touch(req.ClientPID)
 	}
 
+	// Resolve project directory for this request.
+	projectDir, err := s.resolveProjectDir(req.Cwd)
+	if err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+
 	if s.SafeMode {
 		req.Args = append([]string{"--safe"}, req.Args...)
 	}
 
-	s.Logger.Info().Strs("args", req.Args).Msg("handling request")
+	s.Logger.Info().Strs("args", req.Args).Str("project_dir", projectDir).Msg("handling request")
 
-	if s.routeIntercept(conn, reader, req.Args) {
+	if s.routeIntercept(conn, reader, req.Args, projectDir) {
 		return
 	}
 
@@ -164,8 +174,9 @@ func (s *Server) handleLogMode(conn net.Conn, args []string) {
 }
 
 // routeIntercept handles special commands that don't need subprocess execution.
+// projectDir is the resolved project directory for this request.
 // Returns true if the command was handled.
-func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []string) bool {
+func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []string, projectDir string) bool {
 	if len(args) == 0 {
 		return false
 	}
@@ -180,7 +191,7 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 		s.handleHookSnapshot(conn)
 		return true
 	case "tracker-diagnose":
-		s.handleTrackerDiagnose(conn)
+		s.handleTrackerDiagnose(conn, projectDir)
 		return true
 	case "tracker-issues":
 		s.handleTrackerIssues(conn)
@@ -232,8 +243,8 @@ func (s *Server) handleHookSnapshot(conn net.Conn) {
 }
 
 // handleTrackerDiagnose returns tracker credential status from the daemon's env.
-func (s *Server) handleTrackerDiagnose(conn net.Conn) {
-	statuses := tracker.DiagnoseTrackers(".", config.UnmarshalSection, os.Getenv)
+func (s *Server) handleTrackerDiagnose(conn net.Conn, projectDir string) {
+	statuses := tracker.DiagnoseTrackers(projectDir, config.UnmarshalSection, os.Getenv)
 	data, err := json.Marshal(statuses)
 	if err != nil {
 		s.writeError(conn, err.Error(), 1)
@@ -271,6 +282,27 @@ func (s *Server) writeError(conn net.Conn, msg string, code int) {
 	resp := Response{Stderr: msg + "\n", ExitCode: code}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
+}
+
+// resolveProjectDir determines the project directory for a request based on the
+// client's working directory. Returns "." when no ProjectRegistry is configured.
+func (s *Server) resolveProjectDir(cwd string) (string, error) {
+	if s.Projects == nil {
+		return ".", nil
+	}
+	if s.Projects.Single() {
+		return s.Projects.Entries()[0].Dir, nil
+	}
+	entry, ok := s.Projects.Resolve(cwd)
+	if !ok {
+		var dirs []string
+		for _, e := range s.Projects.Entries() {
+			dirs = append(dirs, e.Dir+" ("+e.Name+")")
+		}
+		return "", fmt.Errorf("cwd does not match any registered project: %s\nRegistered projects:\n  %s",
+			cwd, strings.Join(dirs, "\n  "))
+	}
+	return entry.Dir, nil
 }
 
 // envEntry records an env var's previous state so it can be restored.

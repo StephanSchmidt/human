@@ -26,6 +26,16 @@ func UnmarshalSection(dir, key string, target any) error {
 	return nil
 }
 
+// ReadProjectName reads the top-level "project" field from .humanconfig in dir.
+// Returns "" if not set or config is missing.
+func ReadProjectName(dir string) string {
+	v, err := readConfig(dir)
+	if err != nil || v == nil {
+		return ""
+	}
+	return v.GetString("project")
+}
+
 // readConfig creates a viper instance and reads the .humanconfig file from
 // dir (or its local/ subdirectory). Returns (nil, nil) when no config file exists.
 func readConfig(dir string) (*viper.Viper, error) {

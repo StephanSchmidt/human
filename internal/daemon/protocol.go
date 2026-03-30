@@ -18,6 +18,7 @@ type Request struct {
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env,omitempty"`
 	ClientPID int               `json:"client_pid,omitempty"` // parent PID (Claude process) for connection tracking
+	Cwd       string            `json:"cwd,omitempty"`        // client working directory for project routing
 }
 
 // Response is sent from the daemon back to the client (one or more JSON lines per connection).

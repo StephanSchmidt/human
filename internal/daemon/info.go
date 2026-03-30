@@ -23,13 +23,20 @@ const (
 	DockerHost = "host.docker.internal"
 )
 
+// ProjectInfo describes a registered project in a running daemon.
+type ProjectInfo struct {
+	Name string `json:"name"`
+	Dir  string `json:"dir"`
+}
+
 // DaemonInfo holds the runtime details of a running daemon instance.
 type DaemonInfo struct {
-	Addr       string `json:"addr"`
-	ChromeAddr string `json:"chrome_addr,omitempty"`
-	ProxyAddr  string `json:"proxy_addr,omitempty"`
-	Token      string `json:"token"`
-	PID        int    `json:"pid"`
+	Addr       string        `json:"addr"`
+	ChromeAddr string        `json:"chrome_addr,omitempty"`
+	ProxyAddr  string        `json:"proxy_addr,omitempty"`
+	Token      string        `json:"token"`
+	PID        int           `json:"pid"`
+	Projects   []ProjectInfo `json:"projects,omitempty"`
 }
 
 // InfoPath returns the default path for the daemon info file (~/.human/daemon.json).

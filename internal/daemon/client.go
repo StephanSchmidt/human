@@ -29,6 +29,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	defer func() { _ = conn.Close() }()
 
 	env := selectedEnv()
+	cwd, _ := os.Getwd()
 
 	req := Request{
 		Version:   version,
@@ -36,6 +37,7 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 		Args:      args,
 		Env:       env,
 		ClientPID: findAncestorClaude(),
+		Cwd:       cwd,
 	}
 
 	enc := json.NewEncoder(conn)
@@ -95,9 +97,11 @@ func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
 	}
 	defer func() { _ = conn.Close() }()
 
+	cwd, _ := os.Getwd()
 	req := Request{
 		Token: token,
 		Args:  args,
+		Cwd:   cwd,
 	}
 
 	enc := json.NewEncoder(conn)

@@ -54,6 +54,36 @@ func TestUnmarshalSection_malformedYAMLReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "parsing config file")
 }
 
+func TestReadProjectName_happyPath(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `project: infra
+jiras:
+  - name: work
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(yaml), 0o644))
+
+	name := ReadProjectName(dir)
+	assert.Equal(t, "infra", name)
+}
+
+func TestReadProjectName_missingField(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `jiras:
+  - name: work
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".humanconfig.yaml"), []byte(yaml), 0o644))
+
+	name := ReadProjectName(dir)
+	assert.Equal(t, "", name)
+}
+
+func TestReadProjectName_missingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	name := ReadProjectName(dir)
+	assert.Equal(t, "", name)
+}
+
 func TestUnmarshalSection_missingSectionReturnsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	yaml := `jiras:
