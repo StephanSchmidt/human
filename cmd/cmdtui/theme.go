@@ -33,6 +33,7 @@ var (
 	waitingStyle      = lipgloss.NewStyle().Foreground(humanBlue)
 	errorStyle        = lipgloss.NewStyle().Foreground(humanPink)
 	ruleStyle         = lipgloss.NewStyle().Foreground(humanPurple)
+	selectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
 )
 
 func modelColor(name string) string {

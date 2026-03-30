@@ -22,6 +22,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -34,6 +35,27 @@ type trackerIssues struct {
 	Project     string
 	Issues      []tracker.Issue
 	Err         error
+}
+
+// flatIssue is a single issue with its tracker context, used for cursor indexing.
+type flatIssue struct {
+	TrackerKind string
+	Project     string
+	Issue       tracker.Issue
+}
+
+// flattenIssues flattens grouped tracker issues into a single slice for cursor navigation.
+func flattenIssues(groups []trackerIssues) []flatIssue {
+	var out []flatIssue
+	for _, g := range groups {
+		if g.Err != nil || len(g.Issues) == 0 {
+			continue
+		}
+		for _, issue := range g.Issues {
+			out = append(out, flatIssue{TrackerKind: g.TrackerKind, Project: g.Project, Issue: issue})
+		}
+	}
+	return out
 }
 
 // BuildTuiCmd creates the "tui" command.
@@ -123,6 +145,11 @@ type model struct {
 	issuesLoading bool            // true while issue fetch is in flight
 	issuesFetched time.Time       // when issues were last successfully fetched
 
+	issueCursor    int       // index into flattenIssues() result
+	dispatching    bool      // true while dispatch cmd is in-flight
+	dispatchStatus string    // feedback flash: "Sent HUM-42 → session:0.1"
+	dispatchAt     time.Time // when status was set; auto-cleared after 3s
+
 	prevStatuses map[string]logparser.SessionStatus // previous session statuses for idle detection
 }
 
@@ -155,24 +182,43 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd())
 }
 
+func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "l":
+		next := cycleLogMode(m.logMode)
+		m.logMode = next
+		return m, setLogModeCmd(next)
+	case "j", "down":
+		flat := flattenIssues(m.issues)
+		if len(flat) > 0 {
+			m.issueCursor = min(m.issueCursor+1, len(flat)-1)
+		}
+		return m, nil
+	case "k", "up":
+		if m.issueCursor > 0 {
+			m.issueCursor--
+		}
+		return m, nil
+	case "enter":
+		return m.handleDispatch()
+	}
+	return m, nil
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		case "l":
-			next := cycleLogMode(m.logMode)
-			m.logMode = next
-			return m, setLogModeCmd(next)
-		}
+		return m.handleKey(msg)
 	case logModeMsg:
 		m.logMode = string(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 	case fastTickMsg:
+		m.clearExpiredDispatchStatus()
 		if m.fetching {
 			return m, fastTickCmd()
 		}
@@ -199,6 +245,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.issues = msg.results
 		m.issuesLoading = false
 		m.issuesFetched = time.Now()
+		m.clampCursor()
+	case dispatchResultMsg:
+		m.handleDispatchResult(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -238,6 +287,98 @@ func (m model) checkIdleTransitions() {
 	}
 	if bing {
 		playNotificationSound()
+	}
+}
+
+// clampCursor keeps issueCursor in bounds after the issue list changes.
+func (m *model) clampCursor() {
+	flat := flattenIssues(m.issues)
+	if m.issueCursor >= len(flat) {
+		m.issueCursor = max(0, len(flat)-1)
+	}
+}
+
+// clearExpiredDispatchStatus clears the dispatch status flash after 3 seconds.
+func (m *model) clearExpiredDispatchStatus() {
+	if !m.dispatchAt.IsZero() && time.Since(m.dispatchAt) > 3*time.Second {
+		m.dispatchStatus = ""
+		m.dispatchAt = time.Time{}
+	}
+}
+
+// --- dispatch ---
+
+type dispatchResultMsg struct {
+	issueKey  string
+	paneLabel string
+	err       error
+}
+
+func (m *model) handleDispatchResult(msg dispatchResultMsg) {
+	m.dispatching = false
+	if msg.err != nil {
+		m.dispatchStatus = fmt.Sprintf("Failed: %s", msg.err)
+	} else {
+		m.dispatchStatus = fmt.Sprintf("Sent %s → %s", msg.issueKey, msg.paneLabel)
+	}
+	m.dispatchAt = time.Now()
+}
+
+func (m model) handleDispatch() (tea.Model, tea.Cmd) {
+	if m.dispatching {
+		return m, nil
+	}
+	flat := flattenIssues(m.issues)
+	if len(flat) == 0 {
+		m.dispatchStatus = "No issues"
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+	if m.issueCursor >= len(flat) {
+		return m, nil
+	}
+	sel := flat[m.issueCursor]
+
+	// Find first idle pane. Guard against m.snap == nil.
+	var target *claude.TmuxPane
+	if m.snap != nil {
+		for i := range m.snap.Panes {
+			if m.snap.Panes[i].State == claude.StateReady {
+				target = &m.snap.Panes[i]
+				break
+			}
+		}
+	}
+	if target == nil {
+		m.dispatchStatus = "No idle panes"
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+
+	// Build slash command based on tracker kind.
+	var prompt string
+	switch sel.TrackerKind {
+	case "shortcut":
+		prompt = "/human-plan " + sel.Issue.Key
+	default:
+		prompt = "/human-execute " + sel.Issue.Key
+	}
+
+	m.dispatching = true
+	return m, dispatchIssueCmd(*target, prompt, sel.Issue.Key)
+}
+
+func dispatchIssueCmd(pane claude.TmuxPane, prompt, issueKey string) tea.Cmd {
+	return func() tea.Msg {
+		sender := &dispatch.TmuxSender{Runner: claude.OSCommandRunner{}}
+		agent := dispatch.Agent{
+			SessionName: pane.SessionName,
+			WindowIndex: pane.WindowIndex,
+			PaneIndex:   pane.PaneIndex,
+			Label:       fmt.Sprintf("%s:%d.%d", pane.SessionName, pane.WindowIndex, pane.PaneIndex),
+		}
+		err := sender.SendPrompt(context.Background(), agent, prompt)
+		return dispatchResultMsg{issueKey: issueKey, paneLabel: agent.Label, err: err}
 	}
 }
 
@@ -305,14 +446,14 @@ func (m model) View() string {
 	}
 
 	// Issues panel.
-	if ip := renderIssuesPanel(m.issues, m.issuesFetched, w); ip != "" {
+	if ip := renderIssuesPanel(m.issues, m.issuesFetched, w, m.issueCursor); ip != "" {
 		b.WriteByte('\n')
 		b.WriteString(ip)
 	}
 
 	// Footer.
 	b.WriteByte('\n')
-	b.WriteString(renderFooter(w, m.logMode))
+	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus))
 	b.WriteByte('\n')
 
 	return b.String()
@@ -668,12 +809,15 @@ func renderPanes(panes []claude.TmuxPane) string {
 
 // --- render: footer ---
 
-func renderFooter(w int, logMode string) string {
+func renderFooter(w int, logMode, dispatchStatus string) string {
 	left := subtleStyle.Render("  ↻ live")
 	if logMode != "" {
 		left += "  " + subtleStyle.Render("log:"+logMode)
 	}
-	right := subtleStyle.Render("l log  q quit")
+	if dispatchStatus != "" {
+		left += "  " + specialStyle.Render(dispatchStatus)
+	}
+	right := subtleStyle.Render("j/k nav  ⏎ send  l log  q quit")
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
@@ -925,7 +1069,7 @@ func pipelineName(trackerKind string) string {
 	}
 }
 
-func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) string {
+func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w, cursor int) string {
 	if len(groups) == 0 {
 		return ""
 	}
@@ -939,6 +1083,7 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 	b.WriteString(header)
 	b.WriteByte('\n')
 
+	flatIdx := 0
 	first := true
 	for _, g := range groups {
 		if g.Err != nil {
@@ -971,10 +1116,18 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w int) strin
 			title := truncate(issue.Title, w-30)
 			stage := pipelineStage(g.TrackerKind, issue.Status, issue.StatusType)
 			stageStyled := pipelineStageStyle(issue.StatusType).Render(truncate(stage, 14))
-			_, _ = fmt.Fprintf(&b, "      %-12s %-14s %s\n",
-				titleStyle.Render(issue.Key),
+			keyStyle := titleStyle
+			prefix := "      "
+			if flatIdx == cursor {
+				keyStyle = selectedStyle
+				prefix = "    ▸ "
+			}
+			_, _ = fmt.Fprintf(&b, "%s%-12s %-14s %s\n",
+				prefix,
+				keyStyle.Render(issue.Key),
 				stageStyled,
 				title)
+			flatIdx++
 		}
 	}
 

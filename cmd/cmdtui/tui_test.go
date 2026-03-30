@@ -467,7 +467,7 @@ func TestModelUpdate_LogModeMsg(t *testing.T) {
 }
 
 func TestRenderFooter_ShowsLogMode(t *testing.T) {
-	footer := renderFooter(80, "meta")
+	footer := renderFooter(80, "meta", "")
 	assert.Contains(t, footer, "log:meta")
 	assert.Contains(t, footer, "l log")
 	assert.Contains(t, footer, "q quit")
@@ -486,7 +486,7 @@ func TestRenderIssuesPanel_WithIssues(t *testing.T) {
 			},
 		},
 	}
-	out := renderIssuesPanel(groups, time.Now(), 80)
+	out := renderIssuesPanel(groups, time.Now(), 80, -1)
 	assert.Contains(t, out, "Pipeline")
 	assert.Contains(t, out, "Eng")
 	assert.Contains(t, out, "HUM")
@@ -498,7 +498,7 @@ func TestRenderIssuesPanel_WithIssues(t *testing.T) {
 }
 
 func TestRenderIssuesPanel_Empty(t *testing.T) {
-	out := renderIssuesPanel(nil, time.Time{}, 80)
+	out := renderIssuesPanel(nil, time.Time{}, 80, -1)
 	assert.Equal(t, "", out)
 }
 
@@ -510,7 +510,7 @@ func TestRenderIssuesPanel_TrackerError(t *testing.T) {
 			Err:         fmt.Errorf("unauthorized"),
 		},
 	}
-	out := renderIssuesPanel(groups, time.Now(), 80)
+	out := renderIssuesPanel(groups, time.Now(), 80, -1)
 	assert.Contains(t, out, "Pipeline")
 	assert.Contains(t, out, "jira/KAN")
 	assert.Contains(t, out, "fetch failed")
@@ -531,7 +531,7 @@ func TestRenderIssuesPanel_MixedSuccess(t *testing.T) {
 			},
 		},
 	}
-	out := renderIssuesPanel(groups, time.Now(), 80)
+	out := renderIssuesPanel(groups, time.Now(), 80, -1)
 	assert.Contains(t, out, "Pipeline")
 	assert.Contains(t, out, "fetch failed")
 	assert.Contains(t, out, "HUM-1")
@@ -622,4 +622,268 @@ func TestPipelineName(t *testing.T) {
 	assert.Contains(t, pipelineName("shortcut"), "PM")
 	assert.Contains(t, pipelineName("linear"), "Eng")
 	assert.Contains(t, pipelineName("jira"), "jira")
+}
+
+// --- flattenIssues tests ---
+
+func TestFlattenIssues(t *testing.T) {
+	groups := []trackerIssues{
+		{TrackerKind: "shortcut", Project: "PM", Issues: []tracker.Issue{
+			{Key: "42", Title: "A"},
+			{Key: "43", Title: "B"},
+		}},
+		{TrackerKind: "jira", Project: "KAN", Err: fmt.Errorf("timeout")},
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1", Title: "C"},
+		}},
+		{TrackerKind: "linear", Project: "EMPTY"},
+	}
+	flat := flattenIssues(groups)
+	assert.Len(t, flat, 3)
+	assert.Equal(t, "shortcut", flat[0].TrackerKind)
+	assert.Equal(t, "42", flat[0].Issue.Key)
+	assert.Equal(t, "shortcut", flat[1].TrackerKind)
+	assert.Equal(t, "43", flat[1].Issue.Key)
+	assert.Equal(t, "linear", flat[2].TrackerKind)
+	assert.Equal(t, "HUM-1", flat[2].Issue.Key)
+}
+
+func TestFlattenIssues_Empty(t *testing.T) {
+	assert.Empty(t, flattenIssues(nil))
+	assert.Empty(t, flattenIssues([]trackerIssues{}))
+}
+
+// --- clampCursor tests ---
+
+func TestClampCursor(t *testing.T) {
+	m := testModel()
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1"}, {Key: "HUM-2"},
+		}},
+	}
+	m.issueCursor = 5
+	m.clampCursor()
+	assert.Equal(t, 1, m.issueCursor)
+
+	m.issues = nil
+	m.issueCursor = 3
+	m.clampCursor()
+	assert.Equal(t, 0, m.issueCursor)
+}
+
+// --- navigation tests ---
+
+func TestNavigationKeys_Down(t *testing.T) {
+	m := testModel()
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1"}, {Key: "HUM-2"}, {Key: "HUM-3"},
+		}},
+	}
+	assert.Equal(t, 0, m.issueCursor)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	um := updated.(model)
+	assert.Equal(t, 1, um.issueCursor)
+
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	um = updated.(model)
+	assert.Equal(t, 2, um.issueCursor)
+
+	// Clamp at max.
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	um = updated.(model)
+	assert.Equal(t, 2, um.issueCursor)
+}
+
+func TestNavigationKeys_Up(t *testing.T) {
+	m := testModel()
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1"}, {Key: "HUM-2"},
+		}},
+	}
+	m.issueCursor = 1
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	um := updated.(model)
+	assert.Equal(t, 0, um.issueCursor)
+
+	// Clamp at 0.
+	updated, _ = um.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	um = updated.(model)
+	assert.Equal(t, 0, um.issueCursor)
+}
+
+// --- dispatch tests ---
+
+func TestDispatch_NoIssues(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Panes = []claude.TmuxPane{{SessionName: "s", State: claude.StateReady}}
+	})
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, "No issues", um.dispatchStatus)
+	assert.Nil(t, cmd)
+}
+
+func TestDispatch_NoIdlePanes(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Panes = []claude.TmuxPane{{SessionName: "s", State: claude.StateBusy}}
+	})
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, "No idle panes", um.dispatchStatus)
+	assert.Nil(t, cmd)
+}
+
+func TestDispatch_NoPanes(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot() // no panes
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, "No idle panes", um.dispatchStatus)
+	assert.Nil(t, cmd)
+}
+
+func TestDispatch_LinearIssue(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Panes = []claude.TmuxPane{{SessionName: "work", WindowIndex: 0, PaneIndex: 1, State: claude.StateReady}}
+	})
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-42"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.True(t, um.dispatching)
+	assert.NotNil(t, cmd)
+}
+
+func TestDispatch_ShortcutIssue(t *testing.T) {
+	m := testModel()
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Panes = []claude.TmuxPane{{SessionName: "work", State: claude.StateReady}}
+	})
+	m.issues = []trackerIssues{
+		{TrackerKind: "shortcut", Project: "PM", Issues: []tracker.Issue{{Key: "99"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.True(t, um.dispatching)
+	assert.NotNil(t, cmd)
+}
+
+func TestDispatch_WhileDispatching(t *testing.T) {
+	m := testModel()
+	m.dispatching = true
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.Panes = []claude.TmuxPane{{SessionName: "s", State: claude.StateReady}}
+	})
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.True(t, um.dispatching)
+	assert.Nil(t, cmd)
+}
+
+func TestDispatchResultMsg_Success(t *testing.T) {
+	m := testModel()
+	m.dispatching = true
+
+	updated, _ := m.Update(dispatchResultMsg{issueKey: "HUM-42", paneLabel: "work:0.1"})
+	um := updated.(model)
+	assert.False(t, um.dispatching)
+	assert.Contains(t, um.dispatchStatus, "HUM-42")
+	assert.Contains(t, um.dispatchStatus, "work:0.1")
+	assert.False(t, um.dispatchAt.IsZero())
+}
+
+func TestDispatchResultMsg_Error(t *testing.T) {
+	m := testModel()
+	m.dispatching = true
+
+	updated, _ := m.Update(dispatchResultMsg{issueKey: "HUM-42", err: fmt.Errorf("connection refused")})
+	um := updated.(model)
+	assert.False(t, um.dispatching)
+	assert.Contains(t, um.dispatchStatus, "Failed")
+	assert.Contains(t, um.dispatchStatus, "connection refused")
+}
+
+func TestDispatchStatusAutoClear(t *testing.T) {
+	m := testModel()
+	m.fetching = false
+	m.dispatchStatus = "Sent HUM-42"
+	m.dispatchAt = time.Now().Add(-4 * time.Second) // 4s ago
+
+	updated, _ := m.Update(fastTickMsg(time.Now()))
+	um := updated.(model)
+	assert.Equal(t, "", um.dispatchStatus)
+}
+
+func TestDispatchStatusNotClearedEarly(t *testing.T) {
+	m := testModel()
+	m.fetching = false
+	m.dispatchStatus = "Sent HUM-42"
+	m.dispatchAt = time.Now() // just now
+
+	updated, _ := m.Update(fastTickMsg(time.Now()))
+	um := updated.(model)
+	assert.Equal(t, "Sent HUM-42", um.dispatchStatus)
+}
+
+// --- render tests for cursor ---
+
+func TestRenderIssuesPanelCursor(t *testing.T) {
+	groups := []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{
+			{Key: "HUM-1", Status: "Todo", StatusType: "unstarted", Title: "First"},
+			{Key: "HUM-2", Status: "Todo", StatusType: "unstarted", Title: "Second"},
+		}},
+	}
+	out := renderIssuesPanel(groups, time.Now(), 80, 1)
+	// Second issue should have the selection indicator.
+	assert.Contains(t, out, "▸")
+}
+
+func TestRenderFooter_ShowsDispatchStatus(t *testing.T) {
+	footer := renderFooter(120, "off", "Sent HUM-42 → work:0.1")
+	assert.Contains(t, footer, "Sent HUM-42")
+	assert.Contains(t, footer, "⏎ send")
+}
+
+func TestRenderFooter_ShowsNavKeys(t *testing.T) {
+	footer := renderFooter(120, "", "")
+	assert.Contains(t, footer, "j/k nav")
+	assert.Contains(t, footer, "⏎ send")
+}
+
+func TestDispatch_SnapNil(t *testing.T) {
+	m := testModel()
+	// snap is nil (initial state)
+	m.issues = []trackerIssues{
+		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+	assert.Equal(t, "No idle panes", um.dispatchStatus)
+	assert.Nil(t, cmd)
 }
