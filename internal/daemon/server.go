@@ -115,11 +115,16 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 
 	// Apply client environment variables (e.g. NO_COLOR, TERM, COLUMNS)
-	// for the duration of this request, then restore the originals.
-	// Mutex ensures concurrent requests don't corrupt each other's env.
+	// and switch to the project directory for the duration of this request.
+	// Mutex ensures concurrent requests don't corrupt each other's env/cwd.
 	s.envMu.Lock()
 	origEnv := applyEnv(req.Env)
+	origDir, _ := os.Getwd()
+	if projectDir != "." {
+		_ = os.Chdir(projectDir)
+	}
 	defer func() {
+		_ = os.Chdir(origDir)
 		restoreEnv(origEnv)
 		s.envMu.Unlock()
 	}()

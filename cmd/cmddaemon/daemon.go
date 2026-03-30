@@ -141,7 +141,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		Logger:        logger,
 		ConnectedPIDs: connTracker,
 		HookEvents:    hookStore,
-		IssueFetcher:  fetchTrackerIssues,
+		IssueFetcher:  fetchTrackerIssuesFunc(projectRegistry),
 		Projects:      projectRegistry,
 	}
 
@@ -703,42 +703,46 @@ func replaceHost(addr, host string) string {
 	return addr
 }
 
-// fetchTrackerIssues loads tracker instances and fetches open issues from all
-// configured projects. Runs in the daemon process with its env and cwd.
-func fetchTrackerIssues() ([]daemon.TrackerIssuesResult, error) {
-	instances, err := cmdutil.LoadAllInstances(".")
-	if err != nil {
-		return nil, err
-	}
-	var results []daemon.TrackerIssuesResult
-	for _, inst := range instances {
-		projects := inst.Projects
-		if len(projects) == 0 {
-			projects = []string{""}
+// fetchTrackerIssuesFunc returns an IssueFetcher that loads tracker instances
+// from all registered project directories using per-project env scoping.
+func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry) func() ([]daemon.TrackerIssuesResult, error) {
+	return func() ([]daemon.TrackerIssuesResult, error) {
+		var results []daemon.TrackerIssuesResult
+		for _, entry := range reg.Entries() {
+			instances, err := cmdutil.LoadAllInstancesWithLookup(entry.Dir, entry.EnvLookup())
+			if err != nil {
+				return nil, err
+			}
+			for _, inst := range instances {
+				projects := inst.Projects
+				if len(projects) == 0 {
+					projects = []string{""}
+				}
+				for _, project := range projects {
+					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
+						Project:    project,
+						MaxResults: 20,
+						IncludeAll: false,
+					})
+					cancel()
+					label := project
+					if label == "" {
+						label = inst.Name
+					}
+					r := daemon.TrackerIssuesResult{
+						TrackerName: inst.Name,
+						TrackerKind: inst.Kind,
+						Project:     label,
+						Issues:      issues,
+					}
+					if fetchErr != nil {
+						r.Err = fetchErr.Error()
+					}
+					results = append(results, r)
+				}
+			}
 		}
-		for _, project := range projects {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
-				Project:    project,
-				MaxResults: 20,
-				IncludeAll: false,
-			})
-			cancel()
-			label := project
-			if label == "" {
-				label = inst.Name
-			}
-			r := daemon.TrackerIssuesResult{
-				TrackerName: inst.Name,
-				TrackerKind: inst.Kind,
-				Project:     label,
-				Issues:      issues,
-			}
-			if fetchErr != nil {
-				r.Err = fetchErr.Error()
-			}
-			results = append(results, r)
-		}
+		return results, nil
 	}
-	return results, nil
 }
