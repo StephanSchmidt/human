@@ -650,5 +650,5 @@ func projectFromIdentifier(identifier string) string {
 	if idx < 0 {
 		return ""
 	}
-	return identifier[:idx]
+	return strings.ToUpper(identifier[:idx])
 }

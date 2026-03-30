@@ -515,6 +515,8 @@ func Test_projectFromIdentifier(t *testing.T) {
 		{"A-B-1", "A-B"},
 		{"nohyphen", ""},
 		{"TEAM-1", "TEAM"},
+		{"hum-49", "HUM"},
+		{"eng-123", "ENG"},
 	}
 
 	for _, tt := range tests {
