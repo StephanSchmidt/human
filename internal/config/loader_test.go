@@ -36,7 +36,7 @@ func TestApplyEnvOverrides_instanceAndGlobal(t *testing.T) {
 	t.Setenv("TEST_TOKEN", "global-token")
 
 	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
-	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields)
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, nil)
 
 	// Instance-specific takes precedence over global.
 	assert.Equal(t, "instance-token", cfg.Token)
@@ -54,7 +54,7 @@ func TestApplyEnvOverrides_instanceOnly(t *testing.T) {
 	require.NoError(t, os.Unsetenv("TEST_WORK_URL"))
 
 	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
-	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields)
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, nil)
 
 	assert.Equal(t, "instance-token", cfg.Token)
 	assert.Equal(t, "file-url", cfg.URL)
@@ -67,7 +67,7 @@ func TestApplyEnvOverrides_emptyName(t *testing.T) {
 	require.NoError(t, os.Unsetenv("TEST_TOKEN"))
 
 	cfg := testConfig{URL: "file-url", Token: "file-token"}
-	ApplyEnvOverrides(&cfg, "", "TEST_", testFields)
+	ApplyEnvOverrides(&cfg, "", "TEST_", testFields, nil)
 
 	// No instance prefix, no global set → unchanged.
 	assert.Equal(t, "file-url", cfg.URL)
@@ -80,7 +80,7 @@ func TestApplyEnvOverrides_globalOnly(t *testing.T) {
 	require.NoError(t, os.Unsetenv("TEST_TOKEN"))
 
 	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
-	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields)
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, nil)
 
 	assert.Equal(t, "global-url", cfg.URL)
 	assert.Equal(t, "file-token", cfg.Token)
@@ -193,4 +193,101 @@ func TestLoadInstances_noURLCallbacks(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
 	assert.Equal(t, "work", instances[0].Name)
+}
+
+func TestApplyEnvOverrides_customLookup(t *testing.T) {
+	// Custom lookup always returns project-scoped values.
+	lookup := func(key string) (string, bool) {
+		switch key {
+		case "TEST_TOKEN":
+			return "custom-global-tok", true
+		case "TEST_WORK_TOKEN":
+			return "custom-instance-tok", true
+		default:
+			return "", false
+		}
+	}
+
+	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, lookup)
+
+	// Instance-specific from custom lookup takes precedence.
+	assert.Equal(t, "custom-instance-tok", cfg.Token)
+	assert.Equal(t, "file-url", cfg.URL)
+}
+
+func TestApplyEnvOverrides_customLookup_globalOnly(t *testing.T) {
+	// Custom lookup returns only global, not instance-specific.
+	lookup := func(key string) (string, bool) {
+		if key == "TEST_TOKEN" {
+			return "custom-global-tok", true
+		}
+		return "", false
+	}
+
+	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, lookup)
+
+	// Global from custom lookup applies.
+	assert.Equal(t, "custom-global-tok", cfg.Token)
+	assert.Equal(t, "file-url", cfg.URL)
+}
+
+func TestApplyEnvOverrides_customLookup_noMatch(t *testing.T) {
+	// Custom lookup never finds anything.
+	lookup := func(_ string) (string, bool) {
+		return "", false
+	}
+
+	cfg := testConfig{Name: "work", URL: "file-url", Token: "file-token"}
+	ApplyEnvOverrides(&cfg, cfg.Name, "TEST_", testFields, lookup)
+
+	// Values unchanged.
+	assert.Equal(t, "file-url", cfg.URL)
+	assert.Equal(t, "file-token", cfg.Token)
+}
+
+func TestLoadInstances_withLookup(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n")
+	unsetTestEnv(t)
+
+	// Custom lookup provides token via project-scoped env.
+	lookup := func(key string) (string, bool) {
+		if key == "TEST_TOKEN" {
+			return "scoped-tok", true
+		}
+		return "", false
+	}
+
+	spec := testSpec("")
+	spec.Lookup = lookup
+
+	instances, err := LoadInstances(dir, spec)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, "scoped-tok", instances[0].Token)
+}
+
+func TestLoadInstances_lookupOverridesOsEnv(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n")
+	unsetTestEnv(t)
+	t.Setenv("TEST_TOKEN", "os-env-tok")
+
+	// Custom lookup takes precedence over os env (since it replaces os.LookupEnv entirely).
+	lookup := func(key string) (string, bool) {
+		if key == "TEST_TOKEN" {
+			return "lookup-tok", true
+		}
+		return os.LookupEnv(key)
+	}
+
+	spec := testSpec("")
+	spec.Lookup = lookup
+
+	instances, err := LoadInstances(dir, spec)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, "lookup-tok", instances[0].Token)
 }

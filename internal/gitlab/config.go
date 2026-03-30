@@ -59,3 +59,11 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 func LoadInstances(dir string) ([]tracker.Instance, error) {
 	return config.LoadInstances(dir, instanceSpec)
 }
+
+// LoadInstancesWithLookup is like LoadInstances but uses a custom env lookup
+// function for per-project token scoping.
+func LoadInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
+	spec := instanceSpec
+	spec.Lookup = lookup
+	return config.LoadInstances(dir, spec)
+}

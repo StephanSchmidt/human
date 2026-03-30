@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// EnvLookup is a function that looks up an environment variable by key.
+// It returns the value and whether the variable was found,
+// matching the signature of os.LookupEnv.
+type EnvLookup func(key string) (string, bool)
+
 // EnvField maps a config struct field to its environment variable suffix.
 // For example, {Suffix: "TOKEN", Set: func(c *MyConfig, v string) { c.Token = v }}
 // will check for PROVIDER_TOKEN (global) and PROVIDER_NAME_TOKEN (per-instance).
@@ -16,10 +21,18 @@ type EnvField[C any] struct {
 // ApplyEnvOverrides applies environment variable overrides to a config struct.
 // It checks global variables first (PREFIX_SUFFIX), then per-instance variables
 // (PREFIX_NAME_SUFFIX). Per-instance overrides take precedence.
-func ApplyEnvOverrides[C any](cfg *C, name, envPrefix string, fields []EnvField[C]) {
+//
+// The lookup parameter controls how environment variables are resolved.
+// When nil, os.LookupEnv is used. Pass a custom function to implement
+// per-project scoping or other lookup strategies.
+func ApplyEnvOverrides[C any](cfg *C, name, envPrefix string, fields []EnvField[C], lookup EnvLookup) {
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+
 	// Global overrides: PREFIX_SUFFIX
 	for _, f := range fields {
-		if v, ok := os.LookupEnv(envPrefix + f.Suffix); ok {
+		if v, ok := lookup(envPrefix + f.Suffix); ok {
 			f.Set(cfg, v)
 		}
 	}
@@ -28,7 +41,7 @@ func ApplyEnvOverrides[C any](cfg *C, name, envPrefix string, fields []EnvField[
 	if name != "" {
 		instancePrefix := envPrefix + strings.ToUpper(name) + "_"
 		for _, f := range fields {
-			if v, ok := os.LookupEnv(instancePrefix + f.Suffix); ok {
+			if v, ok := lookup(instancePrefix + f.Suffix); ok {
 				f.Set(cfg, v)
 			}
 		}
@@ -49,6 +62,11 @@ type InstanceSpec[C any, I any] struct {
 	// DefaultURL is set on configs with an empty URL before env overrides.
 	// Leave empty if no default (e.g. Jira requires explicit URL).
 	DefaultURL string
+
+	// Lookup overrides how environment variables are resolved.
+	// When nil, os.LookupEnv is used. Set this to a per-project scoped
+	// lookup function to support multi-project token isolation.
+	Lookup EnvLookup
 
 	// GetName returns the instance name from a config entry.
 	GetName func(C) string
@@ -81,7 +99,7 @@ func LoadInstances[C any, I any](dir string, spec InstanceSpec[C, I]) ([]I, erro
 			}
 		}
 
-		ApplyEnvOverrides(&cfg, spec.GetName(cfg), spec.EnvPrefix, spec.EnvFields)
+		ApplyEnvOverrides(&cfg, spec.GetName(cfg), spec.EnvPrefix, spec.EnvFields, spec.Lookup)
 
 		inst, ok := spec.Build(cfg)
 		if !ok {

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/azuredevops"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/github"
 	"github.com/StephanSchmidt/human/internal/gitlab"
 	"github.com/StephanSchmidt/human/internal/index"
@@ -20,6 +21,9 @@ import (
 // instanceLoader loads tracker instances from provider-specific config in dir.
 type instanceLoader func(dir string) ([]tracker.Instance, error)
 
+// instanceLoaderWithLookup loads tracker instances with a custom env lookup.
+type instanceLoaderWithLookup func(dir string, lookup config.EnvLookup) ([]tracker.Instance, error)
+
 // allLoaders lists every provider's instance loader in registration order.
 var allLoaders = []instanceLoader{
 	jira.LoadInstances,
@@ -30,11 +34,35 @@ var allLoaders = []instanceLoader{
 	shortcut.LoadInstances,
 }
 
+// allLoadersWithLookup lists every provider's lookup-aware instance loader.
+var allLoadersWithLookup = []instanceLoaderWithLookup{
+	jira.LoadInstancesWithLookup,
+	github.LoadInstancesWithLookup,
+	gitlab.LoadInstancesWithLookup,
+	linear.LoadInstancesWithLookup,
+	azuredevops.LoadInstancesWithLookup,
+	shortcut.LoadInstancesWithLookup,
+}
+
 // LoadAllInstances collects tracker instances from all provider configs.
 func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 	var all []tracker.Instance
 	for _, load := range allLoaders {
 		instances, err := load(dir)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, instances...)
+	}
+	return all, nil
+}
+
+// LoadAllInstancesWithLookup collects tracker instances using a custom env
+// lookup function. This enables per-project token scoping in the daemon.
+func LoadAllInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
+	var all []tracker.Instance
+	for _, load := range allLoadersWithLookup {
+		instances, err := load(dir, lookup)
 		if err != nil {
 			return nil, err
 		}
