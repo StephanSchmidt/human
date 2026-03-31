@@ -425,3 +425,306 @@ func TestServer_IgnoresZeroClientPID(t *testing.T) {
 	assert.Equal(t, 0, resp.ExitCode)
 	assert.Empty(t, tracker.PIDs())
 }
+
+// --- detectDestructive tests ---
+
+func TestDetectDestructive_Delete(t *testing.T) {
+	op, ok := detectDestructive([]string{"jira", "issue", "delete", "KAN-1"})
+	assert.True(t, ok)
+	assert.Equal(t, "DeleteIssue", op.Operation)
+	assert.Equal(t, "jira", op.Tracker)
+	assert.Equal(t, "KAN-1", op.Key)
+}
+
+func TestDetectDestructive_Edit(t *testing.T) {
+	op, ok := detectDestructive([]string{"linear", "issue", "edit", "HUM-42", "--title", "New"})
+	assert.True(t, ok)
+	assert.Equal(t, "EditIssue", op.Operation)
+	assert.Equal(t, "linear", op.Tracker)
+	assert.Equal(t, "HUM-42", op.Key)
+}
+
+func TestDetectDestructive_WithSafePrefix(t *testing.T) {
+	op, ok := detectDestructive([]string{"--safe", "jira", "issue", "delete", "KAN-1"})
+	assert.True(t, ok)
+	assert.Equal(t, "DeleteIssue", op.Operation)
+	assert.Equal(t, "KAN-1", op.Key)
+}
+
+func TestDetectDestructive_YesDoesNotSkip(t *testing.T) {
+	// --yes is ignored by the daemon — confirmation always required via TUI.
+	op, ok := detectDestructive([]string{"jira", "issue", "delete", "KAN-1", "--yes"})
+	assert.True(t, ok)
+	assert.Equal(t, "DeleteIssue", op.Operation)
+	assert.Equal(t, "KAN-1", op.Key)
+}
+
+func TestDetectDestructive_NonDestructive(t *testing.T) {
+	_, ok := detectDestructive([]string{"jira", "issue", "list", "--project", "KAN"})
+	assert.False(t, ok)
+}
+
+func TestDetectDestructive_TooShort(t *testing.T) {
+	_, ok := detectDestructive([]string{"jira", "issue"})
+	assert.False(t, ok)
+}
+
+func TestDetectDestructive_NoIssueSubcommand(t *testing.T) {
+	_, ok := detectDestructive([]string{"echo", "hello"})
+	assert.False(t, ok)
+}
+
+// --- Server destructive confirmation tests ---
+
+func startTestServerWithConfirm(t *testing.T, token string) (addr string, cancel context.CancelFunc, store *PendingConfirmStore) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	store = NewPendingConfirmStore()
+
+	srv := &Server{
+		Addr:            "127.0.0.1:0",
+		Token:           token,
+		CmdFactory:      echoCmd,
+		Logger:          zerolog.Nop(),
+		PendingConfirms: store,
+	}
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr = ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Cleanup(func() { cancel() })
+	return addr, cancel, store
+}
+
+func TestServer_DestructiveConfirm_Approved(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	// Send a destructive command in a goroutine — it will block.
+	type result struct {
+		resp1 Response
+		resp2 Response
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		enc := json.NewEncoder(conn)
+		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-1"}})
+
+		reader := bufio.NewReader(conn)
+		line1, err := reader.ReadBytes('\n')
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		var r1 Response
+		_ = json.Unmarshal(line1, &r1)
+
+		line2, err := reader.ReadBytes('\n')
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		var r2 Response
+		_ = json.Unmarshal(line2, &r2)
+
+		ch <- result{resp1: r1, resp2: r2}
+	}()
+
+	// Wait for the pending confirmation to appear.
+	deadline := time.Now().Add(2 * time.Second)
+	for store.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.Equal(t, 1, store.Len())
+
+	snap := store.Snapshot()
+	require.Len(t, snap, 1)
+	assert.Equal(t, "DeleteIssue", snap[0].Operation)
+	assert.Equal(t, "KAN-1", snap[0].Key)
+
+	// Approve it.
+	err := store.Resolve(snap[0].ID, true)
+	require.NoError(t, err)
+
+	r := <-ch
+	require.NoError(t, r.err)
+	assert.True(t, r.resp1.AwaitConfirm)
+	assert.Contains(t, r.resp1.ConfirmPrompt, "KAN-1")
+	// Line 2: the command executed (echo cmd handles "issue delete KAN-1 --yes" as unknown, so exit 1 is fine)
+	// The important thing is we got two lines.
+	assert.NotEmpty(t, r.resp1.ConfirmID)
+}
+
+func TestServer_DestructiveConfirm_Rejected(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	type result struct {
+		resp1 Response
+		resp2 Response
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		enc := json.NewEncoder(conn)
+		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-2"}})
+
+		reader := bufio.NewReader(conn)
+		line1, _ := reader.ReadBytes('\n')
+		var r1 Response
+		_ = json.Unmarshal(line1, &r1)
+
+		line2, _ := reader.ReadBytes('\n')
+		var r2 Response
+		_ = json.Unmarshal(line2, &r2)
+
+		ch <- result{resp1: r1, resp2: r2}
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for store.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	snap := store.Snapshot()
+	require.Len(t, snap, 1)
+
+	// Reject it.
+	err := store.Resolve(snap[0].ID, false)
+	require.NoError(t, err)
+
+	r := <-ch
+	require.NoError(t, r.err)
+	assert.True(t, r.resp1.AwaitConfirm)
+	assert.Contains(t, r.resp2.Stderr, "aborted")
+	assert.Equal(t, 1, r.resp2.ExitCode)
+}
+
+func TestServer_DestructiveYes_StillRequiresConfirmation(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	// --yes does NOT bypass daemon confirmation; the daemon always asks.
+	type result struct {
+		resp1 Response
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		enc := json.NewEncoder(conn)
+		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-3", "--yes"}})
+
+		reader := bufio.NewReader(conn)
+		line1, err := reader.ReadBytes('\n')
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		var r1 Response
+		_ = json.Unmarshal(line1, &r1)
+		ch <- result{resp1: r1}
+	}()
+
+	// Confirmation should still be created.
+	deadline := time.Now().Add(2 * time.Second)
+	for store.Len() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.Equal(t, 1, store.Len())
+
+	// Clean up: resolve it so the goroutine can finish.
+	snap := store.Snapshot()
+	if len(snap) > 0 {
+		_ = store.Resolve(snap[0].ID, false)
+	}
+
+	r := <-ch
+	require.NoError(t, r.err)
+	assert.True(t, r.resp1.AwaitConfirm)
+}
+
+func TestServer_PendingConfirmsEndpoint(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	// Initially empty.
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"pending-confirms"}})
+	assert.Equal(t, "[]\n", resp.Stdout)
+
+	// Add a pending confirmation manually.
+	store.Add(&PendingConfirmation{
+		ID:        "test-1",
+		Operation: "DeleteIssue",
+		Tracker:   "jira",
+		Key:       "KAN-1",
+		Prompt:    "Delete KAN-1?",
+		CreatedAt: time.Now(),
+		Decision:  make(chan bool, 1),
+	})
+
+	resp = sendRequest(t, addr, Request{Token: token, Args: []string{"pending-confirms"}})
+	assert.Contains(t, resp.Stdout, "test-1")
+	assert.Contains(t, resp.Stdout, "KAN-1")
+}
+
+func TestServer_ConfirmOpEndpoint(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	pc := &PendingConfirmation{
+		ID:       "test-resolve",
+		Decision: make(chan bool, 1),
+	}
+	store.Add(pc)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"confirm-op", "test-resolve", "yes"}})
+	assert.Equal(t, "ok\n", resp.Stdout)
+
+	decision := <-pc.Decision
+	assert.True(t, decision)
+}
+
+func TestServer_ConfirmOpEndpoint_NotFound(t *testing.T) {
+	token := "test-token"
+	addr, _, _ := startTestServerWithConfirm(t, token)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"confirm-op", "nonexistent", "yes"}})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.Contains(t, resp.Stderr, "nonexistent")
+}

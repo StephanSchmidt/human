@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -293,60 +292,24 @@ func TestRunEditIssue_Error(t *testing.T) {
 
 // --- RunDeleteIssue tests ---
 
-func TestRunDeleteIssue_NoConfirm_ShowsWarning(t *testing.T) {
-	p := &mockProvider{}
-
-	var buf bytes.Buffer
-	err := RunDeleteIssue(context.Background(), p, &buf, "KAN-1", 0)
-	require.NoError(t, err)
-
-	out := buf.String()
-	assert.Contains(t, out, "Warning")
-	assert.Contains(t, out, "KAN-1")
-	assert.Contains(t, out, "--confirm=")
-}
-
-func TestRunDeleteIssue_CorrectConfirm(t *testing.T) {
-	// Generate a code, then use it to confirm.
-	code, err := GenerateConfirmCode("TEST-DEL-1")
-	require.NoError(t, err)
-	defer ClearConfirmCode("TEST-DEL-1")
-
+func TestRunDeleteIssue_Success(t *testing.T) {
 	deleted := false
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, key string) error {
-			assert.Equal(t, "TEST-DEL-1", key)
+			assert.Equal(t, "KAN-1", key)
 			deleted = true
 			return nil
 		},
 	}
 
 	var buf bytes.Buffer
-	err = RunDeleteIssue(context.Background(), p, &buf, "TEST-DEL-1", code)
+	err := RunDeleteIssue(context.Background(), p, &buf, "KAN-1", true)
 	require.NoError(t, err)
 	assert.True(t, deleted)
-	assert.Contains(t, buf.String(), "Deleted TEST-DEL-1")
-}
-
-func TestRunDeleteIssue_WrongConfirm(t *testing.T) {
-	// Generate a code, then try a wrong one.
-	_, err := GenerateConfirmCode("TEST-DEL-2")
-	require.NoError(t, err)
-	defer ClearConfirmCode("TEST-DEL-2")
-
-	p := &mockProvider{}
-
-	var buf bytes.Buffer
-	err = RunDeleteIssue(context.Background(), p, &buf, "TEST-DEL-2", 999999)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "confirmation code does not match")
+	assert.Contains(t, buf.String(), "Deleted KAN-1")
 }
 
 func TestRunDeleteIssue_DeleteError(t *testing.T) {
-	code, err := GenerateConfirmCode("TEST-DEL-3")
-	require.NoError(t, err)
-	defer ClearConfirmCode("TEST-DEL-3")
-
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error {
 			return errors.WithDetails("delete failed")
@@ -354,7 +317,7 @@ func TestRunDeleteIssue_DeleteError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err = RunDeleteIssue(context.Background(), p, &buf, "TEST-DEL-3", code)
+	err := RunDeleteIssue(context.Background(), p, &buf, "KAN-1", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "delete failed")
 }
@@ -681,23 +644,6 @@ func TestPrintIssuesJSON_Success(t *testing.T) {
 	assert.Equal(t, "KAN-1", parsed[0].Key)
 }
 
-// --- GenerateConfirmCode / readConfirmCode / ClearConfirmCode tests ---
-
-func TestGenerateConfirmCode_CreatesValidCode(t *testing.T) {
-	code, err := GenerateConfirmCode("TEST-CONFIRM-1")
-	require.NoError(t, err)
-	defer ClearConfirmCode("TEST-CONFIRM-1")
-
-	assert.GreaterOrEqual(t, code, 100000)
-	assert.LessOrEqual(t, code, 999999)
-}
-
-func TestConfirmPath_ReturnsNonEmpty(t *testing.T) {
-	path := ConfirmPath("TEST-KEY")
-	assert.NotEmpty(t, path)
-	assert.True(t, strings.Contains(path, "human-confirm-TEST-KEY"))
-}
-
 // --- BuildProviderCommands tests ---
 
 func TestBuildProviderCommands_ReturnsExpectedCommands(t *testing.T) {
@@ -860,8 +806,15 @@ func TestCmd_IssueEdit_NoFlags(t *testing.T) {
 	assert.Contains(t, err.Error(), "at least one of --title or --description is required")
 }
 
-func TestCmd_IssueDelete_NoConfirm(t *testing.T) {
-	mp := &mockProvider{}
+func TestCmd_IssueDelete_Success(t *testing.T) {
+	deleted := false
+	mp := &mockProvider{
+		deleteIssueFn: func(_ context.Context, key string) error {
+			assert.Equal(t, "KAN-1", key)
+			deleted = true
+			return nil
+		},
+	}
 	root, _ := newTestRoot(mp)
 
 	var buf bytes.Buffer
@@ -869,8 +822,8 @@ func TestCmd_IssueDelete_NoConfirm(t *testing.T) {
 	root.SetArgs([]string{"jira", "issue", "delete", "KAN-1"})
 	err := root.Execute()
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Warning")
-	assert.Contains(t, buf.String(), "--confirm=")
+	assert.True(t, deleted)
+	assert.Contains(t, buf.String(), "Deleted KAN-1")
 }
 
 func TestCmd_IssueCommentAdd_Success(t *testing.T) {

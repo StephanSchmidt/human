@@ -163,6 +163,13 @@ type model struct {
 
 	projects  []daemon.ProjectInfo // registered projects from daemon info
 	activeTab int                  // index into tabs(); 0 = first project or "All"
+
+	// Destructive operation confirmation overlay.
+	pendingConfirms []daemon.PendingConfirm // from daemon polling
+	confirmActive   bool                    // true when confirm overlay is shown
+	confirmID       string                  // which pending op we're showing
+	confirmPrompt   string                  // e.g. "DeleteIssue KAN-1?"
+	confirmPIDs     map[int]bool            // PIDs of Claude instances with pending confirms
 }
 
 func newModel(mon *monitor.Monitor) model {
@@ -189,6 +196,9 @@ type issuesResultMsg struct {
 	results []trackerIssues
 }
 
+type pendingConfirmsMsg  []daemon.PendingConfirm
+type confirmDecisionMsg  struct{ err error }
+
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
@@ -196,6 +206,11 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// When a destructive confirmation overlay is active, only handle y/n/Esc.
+	if m.confirmActive {
+		return m.handleConfirmKey(msg)
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -219,25 +234,29 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDispatch()
 	case "o":
 		return m.handleOpenBrowser()
+	default:
+		return m.handleTabKey(msg)
+	}
+}
+
+func (m model) handleTabKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "tab":
 		tabs := m.tabs()
 		if len(tabs) > 1 {
 			m.activeTab = (m.activeTab + 1) % len(tabs)
 		}
-		return m, nil
 	case "shift+tab":
 		tabs := m.tabs()
 		if len(tabs) > 1 {
 			m.activeTab = (m.activeTab - 1 + len(tabs)) % len(tabs)
 		}
-		return m, nil
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		idx := int(msg.Runes[0]-'0') - 1 // "1" → 0
 		tabs := m.tabs()
 		if idx < len(tabs) {
 			m.activeTab = idx
 		}
-		return m, nil
 	}
 	return m, nil
 }
@@ -256,19 +275,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fastTickMsg:
 		return m.handleFastTick()
 	case fullTickMsg:
-		if m.fetching {
-			return m, fullTickCmd()
-		}
-		m.fetching = true
-		m.fetchGen++
-		return m, tea.Batch(fetchFull(m.mon, m.fetchGen), fullTickCmd(), fetchProjectsCmd())
+		return m.handleFullTick()
 	case snapshotMsg:
-		if msg.gen != m.fetchGen {
-			return m, nil // stale result, discard
-		}
-		m.snap = msg.snap
-		m.fetching = false
-		m.checkIdleTransitions()
+		return m.handleSnapshot(msg)
 	case issueTickMsg:
 		return m.handleIssueTick()
 	case issuesResultMsg:
@@ -280,12 +289,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleDispatchResult(msg)
 	case openBrowserMsg:
 		m.handleOpenBrowserResult(msg)
+	case pendingConfirmsMsg:
+		m.handlePendingConfirms(msg)
+	case confirmDecisionMsg:
+		m.handleConfirmDecision(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m model) handleFullTick() (tea.Model, tea.Cmd) {
+	if m.fetching {
+		return m, fullTickCmd()
+	}
+	m.fetching = true
+	m.fetchGen++
+	return m, tea.Batch(fetchFull(m.mon, m.fetchGen), fullTickCmd(), fetchProjectsCmd(), fetchPendingConfirmsCmd())
+}
+
+func (m model) handleSnapshot(msg snapshotMsg) (tea.Model, tea.Cmd) {
+	if msg.gen != m.fetchGen {
+		return m, nil // stale result, discard
+	}
+	m.snap = msg.snap
+	m.fetching = false
+	m.checkIdleTransitions()
+	return m, nil
+}
+
+func (m *model) handleConfirmDecision(msg confirmDecisionMsg) {
+	if msg.err != nil {
+		m.dispatchStatus = fmt.Sprintf("Confirm failed: %s", msg.err)
+		m.dispatchAt = time.Now()
+	}
 }
 
 // checkIdleTransitions plays a notification sound when any instance
@@ -471,6 +510,81 @@ func openBrowserCmd(url, issueKey string) tea.Cmd {
 	}
 }
 
+// --- destructive confirmation overlay ---
+
+func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		id := m.confirmID
+		m.confirmActive = false
+		m.confirmID = ""
+		m.confirmPrompt = ""
+		m.dispatchStatus = "Approved"
+		m.dispatchAt = time.Now()
+		return m, sendConfirmCmd(id, true)
+	case "n", "esc":
+		id := m.confirmID
+		m.confirmActive = false
+		m.confirmID = ""
+		m.confirmPrompt = ""
+		m.dispatchStatus = "Aborted"
+		m.dispatchAt = time.Now()
+		return m, sendConfirmCmd(id, false)
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	}
+	return m, nil // swallow all other keys while confirming
+}
+
+func (m *model) handlePendingConfirms(confirms []daemon.PendingConfirm) {
+	m.pendingConfirms = confirms
+
+	// Build PID set for instance state rendering.
+	m.confirmPIDs = make(map[int]bool, len(confirms))
+	for _, c := range confirms {
+		if c.ClientPID > 0 {
+			m.confirmPIDs[c.ClientPID] = true
+		}
+	}
+
+	if len(confirms) > 0 && !m.confirmActive {
+		m.confirmActive = true
+		m.confirmID = confirms[0].ID
+		m.confirmPrompt = confirms[0].Prompt
+	}
+	if len(confirms) == 0 && m.confirmActive {
+		m.confirmActive = false
+		m.confirmID = ""
+		m.confirmPrompt = ""
+	}
+}
+
+func sendConfirmCmd(id string, approved bool) tea.Cmd {
+	return func() tea.Msg {
+		addr, token := daemonAddr()
+		if addr == "" {
+			return confirmDecisionMsg{err: fmt.Errorf("daemon not available")}
+		}
+		err := daemon.SendConfirmDecision(addr, token, id, approved)
+		return confirmDecisionMsg{err: err}
+	}
+}
+
+func fetchPendingConfirmsCmd() tea.Cmd {
+	return func() tea.Msg {
+		addr, token := daemonAddr()
+		if addr == "" {
+			return pendingConfirmsMsg(nil)
+		}
+		confirms, err := daemon.GetPendingConfirms(addr, token)
+		if err != nil {
+			return pendingConfirmsMsg(nil)
+		}
+		return pendingConfirmsMsg(confirms)
+	}
+}
+
 func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
 	if m.issuesLoading {
 		return m, issueTickCmd()
@@ -549,7 +663,11 @@ func (m model) View() string {
 
 	// Footer.
 	b.WriteByte('\n')
-	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
+	if m.confirmActive {
+		b.WriteString(renderConfirmFooter(w, m.confirmPrompt))
+	} else {
+		b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
+	}
 	b.WriteByte('\n')
 
 	return b.String()
@@ -641,8 +759,16 @@ func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int
 	b.WriteByte('\n')
 
 	// Instance header: icon + label + elapsed + slug
-	icon := m.sessionIcon(iv.Session)
-	labelStyle := sessionLabelStyle(iv.Session)
+	// Override with confirm state when this instance has a pending confirmation.
+	var icon string
+	var labelStyle lipgloss.Style
+	if iv.Usage.Instance.PID > 0 && m.confirmPIDs[iv.Usage.Instance.PID] {
+		icon = confirmStyle.Render("●")
+		labelStyle = confirmStyle
+	} else {
+		icon = m.sessionIcon(iv.Session)
+		labelStyle = sessionLabelStyle(iv.Session)
+	}
 	header := "  " + icon + " " + labelStyle.Render(iv.Usage.Instance.Label)
 	if iv.Usage.Instance.DaemonConnected {
 		if iv.Usage.Instance.ProxyConfigured {
@@ -891,6 +1017,8 @@ func renderPanes(panes []claude.TmuxPane) string {
 			icon = waitingStyle.Render("●")
 		case claude.StateError:
 			icon = accentStyle.Render("⚠")
+		case claude.StateConfirm:
+			icon = confirmStyle.Render("●")
 		default:
 			icon = "○"
 		}
@@ -904,6 +1032,16 @@ func renderPanes(panes []claude.TmuxPane) string {
 }
 
 // --- render: footer ---
+
+func renderConfirmFooter(w int, prompt string) string {
+	left := confirmStyle.Render("  ⚠ " + prompt)
+	right := confirmStyle.Render("y confirm  n abort")
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
 
 func renderFooter(w int, logMode, dispatchStatus string, showTabs bool) string {
 	left := subtleStyle.Render("  ↻ live")

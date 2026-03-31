@@ -2,15 +2,9 @@ package cmdprovider
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -109,6 +103,7 @@ func buildIssueCreateCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 
 func buildIssueEditCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 	var title, description string
+	var yes bool
 
 	cmd := &cobra.Command{
 		Use:     "edit KEY",
@@ -133,20 +128,22 @@ func buildIssueEditCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 				opts.Description = &description
 			}
 
+			_ = yes // consumed by daemon interceptor via --yes flag; unused here
 			return RunEditIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], opts)
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "New issue title")
 	cmd.Flags().StringVar(&description, "description", "", "New issue description (markdown)")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip interactive confirmation")
 	return cmd
 }
 
 func buildIssueDeleteCmd(kind string, deps cmdutil.Deps) *cobra.Command {
-	var confirm int
+	var yes bool
 
 	cmd := &cobra.Command{
 		Use:   "delete KEY",
-		Short: "Delete (or close) an issue by key (requires --confirm)",
+		Short: "Delete (or close) an issue by key",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, cleanup, err := cmdutil.ResolveProvider(cmd, kind, deps)
@@ -154,10 +151,10 @@ func buildIssueDeleteCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return RunDeleteIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], confirm)
+			return RunDeleteIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], yes)
 		},
 	}
-	cmd.Flags().IntVar(&confirm, "confirm", 0, "Confirmation code from the first invocation")
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip interactive confirmation")
 	return cmd
 }
 
@@ -315,31 +312,13 @@ func RunCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, proj
 	return nil
 }
 
-// RunDeleteIssue deletes an issue after confirmation.
-func RunDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, confirm int) error {
-	if confirm == 0 {
-		code, err := GenerateConfirmCode(key)
-		if err != nil {
-			return err
-		}
-		_, _ = fmt.Fprintf(out, "Warning: This is a destructive operation. You are about to delete %s.\n", key)
-		_, _ = fmt.Fprintln(out, "Sure? From a user perspective, is this the right thing?")
-		_, _ = fmt.Fprintf(out, "Use --confirm=%d to confirm deletion of %s\n", code, key)
-		return nil
-	}
-
-	stored, err := readConfirmCode(key)
-	if err != nil {
-		return err
-	}
-	if confirm != stored {
-		return errors.WithDetails("confirmation code does not match", "key", key)
-	}
-
+// RunDeleteIssue deletes an issue.
+// Confirmation is handled by the daemon interceptor; the --yes flag is only
+// used by the daemon to mark that confirmation was already obtained.
+func RunDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, _ bool) error {
 	if err := p.DeleteIssue(ctx, key); err != nil {
 		return err
 	}
-	ClearConfirmCode(key)
 	_, _ = fmt.Fprintf(out, "Deleted %s\n", key)
 	return nil
 }
@@ -464,73 +443,3 @@ func PrintStatusesTable(out io.Writer, statuses []tracker.Status) error {
 	return w.Flush()
 }
 
-// --- Confirmation code helpers ---
-
-// confirmDir returns a per-user directory for confirmation code files,
-// creating it if necessary. Uses the user cache directory instead of
-// the shared /tmp to avoid TOCTOU and symlink attacks on multi-user systems.
-func confirmDir() (string, error) {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return "", errors.WrapWithDetails(err, "resolving user cache directory")
-	}
-	dir := filepath.Join(cacheDir, "human", "confirm")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", errors.WrapWithDetails(err, "creating confirm directory", "path", dir)
-	}
-	return dir, nil
-}
-
-// ConfirmPath returns the file path for a confirmation code.
-func ConfirmPath(key string) string {
-	dir, err := confirmDir()
-	if err != nil {
-		// Fall back to temp dir if cache dir is unavailable.
-		return filepath.Join(os.TempDir(), "human-confirm-"+key)
-	}
-	return filepath.Join(dir, "human-confirm-"+key)
-}
-
-// GenerateConfirmCode creates a random 6-digit code, writes it to a file, returns it.
-func GenerateConfirmCode(key string) (int, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(900000))
-	if err != nil {
-		return 0, errors.WithDetails("generating random confirmation code", "key", key)
-	}
-	code := int(n.Int64()) + 100000 // 100000–999999
-	dir, err := confirmDir()
-	if err != nil {
-		return 0, err
-	}
-	path := filepath.Join(dir, "human-confirm-"+key)
-	if err := os.WriteFile(path, []byte(strconv.Itoa(code)), 0o600); err != nil {
-		return 0, errors.WithDetails("writing confirmation file", "path", path)
-	}
-	return code, nil
-}
-
-// readConfirmCode reads the stored confirmation code from the file.
-func readConfirmCode(key string) (int, error) {
-	dir, err := confirmDir()
-	if err != nil {
-		return 0, err
-	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return 0, errors.WithDetails("opening confirm directory", "key", key)
-	}
-	defer func() { _ = root.Close() }()
-	f, err := root.Open("human-confirm-" + key)
-	if err != nil {
-		return 0, errors.WithDetails("no pending confirmation", "key", key)
-	}
-	defer func() { _ = f.Close() }()
-	data := make([]byte, 16)
-	n, _ := f.Read(data)
-	return strconv.Atoi(strings.TrimSpace(string(data[:n])))
-}
-
-// ClearConfirmCode removes the temp file after successful deletion.
-func ClearConfirmCode(key string) {
-	_ = os.Remove(ConfirmPath(key))
-}

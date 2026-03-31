@@ -132,17 +132,19 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	connTracker := daemon.NewConnectedTracker()
 
 	hookStore := daemon.NewHookEventStore()
+	confirmStore := daemon.NewPendingConfirmStore()
 
 	srv := &daemon.Server{
-		Addr:          addr,
-		Token:         token,
-		SafeMode:      safe,
-		CmdFactory:    cmdFactory,
-		Logger:        logger,
-		ConnectedPIDs: connTracker,
-		HookEvents:    hookStore,
-		IssueFetcher:  fetchTrackerIssuesFunc(projectRegistry),
-		Projects:      projectRegistry,
+		Addr:            addr,
+		Token:           token,
+		SafeMode:        safe,
+		CmdFactory:      cmdFactory,
+		Logger:          logger,
+		ConnectedPIDs:   connTracker,
+		HookEvents:      hookStore,
+		IssueFetcher:    fetchTrackerIssuesFunc(projectRegistry),
+		Projects:        projectRegistry,
+		PendingConfirms: confirmStore,
 	}
 
 	// Start socket relay to accept Chrome native messaging

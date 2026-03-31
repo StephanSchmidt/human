@@ -11,6 +11,7 @@ const (
 	humanPurple = lipgloss.Color("#555598") // muted purple — subtle, secondary
 	humanRed    = lipgloss.Color("#e05050") // red — busy, working, accent
 	humanBlue   = lipgloss.Color("#6ab0f3") // blue — waiting for user input
+	humanOrange = lipgloss.Color("#f0a050") // orange — confirmation pending
 )
 
 // Model-specific progress bar colors.
@@ -34,6 +35,7 @@ var (
 	errorStyle        = lipgloss.NewStyle().Foreground(humanPink)
 	ruleStyle         = lipgloss.NewStyle().Foreground(humanPurple)
 	selectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(humanGold)
+	confirmStyle      = lipgloss.NewStyle().Bold(true).Foreground(humanOrange)
 	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold).Background(lipgloss.Color("#333355"))
 	inactiveTabStyle  = lipgloss.NewStyle().Foreground(humanPurple)
 )

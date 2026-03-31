@@ -10,6 +10,7 @@ const (
 	StateBlocked // waiting for permission approval
 	StateWaiting // waiting for user input (AskUserQuestion, ExitPlanMode)
 	StateError   // stopped due to API error or failure
+	StateConfirm // waiting for destructive operation confirmation
 )
 
 func (s InstanceState) String() string {
@@ -24,6 +25,8 @@ func (s InstanceState) String() string {
 		return "🔵"
 	case StateError:
 		return "⚠️"
+	case StateConfirm:
+		return "🟠"
 	default:
 		return "⚪"
 	}

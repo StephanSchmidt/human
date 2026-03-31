@@ -67,25 +67,58 @@ func RunRemote(addr, token string, args []string, version string) (int, error) {
 	}
 
 	// Two-line OAuth protocol: daemon signals us to wait for a callback URL.
-	// Claude Code awaits the BROWSER process exit (10-min timeout via execa),
-	// so we stay alive, read line 2 (callback URL), deliver it, then exit 0.
 	if resp.AwaitCallback {
-		line2, err := reader.ReadBytes('\n')
-		if err != nil {
-			return 1, errors.WrapWithDetails(err, "failed to read callback response")
-		}
-		var resp2 Response
-		if err := json.Unmarshal(line2, &resp2); err != nil {
-			return 1, errors.WrapWithDetails(err, "invalid callback response")
-		}
-		if resp2.Callback != "" {
-			if err := deliverCallback(resp2.Callback); err != nil {
-				return 1, errors.WrapWithDetails(err, "failed to deliver OAuth callback")
-			}
-		}
+		return handleOAuthCallback(reader)
+	}
+
+	// Two-line destructive confirmation protocol: daemon paused a destructive
+	// operation and is waiting for TUI confirmation.
+	if resp.AwaitConfirm {
+		return handleConfirmWait(reader, resp.ConfirmPrompt)
 	}
 
 	return resp.ExitCode, nil
+}
+
+// handleOAuthCallback reads line 2 of the OAuth relay protocol and delivers
+// the callback URL. Claude Code awaits the BROWSER process exit (10-min timeout
+// via execa), so we stay alive, read the callback URL, deliver it, then exit 0.
+func handleOAuthCallback(reader *bufio.Reader) (int, error) {
+	line2, err := reader.ReadBytes('\n')
+	if err != nil {
+		return 1, errors.WrapWithDetails(err, "failed to read callback response")
+	}
+	var resp2 Response
+	if err := json.Unmarshal(line2, &resp2); err != nil {
+		return 1, errors.WrapWithDetails(err, "invalid callback response")
+	}
+	if resp2.Callback != "" {
+		if err := deliverCallback(resp2.Callback); err != nil {
+			return 1, errors.WrapWithDetails(err, "failed to deliver OAuth callback")
+		}
+	}
+	return 0, nil
+}
+
+// handleConfirmWait blocks until the daemon sends line 2 with the result of a
+// destructive operation confirmation.
+func handleConfirmWait(reader *bufio.Reader, prompt string) (int, error) {
+	_, _ = fmt.Fprintf(os.Stderr, "Waiting for confirmation: %s\n", prompt)
+	line2, err := reader.ReadBytes('\n')
+	if err != nil {
+		return 1, errors.WrapWithDetails(err, "failed to read confirmation response")
+	}
+	var resp2 Response
+	if err := json.Unmarshal(line2, &resp2); err != nil {
+		return 1, errors.WrapWithDetails(err, "invalid confirmation response")
+	}
+	if resp2.Stdout != "" {
+		_, _ = fmt.Fprint(os.Stdout, resp2.Stdout)
+	}
+	if resp2.Stderr != "" {
+		_, _ = fmt.Fprint(os.Stderr, resp2.Stderr)
+	}
+	return resp2.ExitCode, nil
 }
 
 // RunRemoteCapture connects to the daemon and runs args, returning stdout
@@ -182,6 +215,29 @@ func GetTrackerIssues(addr, token string) ([]TrackerIssuesResult, error) {
 		return nil, errors.WrapWithDetails(err, "invalid tracker issues JSON")
 	}
 	return results, nil
+}
+
+// GetPendingConfirms fetches pending destructive operation confirmations from the daemon.
+func GetPendingConfirms(addr, token string) ([]PendingConfirm, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"pending-confirms"})
+	if err != nil {
+		return nil, err
+	}
+	var results []PendingConfirm
+	if err := json.Unmarshal(out, &results); err != nil {
+		return nil, errors.WrapWithDetails(err, "invalid pending confirms JSON")
+	}
+	return results, nil
+}
+
+// SendConfirmDecision sends a confirmation decision for a pending destructive operation.
+func SendConfirmDecision(addr, token, id string, approved bool) error {
+	decision := "no"
+	if approved {
+		decision = "yes"
+	}
+	_, err := RunRemoteCapture(addr, token, []string{"confirm-op", id, decision})
+	return err
 }
 
 // deliverCallback performs an HTTP GET to the callback URL, delivering the

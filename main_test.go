@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -564,11 +563,6 @@ func TestRunCreateIssue_error(t *testing.T) {
 
 func TestRunDeleteIssue(t *testing.T) {
 	key := "KAN-1"
-	// Write a known confirmation code to the temp file.
-	code := 4521
-	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, k string) error {
 			assert.Equal(t, key, k)
@@ -577,17 +571,13 @@ func TestRunDeleteIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, true)
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted KAN-1\n", buf.String())
 }
 
 func TestRunDeleteIssue_error(t *testing.T) {
 	key := "KAN-ERR"
-	code := 1234
-	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
 	p := &mockProvider{
 		deleteIssueFn: func(_ context.Context, _ string) error {
 			return fmt.Errorf("delete failed")
@@ -595,97 +585,8 @@ func TestRunDeleteIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, true)
 	assert.EqualError(t, err, "delete failed")
-}
-
-func TestRunDeleteIssue_noConfirm(t *testing.T) {
-	key := "KAN-NC"
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
-	deleted := false
-	p := &mockProvider{
-		deleteIssueFn: func(_ context.Context, _ string) error {
-			deleted = true
-			return nil
-		},
-	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, 0)
-	require.NoError(t, err)
-	assert.False(t, deleted, "issue should not be deleted without confirmation")
-
-	out := buf.String()
-	assert.Contains(t, out, "Warning: This is a destructive operation.")
-	assert.Contains(t, out, "Sure? From a user perspective, is this the right thing?")
-	assert.Contains(t, out, "--confirm=")
-	assert.Contains(t, out, key)
-
-	// Temp file should have been created.
-	_, err = os.Stat(cmdprovider.ConfirmPath(key))
-	assert.NoError(t, err, "confirmation temp file should exist")
-}
-
-func TestRunDeleteIssue_wrongConfirm(t *testing.T) {
-	key := "KAN-WC"
-	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte("5555"), 0o600))
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
-	deleted := false
-	p := &mockProvider{
-		deleteIssueFn: func(_ context.Context, _ string) error {
-			deleted = true
-			return nil
-		},
-	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, 9999)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "confirmation code does not match")
-	assert.False(t, deleted, "issue should not be deleted with wrong code")
-}
-
-func TestRunDeleteIssue_confirmCleansUp(t *testing.T) {
-	key := "KAN-CU"
-	code := 7777
-	require.NoError(t, os.WriteFile(cmdprovider.ConfirmPath(key), []byte(strconv.Itoa(code)), 0o600))
-
-	p := &mockProvider{
-		deleteIssueFn: func(_ context.Context, _ string) error { return nil },
-	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, code)
-	require.NoError(t, err)
-
-	_, err = os.Stat(cmdprovider.ConfirmPath(key))
-	assert.True(t, os.IsNotExist(err), "temp file should be removed after successful delete")
-}
-
-func TestGenerateConfirmCode_range(t *testing.T) {
-	key := "KAN-RNG"
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
-	for range 20 {
-		code, err := cmdprovider.GenerateConfirmCode(key)
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, code, 100000)
-		assert.LessOrEqual(t, code, 999999)
-	}
-}
-
-func TestGenerateConfirmCode_writesFile(t *testing.T) {
-	key := "KAN-WF"
-	t.Cleanup(func() { cmdprovider.ClearConfirmCode(key) })
-
-	code, err := cmdprovider.GenerateConfirmCode(key)
-	require.NoError(t, err)
-
-	data, err := os.ReadFile(cmdprovider.ConfirmPath(key))
-	require.NoError(t, err)
-	assert.Equal(t, strconv.Itoa(code), string(data))
 }
 
 func TestRunAddComment(t *testing.T) {

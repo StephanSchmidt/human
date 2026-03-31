@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
@@ -37,8 +38,9 @@ type Server struct {
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
-	IssueFetcher  func() ([]TrackerIssuesResult, error) // injected; fetches issues from configured trackers
-	Projects      *ProjectRegistry  // multi-project routing; nil means single-project mode
+	IssueFetcher    func() ([]TrackerIssuesResult, error) // injected; fetches issues from configured trackers
+	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
+	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
 
 	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
 }
@@ -111,6 +113,12 @@ func (s *Server) handleConn(conn net.Conn) {
 	s.Logger.Info().Strs("args", req.Args).Str("project_dir", projectDir).Msg("handling request")
 
 	if s.routeIntercept(conn, reader, req.Args, projectDir) {
+		return
+	}
+
+	// Intercept destructive operations for interactive confirmation.
+	if op, ok := detectDestructive(req.Args); ok && s.PendingConfirms != nil {
+		s.handleDestructiveConfirm(conn, req, op, projectDir)
 		return
 	}
 
@@ -205,6 +213,12 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 		return true
 	case "tracker-issues":
 		s.handleTrackerIssues(conn)
+		return true
+	case "pending-confirms":
+		s.handlePendingConfirms(conn)
+		return true
+	case "confirm-op":
+		s.handleConfirmOp(conn, args[1:])
 		return true
 	}
 
@@ -342,4 +356,198 @@ func restoreEnv(orig []envEntry) {
 			_ = os.Unsetenv(e.key)
 		}
 	}
+}
+
+// --- destructive operation confirmation ---
+
+// destructiveOp describes a detected destructive command.
+type destructiveOp struct {
+	Operation string // "DeleteIssue", "EditIssue"
+	Tracker   string // tracker kind from args, e.g. "jira"
+	Key       string // issue key, e.g. "KAN-1"
+}
+
+// detectDestructive inspects CLI args for destructive issue commands.
+// Returns the operation details and true if the command is destructive and
+// should be intercepted. The daemon always intercepts — --yes is ignored
+// when the daemon is running; confirmation must come from the TUI.
+func detectDestructive(args []string) (destructiveOp, bool) {
+	// Strip flags (e.g. --safe, --yes) to find the tracker subcommand.
+	cleaned := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--yes" || a == "--safe" {
+			continue
+		}
+		cleaned = append(cleaned, a)
+	}
+
+	// Pattern: <tracker> issue delete <KEY>
+	//          <tracker> issue edit <KEY> ...
+	if len(cleaned) < 4 {
+		return destructiveOp{}, false
+	}
+
+	// Find "issue" subcommand — it may not be at index 1 if --safe was prepended.
+	trackerKind := ""
+	issueIdx := -1
+	for i, a := range cleaned {
+		if a == "issue" || a == "issues" {
+			issueIdx = i
+			break
+		}
+		// Skip flags.
+		if !strings.HasPrefix(a, "-") {
+			trackerKind = a
+		}
+	}
+	if issueIdx < 0 || issueIdx+2 >= len(cleaned) {
+		return destructiveOp{}, false
+	}
+
+	verb := cleaned[issueIdx+1]
+	key := cleaned[issueIdx+2]
+
+	switch verb {
+	case "delete":
+		return destructiveOp{Operation: "DeleteIssue", Tracker: trackerKind, Key: key}, true
+	case "edit":
+		return destructiveOp{Operation: "EditIssue", Tracker: trackerKind, Key: key}, true
+	default:
+		return destructiveOp{}, false
+	}
+}
+
+// handleDestructiveConfirm implements the two-line confirmation protocol for
+// destructive operations. It pauses the connection, stores a pending
+// confirmation for the TUI, and waits for a decision or timeout.
+func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destructiveOp, projectDir string) {
+	id := fmt.Sprintf("%s-%s-%d", op.Tracker, op.Key, time.Now().UnixNano())
+	prompt := fmt.Sprintf("%s %s?", op.Operation, op.Key)
+
+	pc := &PendingConfirmation{
+		ID:        id,
+		Operation: op.Operation,
+		Tracker:   op.Tracker,
+		Key:       op.Key,
+		Prompt:    prompt,
+		ClientPID: req.ClientPID,
+		CreatedAt: time.Now(),
+		Decision:  make(chan bool, 1),
+	}
+
+	s.PendingConfirms.Add(pc)
+	s.Logger.Info().Str("id", id).Str("prompt", prompt).Msg("destructive operation awaiting confirmation")
+
+	// Line 1: tell the client to wait.
+	enc := json.NewEncoder(conn)
+	resp1 := Response{
+		Stderr:        "", // client prints its own "Waiting for confirmation" message
+		AwaitConfirm:  true,
+		ConfirmID:     id,
+		ConfirmPrompt: prompt,
+	}
+	if err := enc.Encode(resp1); err != nil {
+		s.Logger.Warn().Err(err).Msg("failed to write confirm line 1")
+		return
+	}
+
+	// Wait for TUI decision or timeout.
+	var approved bool
+	select {
+	case approved = <-pc.Decision:
+	case <-time.After(confirmTimeout):
+		s.Logger.Warn().Str("id", id).Msg("destructive confirmation timed out")
+		// Remove from store if still present (Cleanup may have already done it).
+		_ = s.PendingConfirms.Resolve(id, false)
+		approved = false
+	}
+
+	if !approved {
+		resp2 := Response{Stderr: "Operation aborted\n", ExitCode: 1}
+		_ = enc.Encode(resp2)
+		return
+	}
+
+	s.Logger.Info().Str("id", id).Msg("destructive operation approved, executing")
+
+	// Execute the original command.
+	s.envMu.Lock()
+	origEnv := applyEnv(req.Env)
+	prevProjectDir, hadProjectDir := os.LookupEnv("HUMAN_PROJECT_DIR")
+	if projectDir != "." {
+		_ = os.Setenv("HUMAN_PROJECT_DIR", projectDir)
+	}
+	defer func() {
+		if hadProjectDir {
+			_ = os.Setenv("HUMAN_PROJECT_DIR", prevProjectDir)
+		} else {
+			_ = os.Unsetenv("HUMAN_PROJECT_DIR")
+		}
+		restoreEnv(origEnv)
+		s.envMu.Unlock()
+	}()
+
+	// Inject --yes so the Cobra command doesn't try to prompt again.
+	execArgs := append(req.Args, "--yes")
+
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd := s.CmdFactory()
+	cmd.SetArgs(execArgs)
+	cmd.SetOut(&stdoutBuf)
+	cmd.SetErr(&stderrBuf)
+
+	exitCode := 0
+	if err := cmd.Execute(); err != nil {
+		exitCode = 1
+	}
+
+	resp2 := Response{
+		Stdout:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
+		ExitCode: exitCode,
+	}
+	_ = enc.Encode(resp2)
+}
+
+// handlePendingConfirms returns the current pending confirmations as JSON.
+func (s *Server) handlePendingConfirms(conn net.Conn) {
+	var out string
+	if s.PendingConfirms != nil {
+		snap := s.PendingConfirms.Snapshot()
+		data, err := json.Marshal(snap)
+		if err != nil {
+			s.writeError(conn, err.Error(), 1)
+			return
+		}
+		out = string(data) + "\n"
+	} else {
+		out = "[]\n"
+	}
+	resp := Response{Stdout: out}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleConfirmOp resolves a pending confirmation with the given decision.
+// Expected args: [ID, "yes"|"no"].
+func (s *Server) handleConfirmOp(conn net.Conn, args []string) {
+	if len(args) < 2 {
+		s.writeError(conn, "usage: confirm-op ID yes|no", 1)
+		return
+	}
+	id := args[0]
+	approved := args[1] == "yes"
+
+	if s.PendingConfirms == nil {
+		s.writeError(conn, "confirmation store not available", 1)
+		return
+	}
+	if err := s.PendingConfirms.Resolve(id, approved); err != nil {
+		s.writeError(conn, err.Error(), 1)
+		return
+	}
+
+	resp := Response{Stdout: "ok\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
 }
