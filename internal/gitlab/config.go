@@ -32,8 +32,8 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 	EnvPrefix:  "GITLAB_",
 	DefaultURL: "https://gitlab.com",
 	EnvFields: []config.EnvField[Config]{
-		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
-		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }, Get: func(c Config) string { return c.URL }},
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }, Get: func(c Config) string { return c.Token }},
 	},
 	GetName: func(c Config) string { return c.Name },
 	SetURL:  func(c *Config, v string) { c.URL = v },
@@ -65,5 +65,14 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 func LoadInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
 	spec := instanceSpec
 	spec.Lookup = lookup
+	return config.LoadInstances(dir, spec)
+}
+
+// LoadInstancesWithResolver is like LoadInstances but uses a custom env lookup
+// and a vault secret resolver for 1pw:// references.
+func LoadInstancesWithResolver(dir string, lookup config.EnvLookup, resolver config.SecretResolveFunc) ([]tracker.Instance, error) {
+	spec := instanceSpec
+	spec.Lookup = lookup
+	spec.SecretResolver = resolver
 	return config.LoadInstances(dir, spec)
 }

@@ -201,8 +201,18 @@ func (c *Client) displayName() string {
 // body. The context args are passed to errors.WrapWithDetails on decode failure.
 func DecodeJSON(resp *http.Response, dest interface{}, contextArgs ...interface{}) error {
 	defer func() { _ = resp.Body.Close() }()
-	if err := json.NewDecoder(resp.Body).Decode(dest); err != nil {
-		return errors.WrapWithDetails(err, "decoding response", contextArgs...)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return errors.WrapWithDetails(err, "reading response body", contextArgs...)
+	}
+	if err := json.Unmarshal(body, dest); err != nil {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return errors.WithDetails(
+			fmt.Sprintf("decoding response: %s (body: %s)", err, snippet),
+			contextArgs...)
 	}
 	return nil
 }

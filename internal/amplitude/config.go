@@ -38,9 +38,9 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 	EnvPrefix:  "AMPLITUDE_",
 	DefaultURL: "https://amplitude.com",
 	EnvFields: []config.EnvField[Config]{
-		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
-		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }},
-		{Suffix: "SECRET", Set: func(c *Config, v string) { c.Secret = v }},
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }, Get: func(c Config) string { return c.URL }},
+		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }, Get: func(c Config) string { return c.Key }},
+		{Suffix: "SECRET", Set: func(c *Config, v string) { c.Secret = v }, Get: func(c Config) string { return c.Secret }},
 	},
 	GetName: func(c Config) string { return c.Name },
 	SetURL:  func(c *Config, v string) { c.URL = v },
@@ -62,4 +62,12 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 // and returns ready-to-use Amplitude instances.
 func LoadInstances(dir string) ([]Instance, error) {
 	return config.LoadInstances(dir, instanceSpec)
+}
+
+// LoadInstancesWithResolver is like LoadInstances but uses a vault secret
+// resolver for 1pw:// references.
+func LoadInstancesWithResolver(dir string, resolver config.SecretResolveFunc) ([]Instance, error) {
+	spec := instanceSpec
+	spec.SecretResolver = resolver
+	return config.LoadInstances(dir, spec)
 }

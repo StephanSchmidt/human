@@ -37,8 +37,8 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 	EnvPrefix:  "NOTION_",
 	DefaultURL: "https://api.notion.com",
 	EnvFields: []config.EnvField[Config]{
-		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
-		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }, Get: func(c Config) string { return c.URL }},
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }, Get: func(c Config) string { return c.Token }},
 	},
 	GetName: func(c Config) string { return c.Name },
 	SetURL:  func(c *Config, v string) { c.URL = v },
@@ -60,4 +60,12 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 // and returns ready-to-use Notion instances.
 func LoadInstances(dir string) ([]Instance, error) {
 	return config.LoadInstances(dir, instanceSpec)
+}
+
+// LoadInstancesWithResolver is like LoadInstances but uses a vault secret
+// resolver for 1pw:// references.
+func LoadInstancesWithResolver(dir string, resolver config.SecretResolveFunc) ([]Instance, error) {
+	spec := instanceSpec
+	spec.SecretResolver = resolver
+	return config.LoadInstances(dir, spec)
 }

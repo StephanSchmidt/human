@@ -32,9 +32,9 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 	Section:   "jiras",
 	EnvPrefix: "JIRA_",
 	EnvFields: []config.EnvField[Config]{
-		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }},
-		{Suffix: "USER", Set: func(c *Config, v string) { c.User = v }},
-		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }},
+		{Suffix: "URL", Set: func(c *Config, v string) { c.URL = v }, Get: func(c Config) string { return c.URL }},
+		{Suffix: "USER", Set: func(c *Config, v string) { c.User = v }, Get: func(c Config) string { return c.User }},
+		{Suffix: "KEY", Set: func(c *Config, v string) { c.Key = v }, Get: func(c Config) string { return c.Key }},
 	},
 	GetName: func(c Config) string { return c.Name },
 	SetURL:  func(c *Config, v string) { c.URL = v },
@@ -67,5 +67,14 @@ func LoadInstances(dir string) ([]tracker.Instance, error) {
 func LoadInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
 	spec := instanceSpec
 	spec.Lookup = lookup
+	return config.LoadInstances(dir, spec)
+}
+
+// LoadInstancesWithResolver is like LoadInstances but uses a custom env lookup
+// and a vault secret resolver for 1pw:// references.
+func LoadInstancesWithResolver(dir string, lookup config.EnvLookup, resolver config.SecretResolveFunc) ([]tracker.Instance, error) {
+	spec := instanceSpec
+	spec.Lookup = lookup
+	spec.SecretResolver = resolver
 	return config.LoadInstances(dir, spec)
 }

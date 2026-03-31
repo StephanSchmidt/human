@@ -10,12 +10,17 @@ import (
 // matching the signature of os.LookupEnv.
 type EnvLookup func(key string) (string, bool)
 
+// SecretResolveFunc resolves a vault reference (e.g. "1pw://vault/item/field")
+// to its plaintext value. Non-references are returned unchanged.
+type SecretResolveFunc func(ref string) (string, error)
+
 // EnvField maps a config struct field to its environment variable suffix.
 // For example, {Suffix: "TOKEN", Set: func(c *MyConfig, v string) { c.Token = v }}
 // will check for PROVIDER_TOKEN (global) and PROVIDER_NAME_TOKEN (per-instance).
 type EnvField[C any] struct {
 	Suffix string
 	Set    func(c *C, v string)
+	Get    func(c C) string // optional: read the current value (needed for vault resolution)
 }
 
 // ApplyEnvOverrides applies environment variable overrides to a config struct.
@@ -80,6 +85,11 @@ type InstanceSpec[C any, I any] struct {
 	// Build creates an instance from a config entry. Return (zero, false) to skip
 	// the entry (e.g. missing required credentials).
 	Build func(C) (I, bool)
+
+	// SecretResolver resolves vault references in config field values.
+	// When nil, no vault resolution is performed and values are used as-is.
+	// Set this to vault.Resolver.Resolve to enable 1pw:// references.
+	SecretResolver SecretResolveFunc
 }
 
 // LoadInstances reads configs from a .humanconfig file, applies env overrides,
@@ -101,6 +111,13 @@ func LoadInstances[C any, I any](dir string, spec InstanceSpec[C, I]) ([]I, erro
 
 		ApplyEnvOverrides(&cfg, spec.GetName(cfg), spec.EnvPrefix, spec.EnvFields, spec.Lookup)
 
+		// Resolve vault references in config fields (e.g. 1pw://...).
+		if spec.SecretResolver != nil {
+			if err := resolveSecrets(&cfg, spec.EnvFields, spec.SecretResolver); err != nil {
+				return nil, err
+			}
+		}
+
 		inst, ok := spec.Build(cfg)
 		if !ok {
 			continue
@@ -108,4 +125,26 @@ func LoadInstances[C any, I any](dir string, spec InstanceSpec[C, I]) ([]I, erro
 		instances = append(instances, inst)
 	}
 	return instances, nil
+}
+
+// resolveSecrets iterates over EnvFields that have a Get function and resolves
+// vault references through the provided resolver. Fields without Get are skipped.
+func resolveSecrets[C any](cfg *C, fields []EnvField[C], resolve SecretResolveFunc) error {
+	for _, f := range fields {
+		if f.Get == nil {
+			continue
+		}
+		val := f.Get(*cfg)
+		if val == "" {
+			continue
+		}
+		resolved, err := resolve(val)
+		if err != nil {
+			return err
+		}
+		if resolved != val {
+			f.Set(cfg, resolved)
+		}
+	}
+	return nil
 }

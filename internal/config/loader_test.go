@@ -22,8 +22,8 @@ type testInstance struct {
 }
 
 var testFields = []EnvField[testConfig]{
-	{Suffix: "URL", Set: func(c *testConfig, v string) { c.URL = v }},
-	{Suffix: "TOKEN", Set: func(c *testConfig, v string) { c.Token = v }},
+	{Suffix: "URL", Set: func(c *testConfig, v string) { c.URL = v }, Get: func(c testConfig) string { return c.URL }},
+	{Suffix: "TOKEN", Set: func(c *testConfig, v string) { c.Token = v }, Get: func(c testConfig) string { return c.Token }},
 }
 
 func TestApplyEnvOverrides_instanceAndGlobal(t *testing.T) {
@@ -290,4 +290,89 @@ func TestLoadInstances_lookupOverridesOsEnv(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
 	assert.Equal(t, "lookup-tok", instances[0].Token)
+}
+
+func TestLoadInstances_secretResolver(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n    token: 1pw://vault/item/field\n")
+	unsetTestEnv(t)
+
+	resolver := func(ref string) (string, error) {
+		if ref == "1pw://vault/item/field" {
+			return "resolved-secret", nil
+		}
+		return ref, nil
+	}
+
+	spec := testSpec("")
+	spec.SecretResolver = resolver
+
+	instances, err := LoadInstances(dir, spec)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, "resolved-secret", instances[0].Token)
+}
+
+func TestLoadInstances_secretResolverError(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n    token: 1pw://vault/item/field\n")
+	unsetTestEnv(t)
+
+	resolver := func(ref string) (string, error) {
+		return "", assert.AnError
+	}
+
+	spec := testSpec("")
+	spec.SecretResolver = resolver
+
+	_, err := LoadInstances(dir, spec)
+	require.Error(t, err)
+}
+
+func TestLoadInstances_secretResolverNil(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n    token: 1pw://vault/item/field\n")
+	unsetTestEnv(t)
+
+	// No resolver — vault refs stay as literal strings.
+	spec := testSpec("")
+	instances, err := LoadInstances(dir, spec)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, "1pw://vault/item/field", instances[0].Token)
+}
+
+func TestLoadInstances_secretResolverPlainValueUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "tests:\n  - name: work\n    url: https://example.com\n    token: plain-tok\n")
+	unsetTestEnv(t)
+
+	calls := 0
+	resolver := func(ref string) (string, error) {
+		calls++
+		return ref, nil // pass-through
+	}
+
+	spec := testSpec("")
+	spec.SecretResolver = resolver
+
+	instances, err := LoadInstances(dir, spec)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+	assert.Equal(t, "plain-tok", instances[0].Token)
+	assert.Equal(t, 2, calls) // called for both URL and Token
+}
+
+func TestResolveSecrets_fieldsWithoutGet(t *testing.T) {
+	// Fields without Get are silently skipped.
+	fieldsNoGet := []EnvField[testConfig]{
+		{Suffix: "TOKEN", Set: func(c *testConfig, v string) { c.Token = v }},
+	}
+
+	cfg := testConfig{Token: "1pw://vault/item/field"}
+	err := resolveSecrets(&cfg, fieldsNoGet, func(ref string) (string, error) {
+		return "should-not-be-called", nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "1pw://vault/item/field", cfg.Token) // unchanged
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/azuredevops"
+	"github.com/StephanSchmidt/human/internal/clickup"
 	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/github"
 	"github.com/StephanSchmidt/human/internal/gitlab"
@@ -16,42 +17,42 @@ import (
 	"github.com/StephanSchmidt/human/internal/notion"
 	"github.com/StephanSchmidt/human/internal/shortcut"
 	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/vault"
 )
 
-// instanceLoader loads tracker instances from provider-specific config in dir.
-type instanceLoader func(dir string) ([]tracker.Instance, error)
+// instanceLoaderWithResolver loads tracker instances with a custom env lookup
+// and a vault secret resolver.
+type instanceLoaderWithResolver func(dir string, lookup config.EnvLookup, resolver config.SecretResolveFunc) ([]tracker.Instance, error)
 
-// instanceLoaderWithLookup loads tracker instances with a custom env lookup.
-type instanceLoaderWithLookup func(dir string, lookup config.EnvLookup) ([]tracker.Instance, error)
-
-// allLoaders lists every provider's instance loader in registration order.
-var allLoaders = []instanceLoader{
-	jira.LoadInstances,
-	github.LoadInstances,
-	gitlab.LoadInstances,
-	linear.LoadInstances,
-	azuredevops.LoadInstances,
-	shortcut.LoadInstances,
-}
-
-// allLoadersWithLookup lists every provider's lookup-aware instance loader.
-var allLoadersWithLookup = []instanceLoaderWithLookup{
-	jira.LoadInstancesWithLookup,
-	github.LoadInstancesWithLookup,
-	gitlab.LoadInstancesWithLookup,
-	linear.LoadInstancesWithLookup,
-	azuredevops.LoadInstancesWithLookup,
-	shortcut.LoadInstancesWithLookup,
+// allLoadersWithResolver lists every provider's resolver-aware instance loader.
+var allLoadersWithResolver = []instanceLoaderWithResolver{
+	jira.LoadInstancesWithResolver,
+	github.LoadInstancesWithResolver,
+	gitlab.LoadInstancesWithResolver,
+	linear.LoadInstancesWithResolver,
+	azuredevops.LoadInstancesWithResolver,
+	shortcut.LoadInstancesWithResolver,
+	clickup.LoadInstancesWithResolver,
 }
 
 // LoadAllInstances collects tracker instances from all provider configs.
 // The dir parameter accepts config.DirProject (resolved via HUMAN_PROJECT_DIR
 // in daemon context) or config.DirCwd (".") for direct CLI usage.
+// If a vault section is present in .humanconfig, secret references (e.g. 1pw://)
+// are resolved automatically.
 func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 	dir = config.ResolveDir(dir)
+
+	// Auto-detect vault config for the direct CLI path.
+	resolver := vault.NewResolverFromConfig(vault.ReadConfig(dir))
+	var resolveFunc config.SecretResolveFunc
+	if resolver != nil {
+		resolveFunc = resolver.Resolve
+	}
+
 	var all []tracker.Instance
-	for _, load := range allLoaders {
-		instances, err := load(dir)
+	for _, load := range allLoadersWithResolver {
+		instances, err := load(dir, nil, resolveFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -60,13 +61,18 @@ func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 	return all, nil
 }
 
-// LoadAllInstancesWithLookup collects tracker instances using a custom env
-// lookup function. This enables per-project token scoping in the daemon.
-func LoadAllInstancesWithLookup(dir string, lookup config.EnvLookup) ([]tracker.Instance, error) {
+// LoadAllInstancesWithResolver collects tracker instances using a custom env
+// lookup function and vault secret resolver. This enables both per-project
+// token scoping and 1pw:// secret references in .humanconfig.
+func LoadAllInstancesWithResolver(dir string, lookup config.EnvLookup, resolver *vault.Resolver) ([]tracker.Instance, error) {
 	dir = config.ResolveDir(dir)
+	var resolveFunc config.SecretResolveFunc
+	if resolver != nil {
+		resolveFunc = resolver.Resolve
+	}
 	var all []tracker.Instance
-	for _, load := range allLoadersWithLookup {
-		instances, err := load(dir, lookup)
+	for _, load := range allLoadersWithResolver {
+		instances, err := load(dir, lookup, resolveFunc)
 		if err != nil {
 			return nil, err
 		}
@@ -83,85 +89,79 @@ func InstanceFromFlags(cmd *cobra.Command) *tracker.Instance {
 		return v
 	}
 
-	jiraURL := getFlag("jira-url")
-	jiraUser := getFlag("jira-user")
-	jiraKey := getFlag("jira-key")
-	if jiraURL != "" && jiraUser != "" && jiraKey != "" {
-		return &tracker.Instance{
-			Kind:     "jira",
-			URL:      jiraURL,
-			User:     jiraUser,
-			Provider: jira.New(jiraURL, jiraUser, jiraKey),
-		}
+	if inst := instanceFromJiraFlags(getFlag); inst != nil {
+		return inst
+	}
+	if inst := instanceFromAzureFlags(getFlag); inst != nil {
+		return inst
 	}
 
-	githubToken := getFlag("github-token")
-	if githubToken != "" {
-		url := getFlag("github-url")
-		if url == "" {
-			url = "https://api.github.com"
-		}
-		return &tracker.Instance{
-			Kind:     "github",
-			URL:      url,
-			Provider: github.New(url, githubToken),
-		}
+	// Simple token-based providers: token flag, url flag, default URL, kind, constructor.
+	type simpleProvider struct {
+		tokenFlag  string
+		urlFlag    string
+		defaultURL string
+		kind       string
+		newClient  func(url, token string) tracker.Provider
 	}
-
-	gitlabToken := getFlag("gitlab-token")
-	if gitlabToken != "" {
-		url := getFlag("gitlab-url")
-		if url == "" {
-			url = "https://gitlab.com"
-		}
-		return &tracker.Instance{
-			Kind:     "gitlab",
-			URL:      url,
-			Provider: gitlab.New(url, gitlabToken),
-		}
+	simpleProviders := []simpleProvider{
+		{"github-token", "github-url", "https://api.github.com", "github", func(u, t string) tracker.Provider { return github.New(u, t) }},
+		{"gitlab-token", "gitlab-url", "https://gitlab.com", "gitlab", func(u, t string) tracker.Provider { return gitlab.New(u, t) }},
+		{"linear-token", "linear-url", "https://api.linear.app", "linear", func(u, t string) tracker.Provider { return linear.New(u, t) }},
+		{"shortcut-token", "shortcut-url", "https://api.app.shortcut.com", "shortcut", func(u, t string) tracker.Provider { return shortcut.New(u, t) }},
+		{"clickup-token", "clickup-url", "https://api.clickup.com", "clickup", func(u, t string) tracker.Provider { return clickup.New(u, t, "") }},
 	}
-
-	linearToken := getFlag("linear-token")
-	if linearToken != "" {
-		url := getFlag("linear-url")
+	for _, sp := range simpleProviders {
+		token := getFlag(sp.tokenFlag)
+		if token == "" {
+			continue
+		}
+		url := getFlag(sp.urlFlag)
 		if url == "" {
-			url = "https://api.linear.app"
+			url = sp.defaultURL
 		}
 		return &tracker.Instance{
-			Kind:     "linear",
+			Kind:     sp.kind,
 			URL:      url,
-			Provider: linear.New(url, linearToken),
-		}
-	}
-
-	azureToken := getFlag("azure-token")
-	azureOrg := getFlag("azure-org")
-	if azureToken != "" && azureOrg != "" {
-		url := getFlag("azure-url")
-		if url == "" {
-			url = "https://dev.azure.com"
-		}
-		return &tracker.Instance{
-			Kind:     "azuredevops",
-			URL:      url,
-			Provider: azuredevops.New(url, azureOrg, azureToken),
-		}
-	}
-
-	shortcutToken := getFlag("shortcut-token")
-	if shortcutToken != "" {
-		url := getFlag("shortcut-url")
-		if url == "" {
-			url = "https://api.app.shortcut.com"
-		}
-		return &tracker.Instance{
-			Kind:     "shortcut",
-			URL:      url,
-			Provider: shortcut.New(url, shortcutToken),
+			Provider: sp.newClient(url, token),
 		}
 	}
 
 	return nil
+}
+
+// instanceFromJiraFlags builds a Jira instance from flags, or returns nil.
+func instanceFromJiraFlags(getFlag func(string) string) *tracker.Instance {
+	jiraURL := getFlag("jira-url")
+	jiraUser := getFlag("jira-user")
+	jiraKey := getFlag("jira-key")
+	if jiraURL == "" || jiraUser == "" || jiraKey == "" {
+		return nil
+	}
+	return &tracker.Instance{
+		Kind:     "jira",
+		URL:      jiraURL,
+		User:     jiraUser,
+		Provider: jira.New(jiraURL, jiraUser, jiraKey),
+	}
+}
+
+// instanceFromAzureFlags builds an Azure DevOps instance from flags, or returns nil.
+func instanceFromAzureFlags(getFlag func(string) string) *tracker.Instance {
+	azureToken := getFlag("azure-token")
+	azureOrg := getFlag("azure-org")
+	if azureToken == "" || azureOrg == "" {
+		return nil
+	}
+	url := getFlag("azure-url")
+	if url == "" {
+		url = "https://dev.azure.com"
+	}
+	return &tracker.Instance{
+		Kind:     "azuredevops",
+		URL:      url,
+		Provider: azuredevops.New(url, azureOrg, azureToken),
+	}
 }
 
 // LoadNotionIndexInstances loads Notion instances and converts them

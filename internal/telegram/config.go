@@ -38,7 +38,7 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 	Section:   "telegrams",
 	EnvPrefix: "TELEGRAM_",
 	EnvFields: []config.EnvField[Config]{
-		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }},
+		{Suffix: "TOKEN", Set: func(c *Config, v string) { c.Token = v }, Get: func(c Config) string { return c.Token }},
 	},
 	GetName: func(c Config) string { return c.Name },
 	Build: func(cfg Config) (Instance, bool) {
@@ -59,4 +59,12 @@ var instanceSpec = config.InstanceSpec[Config, Instance]{
 // and returns ready-to-use Telegram instances.
 func LoadInstances(dir string) ([]Instance, error) {
 	return config.LoadInstances(dir, instanceSpec)
+}
+
+// LoadInstancesWithResolver is like LoadInstances but uses a vault secret
+// resolver for 1pw:// references.
+func LoadInstancesWithResolver(dir string, resolver config.SecretResolveFunc) ([]Instance, error) {
+	spec := instanceSpec
+	spec.SecretResolver = resolver
+	return config.LoadInstances(dir, spec)
 }

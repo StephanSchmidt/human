@@ -1,0 +1,52 @@
+package vault
+
+import (
+	"context"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/StephanSchmidt/human/errors"
+)
+
+// OpCLI resolves 1pw:// secret references by shelling out to the 1Password CLI.
+// This is the fallback for WSL2 where the Go SDK cannot reach the Windows
+// 1Password desktop app.
+type OpCLI struct {
+	// Binary is the op CLI binary name. Defaults to "op.exe" for WSL2.
+	Binary string
+
+	// runner overrides command execution for testing.
+	runner func(ctx context.Context, binary string, args ...string) ([]byte, error)
+}
+
+// NewOpCLI creates a 1Password CLI provider for WSL2.
+func NewOpCLI() *OpCLI {
+	return &OpCLI{Binary: "op.exe"}
+}
+
+// CanResolve reports whether ref is a 1Password reference (1pw:// prefix).
+func (o *OpCLI) CanResolve(ref string) bool {
+	return strings.HasPrefix(ref, secretRefPrefix)
+}
+
+// Resolve shells out to op.exe to retrieve the secret value for the given reference.
+// It translates the 1pw:// prefix to op:// before calling the CLI.
+func (o *OpCLI) Resolve(ref string) (string, error) {
+	sdkRef := sdkRefPrefix + strings.TrimPrefix(ref, secretRefPrefix)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var out []byte
+	var err error
+	if o.runner != nil {
+		out, err = o.runner(ctx, o.Binary, "read", sdkRef)
+	} else {
+		out, err = exec.CommandContext(ctx, o.Binary, "read", sdkRef).Output() // #nosec G204 -- binary is a static default, ref is from config
+	}
+	if err != nil {
+		return "", errors.WrapWithDetails(err, "resolving 1Password secret via CLI", "ref", ref)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
