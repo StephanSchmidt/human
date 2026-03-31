@@ -33,19 +33,15 @@ An attack chain is a sequence of steps an attacker takes, where each step uses t
 
 ## Process
 
-### 1. Read all reports
+### 1. Read candidates and surface map
 
 Read from `.human/security/`:
+- `.security-candidates.md` — all candidate findings from all iterations (with C-NNN IDs)
 - `.security-surface.md` — attack surface map with entry points and trust boundaries
-- `.security-injection.md` — injection findings
-- `.security-auth.md` — auth/authz findings
-- `.security-secrets.md` — secrets and crypto findings
-- `.security-deps.md` — dependency findings
-- `.security-infra.md` — infrastructure findings
 
 ### 2. Catalog all findings with their properties
 
-For each finding across all reports, extract:
+For each candidate finding, extract:
 - What it enables (data access, code execution, privilege escalation, information disclosure)
 - What it requires (authenticated, unauthenticated, specific role, specific input)
 - Where it operates (which endpoints, files, services)
@@ -108,12 +104,12 @@ Write to `.human/security/.security-chains.md`:
 **Impact**: <what the attacker achieves at the end>
 **Steps**:
 
-1. **<Step title>** (from <agent> finding #N)
+1. **<Step title>** (candidate C-NNN)
    - **Action**: <what the attacker does>
    - **Result**: <what the attacker gains>
    - **Evidence**: `file.go:42` — <brief code reference>
 
-2. **<Step title>** (from <agent> finding #M)
+2. **<Step title>** (candidate C-NNN)
    - **Action**: <how the attacker uses the previous step's output>
    - **Result**: <what the attacker gains>
    - **Evidence**: `other.go:15` — <brief code reference>

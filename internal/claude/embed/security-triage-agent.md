@@ -11,20 +11,16 @@ You are the quality gate for the security scanner. You read all scanning reports
 
 ## Process
 
-### 1. Read all reports
+### 1. Read candidates, chains, and context
 
 Read from `.human/security/`:
-- `.security-surface.md` — attack surface context
-- `.security-injection.md` — injection findings
-- `.security-auth.md` — auth/authz findings
-- `.security-secrets.md` — secrets and crypto findings
-- `.security-deps.md` — dependency findings
-- `.security-infra.md` — infrastructure findings
+- `.security-candidates.md` — all candidate findings from all iterations
 - `.security-chains.md` — attack chain analysis
+- `.security-surface.md` — attack surface context
 
 ### 2. Validate each finding
 
-For every finding in every scanning report:
+For every candidate finding:
 
 1. **Re-read the actual code** at the cited file and line number. This is mandatory.
 2. **Verify the line numbers** match the cited code. Scanning agents sometimes cite wrong lines.
@@ -75,6 +71,7 @@ Write the final report to `.human/security/security-<TIMESTAMP>.md`:
 **Codebase**: <project name from git remote or directory name>
 **Technologies**: <from surface map>
 **Entry points scanned**: N
+**Iterations**: <number of scanning iterations that ran>
 **Vulnerabilities found**: N (X critical, Y high, Z medium, W low)
 **Attack chains identified**: N
 
@@ -156,7 +153,7 @@ Write the final report to `.human/security/security-<TIMESTAMP>.md`:
 ### 6. Clean up intermediate files
 
 ```bash
-rm -f .human/security/.security-surface.md .human/security/.security-injection.md .human/security/.security-auth.md .human/security/.security-secrets.md .human/security/.security-deps.md .human/security/.security-infra.md .human/security/.security-chains.md
+rm -f .human/security/.security-surface.md .human/security/.security-candidates.md .human/security/.security-chains.md .human/security/.security-state.md .human/security/.security-injection-count .human/security/.security-auth-count .human/security/.security-secrets-count .human/security/.security-deps-count .human/security/.security-infra-count
 ```
 
 ## Principles
