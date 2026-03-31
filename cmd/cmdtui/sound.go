@@ -1,10 +1,10 @@
 package cmdtui
 
 import (
-	"os"
 	"os/exec"
 	"runtime"
-	"strings"
+
+	"github.com/StephanSchmidt/human/internal/platform"
 )
 
 // playNotificationSound plays a platform-appropriate notification sound
@@ -24,19 +24,11 @@ func notificationCommand() (string, []string) {
 	case "darwin":
 		return "afplay", []string{"/System/Library/Sounds/Glass.aiff"}
 	case "linux":
-		if isWSL() {
+		if platform.IsWSL() {
 			return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", "(New-Object System.Media.SoundPlayer 'C:\\Windows\\Media\\chimes.wav').PlaySync()"}
 		}
 		return "paplay", []string{"/usr/share/sounds/freedesktop/stereo/complete.oga"}
 	default:
 		return "", nil
 	}
-}
-
-func isWSL() bool {
-	data, err := os.ReadFile("/proc/version")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }

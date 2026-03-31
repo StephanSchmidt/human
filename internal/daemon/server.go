@@ -38,7 +38,8 @@ type Server struct {
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
 	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
-	IssueFetcher    func() ([]TrackerIssuesResult, error) // injected; fetches issues from configured trackers
+	IssueFetcher     func() ([]TrackerIssuesResult, error)    // injected; fetches issues from configured trackers
+	TrackerDiagnoser func(dir string) []tracker.TrackerStatus // injected; diagnoses tracker status with vault resolution
 	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
 	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
 
@@ -268,7 +269,12 @@ func (s *Server) handleHookSnapshot(conn net.Conn) {
 
 // handleTrackerDiagnose returns tracker credential status from the daemon's env.
 func (s *Server) handleTrackerDiagnose(conn net.Conn, projectDir string) {
-	statuses := tracker.DiagnoseTrackers(projectDir, config.UnmarshalSection, os.Getenv)
+	var statuses []tracker.TrackerStatus
+	if s.TrackerDiagnoser != nil {
+		statuses = s.TrackerDiagnoser(projectDir)
+	} else {
+		statuses = tracker.DiagnoseTrackers(projectDir, config.UnmarshalSection, os.Getenv)
+	}
 	data, err := json.Marshal(statuses)
 	if err != nil {
 		s.writeError(conn, err.Error(), 1)

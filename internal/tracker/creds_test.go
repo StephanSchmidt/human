@@ -212,6 +212,31 @@ func TestDiagnoseTrackers_globalEnvOverride(t *testing.T) {
 	assert.True(t, found.Working)
 }
 
+func TestDiagnoseTrackers_vaultRef(t *testing.T) {
+	unmarshal := func(_, section string, target any) error {
+		if section == "linears" {
+			entries := target.(*[]diagnoseEntry)
+			*entries = []diagnoseEntry{{Name: "work", Token: "1pw://Private/Linear Token/notesPlain"}}
+		}
+		return nil
+	}
+	getenv := func(_ string) string { return "" }
+
+	statuses := DiagnoseTrackers(".", unmarshal, getenv)
+
+	var found *TrackerStatus
+	for i := range statuses {
+		if statuses[i].Name == "work" && statuses[i].Kind == "linear" {
+			found = &statuses[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "expected linear/work in results")
+	assert.False(t, found.Working, "vault ref should not count as working")
+	assert.True(t, found.VaultRef, "should be flagged as vault ref")
+	assert.Empty(t, found.Missing, "no env vars missing — token is present as vault ref")
+}
+
 func TestDiagnoseTrackers_noConfig(t *testing.T) {
 	unmarshal := func(_, _ string, _ any) error { return nil }
 	getenv := func(_ string) string { return "" }

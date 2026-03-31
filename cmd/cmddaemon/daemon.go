@@ -20,6 +20,7 @@ import (
 
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/chrome"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/dispatch"
@@ -27,6 +28,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
 	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/vault"
 )
 
 const daemonChildEnv = "_HUMAN_DAEMON_CHILD"
@@ -129,22 +131,27 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 
 	logger := newDaemonLogger(debug)
 
+	// Initialize vault resolver from the first project's .humanconfig vault section.
+	// The resolver is session-scoped (one op read per ref per daemon lifetime).
+	vaultResolver := buildVaultResolver(projectRegistry, logger)
+
 	connTracker := daemon.NewConnectedTracker()
 
 	hookStore := daemon.NewHookEventStore()
 	confirmStore := daemon.NewPendingConfirmStore()
 
 	srv := &daemon.Server{
-		Addr:            addr,
-		Token:           token,
-		SafeMode:        safe,
-		CmdFactory:      cmdFactory,
-		Logger:          logger,
-		ConnectedPIDs:   connTracker,
-		HookEvents:      hookStore,
-		IssueFetcher:    fetchTrackerIssuesFunc(projectRegistry),
-		Projects:        projectRegistry,
-		PendingConfirms: confirmStore,
+		Addr:             addr,
+		Token:            token,
+		SafeMode:         safe,
+		CmdFactory:       cmdFactory,
+		Logger:           logger,
+		ConnectedPIDs:    connTracker,
+		HookEvents:       hookStore,
+		IssueFetcher:     fetchTrackerIssuesFunc(projectRegistry, vaultResolver),
+		TrackerDiagnoser: trackerDiagnoserFunc(projectRegistry, vaultResolver),
+		Projects:         projectRegistry,
+		PendingConfirms:  confirmStore,
 	}
 
 	// Start socket relay to accept Chrome native messaging
@@ -213,13 +220,13 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 
 	// Start Slack notifier (if configured).
-	slackNotifier, slackStatus := startSlackNotifier(logger)
+	slackNotifier, slackStatus := startSlackNotifier(logger, vaultResolver)
 	if slackStatus != "" {
 		_, _ = fmt.Fprintln(out, "Slack notifications:", slackStatus)
 	}
 
 	// Start Telegram dispatch loop (if configured).
-	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier)
+	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier, vaultResolver)
 	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
 
 	// Auto-upgrade lifecycle hooks in ~/.claude/settings.json.
@@ -470,7 +477,7 @@ func resolveHostIP() string {
 // startTelegramDispatcher starts the Telegram dispatch loop if a Telegram
 // instance is configured. It runs as a background goroutine and returns
 // a human-readable status string for the startup banner.
-func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNotifier dispatch.Notifier) string {
+func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNotifier dispatch.Notifier, resolver *vault.Resolver) string {
 	configs, cfgErr := telegram.LoadConfigs(".")
 	if cfgErr != nil {
 		logger.Warn().Err(cfgErr).Msg("failed to load Telegram config, dispatch disabled")
@@ -480,7 +487,13 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNo
 		return "not configured (add telegrams: to .humanconfig)"
 	}
 
-	instances, err := telegram.LoadInstances(".")
+	var instances []telegram.Instance
+	var err error
+	if resolver != nil {
+		instances, err = telegram.LoadInstancesWithResolver(".", resolver.Resolve)
+	} else {
+		instances, err = telegram.LoadInstances(".")
+	}
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to build Telegram instances")
 		return "error loading config"
@@ -526,7 +539,7 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNo
 
 // startSlackNotifier creates a Slack notifier if configured.
 // Returns (nil, "") when Slack is not configured (no error — it is optional).
-func startSlackNotifier(logger zerolog.Logger) (dispatch.Notifier, string) {
+func startSlackNotifier(logger zerolog.Logger, resolver *vault.Resolver) (dispatch.Notifier, string) {
 	configs, cfgErr := slack.LoadConfigs(".")
 	if cfgErr != nil {
 		logger.Warn().Err(cfgErr).Msg("failed to load Slack config, notifications disabled")
@@ -536,7 +549,13 @@ func startSlackNotifier(logger zerolog.Logger) (dispatch.Notifier, string) {
 		return nil, ""
 	}
 
-	instances, err := slack.LoadInstances(".")
+	var instances []slack.Instance
+	var err error
+	if resolver != nil {
+		instances, err = slack.LoadInstancesWithResolver(".", resolver.Resolve)
+	} else {
+		instances, err = slack.LoadInstances(".")
+	}
 	if err != nil {
 		logger.Warn().Err(err).Msg("failed to build Slack instances")
 		return nil, "error loading config"
@@ -692,6 +711,24 @@ func buildProjectRegistry(dirs []string) (*daemon.ProjectRegistry, []daemon.Proj
 	return reg, infos, nil
 }
 
+// buildVaultResolver reads the vault config from the first registered project
+// and creates a session-scoped vault resolver. Returns nil if vault is not
+// configured (graceful no-op — plain tokens continue to work).
+func buildVaultResolver(reg *daemon.ProjectRegistry, logger zerolog.Logger) *vault.Resolver {
+	for _, entry := range reg.Entries() {
+		cfg := vault.ReadConfig(entry.Dir)
+		if cfg == nil {
+			continue
+		}
+		resolver := vault.NewResolverFromConfig(cfg)
+		if resolver != nil {
+			logger.Info().Str("provider", cfg.Provider).Str("project", entry.Name).Msg("vault secret resolution enabled")
+			return resolver
+		}
+	}
+	return nil
+}
+
 // replaceHost replaces an empty or wildcard host in addr with the given host.
 // e.g. ":19285" → "192.168.1.5:19285", "0.0.0.0:19285" → "192.168.1.5:19285".
 func replaceHost(addr, host string) string {
@@ -706,12 +743,52 @@ func replaceHost(addr, host string) string {
 }
 
 // fetchTrackerIssuesFunc returns an IssueFetcher that loads tracker instances
-// from all registered project directories using per-project env scoping.
-func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry) func() ([]daemon.TrackerIssuesResult, error) {
+// from all registered project directories using per-project env scoping and
+// vault secret resolution.
+// trackerDiagnoserFunc returns a function that diagnoses tracker status by
+// actually loading instances through the vault resolver. Only trackers that
+// successfully load (credentials resolved and valid) are reported as working.
+func trackerDiagnoserFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolver) func(dir string) []tracker.TrackerStatus {
+	return func(dir string) []tracker.TrackerStatus {
+		// Get the config-level view (what's configured).
+		configured := tracker.DiagnoseTrackers(dir, config.UnmarshalSection, os.Getenv)
+
+		// Find the project entry for this dir to get env scoping.
+		entry, ok := reg.Resolve(dir)
+		if !ok {
+			return configured
+		}
+
+		// Actually load instances through vault resolution.
+		loaded, err := cmdutil.LoadAllInstancesWithResolver(entry.Dir, entry.EnvLookup(), resolver)
+		if err != nil {
+			// Vault or loading failed — mark all as not working.
+			for i := range configured {
+				configured[i].Working = false
+			}
+			return configured
+		}
+
+		// Build set of loaded instance keys.
+		loadedSet := make(map[string]bool) // "kind/name"
+		for _, inst := range loaded {
+			loadedSet[inst.Kind+"/"+inst.Name] = true
+		}
+
+		// Only mark as working if the instance actually loaded.
+		for i := range configured {
+			key := configured[i].Kind + "/" + configured[i].Name
+			configured[i].Working = loadedSet[key]
+		}
+		return configured
+	}
+}
+
+func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolver) func() ([]daemon.TrackerIssuesResult, error) {
 	return func() ([]daemon.TrackerIssuesResult, error) {
 		var results []daemon.TrackerIssuesResult
 		for _, entry := range reg.Entries() {
-			instances, err := cmdutil.LoadAllInstancesWithLookup(entry.Dir, entry.EnvLookup())
+			instances, err := cmdutil.LoadAllInstancesWithResolver(entry.Dir, entry.EnvLookup(), resolver)
 			if err != nil {
 				return nil, err
 			}

@@ -66,11 +66,12 @@ func CheckCredsEnv(spec CredSpec, getenv func(string) string) CredResult {
 
 // TrackerStatus describes a configured tracker entry and its credential state.
 type TrackerStatus struct {
-	Name    string   // config entry name, e.g. "work", "amazingcto"
-	Kind    string   // tracker kind, e.g. "linear", "jira"
-	Label   string   // human-readable name, e.g. "Linear", "Jira"
-	Working bool     // true when all required credentials are present
-	Missing []string // env var names for missing credentials (empty when Working)
+	Name     string   // config entry name, e.g. "work", "amazingcto"
+	Kind     string   // tracker kind, e.g. "linear", "jira"
+	Label    string   // human-readable name, e.g. "Linear", "Jira"
+	Working  bool     // true when all required credentials are present (and not vault refs)
+	VaultRef bool     // true when credentials are vault references (e.g. 1pw://) — unverified
+	Missing  []string // env var names for missing credentials (empty when Working)
 }
 
 // KindToSection maps tracker kinds to their .humanconfig YAML section names.
@@ -138,13 +139,14 @@ func DiagnoseTrackers(dir string, unmarshal func(dir, section string, target any
 		}
 
 		for _, entry := range entries {
-			missing := diagnoseMissing(spec, entry, getenv)
+			missing, vaultRef := diagnoseMissing(spec, entry, getenv)
 			result = append(result, TrackerStatus{
-				Name:    entry.Name,
-				Kind:    kind,
-				Label:   spec.Label,
-				Working: len(missing) == 0,
-				Missing: missing,
+				Name:     entry.Name,
+				Kind:     kind,
+				Label:    spec.Label,
+				Working:  len(missing) == 0 && !vaultRef,
+				VaultRef: vaultRef,
+				Missing:  missing,
 			})
 		}
 	}
@@ -159,10 +161,17 @@ func DiagnoseTrackers(dir string, unmarshal func(dir, section string, target any
 
 // diagnoseMissing returns env var names for credentials not provided by
 // the config file, per-instance env vars, or global env vars.
-func diagnoseMissing(spec CredSpec, entry diagnoseEntry, getenv func(string) string) []string {
+// The second return value is true if any credential is a vault reference
+// (e.g. 1pw://) that cannot be verified without vault resolution.
+func diagnoseMissing(spec CredSpec, entry diagnoseEntry, getenv func(string) string) ([]string, bool) {
 	var missing []string
+	vaultRef := false
 	for _, suffix := range spec.Required {
-		if entry.fieldValue(suffix) != "" {
+		val := entry.fieldValue(suffix)
+		if val != "" {
+			if strings.HasPrefix(val, "1pw://") {
+				vaultRef = true
+			}
 			continue
 		}
 		if entry.Name != "" {
@@ -177,7 +186,7 @@ func diagnoseMissing(spec CredSpec, entry diagnoseEntry, getenv func(string) str
 		}
 		missing = append(missing, spec.EnvPrefix+"_"+suffix)
 	}
-	return missing
+	return missing, vaultRef
 }
 
 // FormatMissingCreds returns a user-friendly message about which env vars to set.

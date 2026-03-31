@@ -96,9 +96,13 @@ func (s *servicesStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 		}
 	}
 	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, "Tip: Use a secret manager to inject tokens instead of hardcoding them.")
-	_, _ = fmt.Fprintln(w, "  1Password CLI (op) is free for personal use: https://1password.com/downloads/command-line")
-	_, _ = fmt.Fprintln(w, "  Example: export JIRA_WORK_TOKEN=$(op read 'op://Vault/Jira/token')")
+	_, _ = fmt.Fprintln(w, "Tip: Use vault references instead of hardcoding tokens.")
+	_, _ = fmt.Fprintln(w, "  Add to .humanconfig.yaml:")
+	_, _ = fmt.Fprintln(w, "    vault:")
+	_, _ = fmt.Fprintln(w, "      provider: 1password")
+	_, _ = fmt.Fprintln(w, "  Then use 1pw:// references for token fields:")
+	_, _ = fmt.Fprintln(w, "    token: 1pw://Vault/Jira/token")
+	_, _ = fmt.Fprintln(w, "  Set OP_SERVICE_ACCOUNT_TOKEN for authentication.")
 
 	return nil, nil
 }
