@@ -21,6 +21,7 @@ human list --project=<PROJECT_KEY>
 
 # Provider-specific commands (replace <TRACKER> with jira, github, gitlab, linear, azuredevops, or shortcut)
 human <TRACKER> issue get <TICKET_KEY>
+human <TRACKER> issue comment list <TICKET_KEY>
 human <TRACKER> issues list --project=<PROJECT_KEY>
 human <TRACKER> issue create --project=<PROJECT_KEY> "Short title" --description "Detailed description in markdown"
 ```
@@ -35,15 +36,16 @@ human <TRACKER> issue create --project=<PROJECT_KEY> "Short title" --description
 ## Planning process
 
 1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured)
-2. **Explore** the codebase with Glob, Grep, and Read to understand affected areas
-3. **Identify** existing patterns, conventions, and related code
-4. **Produce** a structured plan with:
+2. **Fetch comments** using `human <tracker> issue comment list <key>` — comments often contain research findings, design decisions, constraints, and context that is not in the ticket description. Incorporate relevant information from comments into the plan.
+3. **Explore** the codebase with Glob, Grep, and Read to understand affected areas
+4. **Identify** existing patterns, conventions, and related code
+5. **Produce** a structured plan with:
    - **Context**: ticket summary, acceptance criteria
    - **Changes**: ordered list of files to create/modify with rationale
    - **Verification**: test commands, manual checks, edge cases
-5. **Verify references** that every file, function, and type referenced in the plan actually exists. Use Grep/Glob to confirm.
-6. **Write** the draft plan to `.human/plans/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the `.human/plans/` directory first with `mkdir -p .human/plans`.
-7. **Create ticket** (only if the prompt explicitly asks you to create a ticket): Create a Linear implementation ticket using `human <tracker> issue create --project=<PROJECT> "Short title" --description "$(cat .human/plans/<key>.md)"` — title must be a short one-line summary, all detail goes in `--description`. If the prompt does not mention creating a ticket, skip this step — the orchestrator will handle it after verification.
+6. **Verify references** that every file, function, and type referenced in the plan actually exists. Use Grep/Glob to confirm.
+7. **Write** the draft plan to `.human/plans/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the `.human/plans/` directory first with `mkdir -p .human/plans`.
+8. **Create ticket** (only if the prompt explicitly asks you to create a ticket): Create a Linear implementation ticket using `human <tracker> issue create --project=<PROJECT> "Short title" --description "$(cat .human/plans/<key>.md)"` — title must be a short one-line summary, all detail goes in `--description`. If the prompt does not mention creating a ticket, skip this step — the orchestrator will handle it after verification.
 
 ## Principles
 
