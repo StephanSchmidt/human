@@ -15,6 +15,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdamplitude"
 	"github.com/StephanSchmidt/human/cmd/cmdauto"
 	"github.com/StephanSchmidt/human/cmd/cmdbrowser"
+	"github.com/StephanSchmidt/human/cmd/cmdclickup"
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
 	"github.com/StephanSchmidt/human/cmd/cmdfigma"
 	"github.com/StephanSchmidt/human/cmd/cmdindex"
@@ -71,7 +72,7 @@ func newRootCmd() *cobra.Command {
 		Use:   "human",
 		Short: "Unified CLI for issue trackers and tools",
 		Long: `Unified CLI to list, read, create, delete, and comment on issues
-across Jira, GitHub, GitLab, Linear, Azure DevOps, and Shortcut.
+across Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut, and ClickUp.
 Search and read content from Notion workspaces. Browse Figma designs.
 Queries Amplitude product analytics. Reads Telegram bot messages.
 
@@ -148,6 +149,8 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 		{"azure-org", "AZURE_ORG", "Azure DevOps organization"},
 		{"shortcut-token", "SHORTCUT_TOKEN", "Shortcut API token"},
 		{"shortcut-url", "SHORTCUT_URL", "Shortcut API base URL"},
+		{"clickup-token", "CLICKUP_TOKEN", "ClickUp personal API token"},
+		{"clickup-url", "CLICKUP_URL", "ClickUp API base URL"},
 	}
 	for _, f := range credFlags {
 		pf.String(f.name, os.Getenv(f.env), f.help)
@@ -183,7 +186,7 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	rootCmd.AddCommand(autoStatusCmd)
 
 	// --- Provider commands (dynamic registration) ---
-	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}
+	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut", "clickup"}
 	for _, kind := range providers {
 		providerCmd := &cobra.Command{
 			Use:     kind,
@@ -192,6 +195,12 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 		}
 		for _, sub := range cmdprovider.BuildProviderCommands(kind, deps) {
 			providerCmd.AddCommand(sub)
+		}
+		// Add ClickUp-specific commands (hierarchy browsing, custom fields, members).
+		if kind == "clickup" {
+			for _, sub := range cmdclickup.BuildClickUpCommands(deps) {
+				providerCmd.AddCommand(sub)
+			}
 		}
 		rootCmd.AddCommand(providerCmd)
 	}

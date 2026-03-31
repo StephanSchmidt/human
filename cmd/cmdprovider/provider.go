@@ -78,7 +78,7 @@ func buildIssueGetCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 }
 
 func buildIssueCreateCmd(kind string, deps cmdutil.Deps) *cobra.Command {
-	var project, typ, description string
+	var project, typ, description, parent string
 
 	cmd := &cobra.Command{
 		Use:     "create TITLE",
@@ -91,13 +91,14 @@ func buildIssueCreateCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return RunCreateIssue(cmd.Context(), p, cmd.OutOrStdout(), project, typ, args[0], description)
+			return RunCreateIssue(cmd.Context(), p, cmd.OutOrStdout(), project, typ, args[0], description, parent)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", "", "Project key (Jira: KAN, GitHub: owner/repo, GitLab: group/project, Linear: ENG)")
 	_ = cmd.MarkFlagRequired("project")
 	cmd.Flags().StringVar(&typ, "type", "Task", "Issue type (Jira only, e.g. Task, Bug, Story)")
 	cmd.Flags().StringVar(&description, "description", "", "Issue description in markdown (separate from title)")
+	cmd.Flags().StringVar(&parent, "parent", "", "Parent task ID for creating subtasks (ClickUp)")
 	return cmd
 }
 
@@ -297,13 +298,15 @@ func RunGetIssue(ctx context.Context, p tracker.Provider, out io.Writer, key str
 	return nil
 }
 
-// RunCreateIssue creates a new issue.
-func RunCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, project, typ, title, description string) error {
+// RunCreateIssue creates a new issue. When parent is non-empty, the issue is
+// created as a subtask of the given parent key (ClickUp).
+func RunCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, project, typ, title, description, parent string) error {
 	issue, err := p.CreateIssue(ctx, &tracker.Issue{
 		Project:     project,
 		Type:        typ,
 		Title:       title,
 		Description: description,
+		ParentKey:   parent,
 	})
 	if err != nil {
 		return err

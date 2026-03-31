@@ -225,7 +225,7 @@ func TestRunCreateIssue_Success(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "New feature", "Details here")
+	err := RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "New feature", "Details here", "")
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "KAN-10")
 	assert.Contains(t, buf.String(), "New feature")
@@ -239,7 +239,7 @@ func TestRunCreateIssue_Error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "Title", "")
+	err := RunCreateIssue(context.Background(), p, &buf, "KAN", "Task", "Title", "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "create failed")
 }

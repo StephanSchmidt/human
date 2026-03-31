@@ -57,7 +57,7 @@ func TestResolveByKind_notFound(t *testing.T) {
 
 	_, err := ResolveByKind("github", instances, "")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no tracker of kind configured")
+	assert.Contains(t, err.Error(), "no github tracker found")
 }
 
 func TestResolveByKind_withName(t *testing.T) {

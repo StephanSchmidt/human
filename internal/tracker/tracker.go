@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -179,6 +180,8 @@ type Issue struct {
 	Description string    `json:"description"`                // markdown
 	URL         string    `json:"url,omitempty"`              // web URL for opening in browser
 	UpdatedAt   time.Time `json:"updated_at"`                 // last modification timestamp
+	ParentKey   string    `json:"parent_key,omitempty"`       // parent issue key (subtask support)
+	Labels      []string  `json:"labels,omitempty"`           // tags/labels on the issue
 }
 
 // Comment is a provider-agnostic comment representation.
@@ -316,7 +319,10 @@ func ResolveByKind(kind string, instances []Instance, name string) (*Instance, e
 		}
 	}
 	if len(filtered) == 0 {
-		return nil, errors.WithDetails("no tracker of kind configured", "kind", kind)
+		env := envHintForKind(kind)
+		return nil, errors.WithDetails(
+			fmt.Sprintf("no %s tracker found, set %s or add %ss: to .humanconfig", kind, env, kind),
+			"kind", kind)
 	}
 	if name != "" {
 		for i := range filtered {
@@ -327,6 +333,19 @@ func ResolveByKind(kind string, instances []Instance, name string) (*Instance, e
 		return nil, errors.WithDetails("tracker name not found for kind", "name", name, "kind", kind)
 	}
 	return &filtered[0], nil
+}
+
+// envHintForKind returns an example env var for the given tracker kind.
+func envHintForKind(kind string) string {
+	prefix := strings.ToUpper(kind)
+	if kind == "azuredevops" {
+		prefix = "AZURE"
+	}
+	suffix := "TOKEN"
+	if kind == "jira" {
+		suffix = "KEY"
+	}
+	return prefix + "_<NAME>_" + suffix
 }
 
 // resolveByName finds exactly one instance with the given name.
@@ -352,7 +371,7 @@ func resolveByName(name string, instances []Instance) (*Instance, error) {
 // If multiple kinds remain an error is returned asking the user to specify --tracker.
 func resolveAutoDetect(instances []Instance, keyHint string) (*Instance, error) {
 	if len(instances) == 0 {
-		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, gitlabs:, linears:, or shortcuts: to .humanconfig.yaml")
+		return nil, errors.WithDetails("no tracker configured, add jiras:, githubs:, gitlabs:, linears:, shortcuts:, or clickups: to .humanconfig.yaml")
 	}
 
 	// Try to narrow by key format.
