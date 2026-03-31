@@ -47,7 +47,7 @@
 - **`/human-plan` skill** (`.claude/skills/human-plan/SKILL.md`)
   - Accepts `<ticket-key>` argument
   - Delegates to the `human-planner` agent with prompt `Create an implementation plan for ticket <key>`
-  - Writes the plan to `.human/plans/<key>.md` (lowercased key)
+  - Embeds the plan directly in the engineering ticket description (no plan files)
 - **`/human-bug-plan` skill** (`.claude/skills/human-bug-plan/SKILL.md`)
   - Accepts `<ticket-key>` argument
   - Delegates to the `human-bug-analyzer` agent with prompt `Analyze bug ticket <key>`
@@ -69,8 +69,8 @@
     1. Fetch the ticket via `human <tracker> issue get <key>` (or `human get <key>` for single-tracker setups)
     2. Explore the codebase with Glob, Grep, and Read to understand affected areas
     3. Identify existing patterns, conventions, and related code
-    4. Produce a structured plan (context, ordered changes with rationale, verification steps)
-    5. Write the plan to `.human/plans/<key>.md` (lowercased key)
+    4. Produce a structured plan (context, ordered changes with exact signatures and step-by-step instructions, verification steps, test cases)
+    5. Return the plan as output (embedded in the engineering ticket description by the orchestrator)
 - **`human-bug-analyzer` agent** (`.claude/agents/human-bug-analyzer.md`)
   - Tools: Bash, Read, Grep, Glob, Write
   - Analysis process:

@@ -34,25 +34,42 @@ The daemon is auto-discovered via `~/.human/daemon.json`. Check with `human daem
 
 These tokens only need to be set **once on the host where the daemon runs**. They are NOT needed for individual CLI invocations when the daemon is running.
 
-Tracker API tokens are stored in 1Password. Use `op.exe` (Windows host) to retrieve them and set as env vars:
+## Preferred: Native vault provider (1Password)
+
+Add a `vault` section and use `1pw://` references directly in `.humanconfig.yaml`:
+
+```yaml
+vault:
+  provider: 1password
+  account: my-account    # 1Password account name (top-left in app sidebar)
+
+githubs:
+  - name: personal
+    token: 1pw://Development/GitHub PAT/token
+
+linears:
+  - name: work
+    token: 1pw://Development/Linear Token/token
+
+jiras:
+  - name: amazingcto
+    url: https://amazingcto.atlassian.net
+    user: alice@example.com
+    key: 1pw://Development/Jira API Key/token
+```
+
+Secrets are resolved via the 1Password desktop app integration. The 1Password app must be installed and running — it will prompt for biometric or master password authentication. Enable "Integrate with other apps" in 1Password Settings > Developer.
+
+## Alternative: Environment variables
+
+Tracker API tokens can also be injected via env vars (legacy approach):
 
 ```sh
-# Shortcut
 export SHORTCUT_HUMAN_TOKEN="$(op.exe item get 'Shortcut Token' --fields label=notesPlain)"
-
-# Linear
 export LINEAR_WORK_TOKEN="$(op.exe item get 'Linear Token' --fields label=notesPlain)"
-
-# Jira
 export JIRA_AMAZINGCTO_KEY="$(op.exe item get 'Jira API Key' --fields label=notesPlain)"
-
-# GitLab
 export GITLAB_HUMAN_TOKEN="$(op.exe item get 'Gitlab Token' --fields label=notesPlain)"
-
-# Azure DevOps
 export AZUREDEVOPS_GETHUMAN_TOKEN="$(op.exe item get 'Azure Token' --fields label=notesPlain)"
-
-# Telegram
 export TELEGRAM_BOT_TOKEN="$(op.exe item get 'Telegram Token' --fields label=notesPlain)"
 ```
 
@@ -62,6 +79,7 @@ The env var naming convention is `<TRACKER>_<CONFIG_NAME>_TOKEN` (or `_KEY` for 
 
 - `main.go` — CLI entry point
 - `internal/tracker/` — Provider-agnostic issue tracker interfaces (Lister, Getter, Creator, etc.)
+- `internal/vault/` — Pluggable vault secret resolution (1Password, extensible to Vault/AWS/etc.)
 - `internal/jira/` — Jira API client and types
 - `errors/` — Custom error handling (WithDetails)
 

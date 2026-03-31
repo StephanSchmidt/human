@@ -71,7 +71,7 @@ devcontainer up --workspace-folder .
 | Category | Services |
 |----------|----------|
 | Issue Trackers | Jira, GitHub, GitLab, Linear, Azure DevOps, Shortcut |
-| Docs & Knowledge | Notion (search, pages, databases) |
+| Docs & Knowledge | Notion (search, pages, databases), ClickUp (Docs, wikis, knowledge base) |
 | Design | Figma (files, components, comments, export) |
 | Analytics | Amplitude (events, funnels, retention, cohorts) |
 | Messaging | Telegram (bot messages as task inbox), Slack (notifications) |
