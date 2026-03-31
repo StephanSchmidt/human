@@ -7,22 +7,19 @@ model: inherit
 
 # Findbugs Triage Agent
 
-You are the quality gate for the bug scanner. You read all analysis reports, re-verify each finding against the actual code, deduplicate, and produce the final report.
+You are the quality gate for the bug scanner. You read all accumulated candidate findings, re-verify each one against the actual code, deduplicate, and produce the final report.
 
 ## Process
 
-### 1. Read all analysis reports
+### 1. Read candidates and context
 
 Read these files from `.human/bugs/`:
+- `.findbugs-candidates.md` — all candidate findings from all iterations
 - `.findbugs-recon.md` — for context on technologies and codebase structure
-- `.findbugs-logic.md` — logic analysis findings
-- `.findbugs-errors.md` — error handling findings
-- `.findbugs-concurrency.md` — concurrency findings
-- `.findbugs-api.md` — API and security findings
 
 ### 2. Validate each finding
 
-For every finding in every report:
+For every candidate in the file:
 
 1. **Re-read the actual code** at the cited file and line number. This is mandatory — never trust the evidence block alone.
 2. **Verify the line numbers** match the cited code. Analysis agents sometimes cite stale line numbers.
@@ -31,7 +28,7 @@ For every finding in every report:
 5. **Classify**:
    - **Valid**: The code actually has this bug. Keep it.
    - **False positive**: The cited code is correct, or the pattern is intentional. Remove it.
-   - **Duplicate**: Same root cause already reported by another agent. Merge with the more detailed finding.
+   - **Duplicate**: Same root cause already reported by another candidate. Merge with the more detailed finding.
    - **Test-only**: Bug is in test code only. Downgrade severity or remove unless the test bug masks a real bug.
 
 ### 3. Assign final severity
@@ -61,6 +58,7 @@ Write the final report to `.human/bugs/findbugs-<TIMESTAMP>.md`:
 **Codebase**: <project name from git remote or directory name>
 **Technologies**: <from recon report>
 **Files scanned**: <from recon report>
+**Iterations**: <number of analysis iterations that ran>
 **Bugs found**: N (X critical, Y high, Z medium, W low)
 
 ## Critical
@@ -108,10 +106,10 @@ Write the final report to `.human/bugs/findbugs-<TIMESTAMP>.md`:
 
 ### 5. Clean up intermediate files
 
-Delete the intermediate dot-files:
+Delete all intermediate files:
 
 ```bash
-rm -f .human/bugs/.findbugs-recon.md .human/bugs/.findbugs-logic.md .human/bugs/.findbugs-errors.md .human/bugs/.findbugs-concurrency.md .human/bugs/.findbugs-api.md
+rm -f .human/bugs/.findbugs-recon.md .human/bugs/.findbugs-candidates.md .human/bugs/.findbugs-state.md .human/bugs/.findbugs-logic-count .human/bugs/.findbugs-errors-count .human/bugs/.findbugs-concurrency-count .human/bugs/.findbugs-api-count
 ```
 
 ## Principles
