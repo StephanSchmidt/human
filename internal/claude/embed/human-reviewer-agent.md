@@ -32,12 +32,11 @@ human <TRACKER> issue comment list <TICKET_KEY>
 
 ## Review process
 
-1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured)
-2. **Load plan** from `.human/plans/<key>.md` if it exists — use it as additional context for what was intended
-3. **Diff** the current branch against the default branch: detect the default branch with `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'`, fall back to `main`. Run `git diff <default>...HEAD`. If on the default branch, fall back to `git diff` (unstaged changes).
-4. **Evaluate** the diff against each acceptance criterion from the ticket
-5. **Flag** missing criteria, unaddressed edge cases, and scope creep beyond the ticket
-6. **Write** the review to `.human/reviews/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the directory first with `mkdir -p .human/reviews`.
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured). The ticket description contains the implementation plan — use it as additional context for what was intended.
+2. **Diff** the current branch against the default branch: detect the default branch with `git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'`, fall back to `main`. Run `git diff <default>...HEAD`. If on the default branch, fall back to `git diff` (unstaged changes).
+3. **Evaluate** the diff against each acceptance criterion from the ticket
+4. **Flag** missing criteria, unaddressed edge cases, and scope creep beyond the ticket
+5. **Write** the review to `.human/reviews/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the directory first with `mkdir -p .human/reviews`.
 
 ## Principles
 

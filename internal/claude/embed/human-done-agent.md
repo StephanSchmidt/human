@@ -32,13 +32,12 @@ human <TRACKER> issue comment list <TICKET_KEY>
 
 ## Done process
 
-1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured)
-2. **Load plan** from `.human/plans/<key>.md` if it exists
-3. **Load readiness** from `.human/ready/<key>.md` if it exists — use it to cross-check that gaps identified during readiness were addressed
-4. **Run tests** — detect and run the project's test suite (e.g. `make test`, `npm test`, `go test ./...`, `pytest`). If no test runner is found, note it in the report.
-5. **Check** each acceptance criterion against the actual implementation using Grep, Glob, and Read
-6. **Evaluate** the Definition of Done checklist (see below)
-7. **Write** the result to `.human/done/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the directory first with `mkdir -p .human/done`.
+1. **Fetch** the ticket using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured). The ticket description contains the implementation plan — use it for plan task completion checks.
+2. **Load readiness** from `.human/ready/<key>.md` if it exists — use it to cross-check that gaps identified during readiness were addressed
+3. **Run tests** — detect and run the project's test suite (e.g. `make test`, `npm test`, `go test ./...`, `pytest`). If no test runner is found, note it in the report.
+4. **Check** each acceptance criterion against the actual implementation using Grep, Glob, and Read
+5. **Evaluate** the Definition of Done checklist (see below)
+6. **Write** the result to `.human/done/<key>.md` where `<key>` is the ticket key lowercased (e.g. `KAN-1` → `kan-1.md`). Create the directory first with `mkdir -p .human/done`.
 
 ## Definition of Done checklist
 

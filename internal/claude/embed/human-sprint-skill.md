@@ -92,25 +92,47 @@ Store the answers as `<ENG_TRACKER>` and `<ENG_PROJECT>`.
 
 ## Step 4 — Phase 2: Plan (creates engineering ticket)
 
-Delegate to the **human-planner** agent:
+### Step 4a: Draft
+
+Delegate to the **human-planner** agent to create the plan. The planner returns the plan as output (no files written):
 
 ```
-Task(subagent_type="human-planner", prompt="Create an implementation plan for the idea described in .human/ideation/<slug>.md. The PM ticket is <PM_TICKET_KEY> on <PM_TRACKER>. Create the engineering ticket on <ENG_TRACKER> project <ENG_PROJECT>. Reference the PM ticket in the engineering ticket description for traceability.")
+Task(subagent_type="human-planner", prompt="Create an implementation plan for the idea described in .human/ideation/<slug>.md. The PM ticket is <PM_TICKET_KEY> on <PM_TRACKER>. Return the complete plan as your output. Do not write any files or create any tickets.")
 ```
 
-The planner agent reads the ideation artifact, explores the codebase, writes the plan to `.human/plans/<key>.md`, and creates the engineering ticket.
+Capture the output as `<PLAN_CONTENT>`.
+
+### Step 4b: Verify (parallel)
+
+Launch both verification agents in a single message, passing the plan inline:
+
+```
+Task(subagent_type="plan-verify-code", prompt="Verify all code references in the following implementation plan against the actual codebase. Return your verification report as output. Do not write any files.\n\n---BEGIN PLAN---\n<PLAN_CONTENT>\n---END PLAN---")
+
+Task(subagent_type="plan-verify-docs", prompt="Verify all library, framework, and API assumptions in the following implementation plan against actual documentation and source. Return your verification report as output. Do not write any files.\n\n---BEGIN PLAN---\n<PLAN_CONTENT>\n---END PLAN---")
+```
+
+### Step 4c: Finalize and create ticket
+
+If verification found issues, fix `<PLAN_CONTENT>` accordingly. Then create the engineering ticket with the plan as the description:
+
+```bash
+human <ENG_TRACKER> issue create --project=<ENG_PROJECT> "Short title from plan" --description "$(cat <<'PLAN_EOF'
+<FINAL_PLAN_CONTENT>
+PLAN_EOF
+)"
+```
 
 Store the engineering ticket key as `<ENG_TICKET_KEY>`.
 
 **If `<pipeline_depth>` is "Tickets only":** Stop here. Tell the user:
 - PM ticket created: `<PM_TRACKER> #<PM_TICKET_KEY>`
 - Engineering ticket created: `<ENG_TRACKER> <ENG_TICKET_KEY>`
-- Plan written to `.human/plans/<key>.md`
 - Ideation record at `.human/ideation/<slug>.md`
 
 ## Step 5 — Mechanical decision gate
 
-Before executing, check the plan in `.human/plans/<key>.md` for architecture choices or trade-offs:
+Before executing, fetch the engineering ticket via `human get <ENG_TICKET_KEY>` and check for architecture choices or trade-offs in the plan:
 
 - **If the plan has no taste decisions** (only mechanical implementation steps): Proceed automatically to execution. Apply the decision principles above.
 - **If the plan contains trade-offs or architecture choices**: Present them to the user via `AskUserQuestion` and let the user decide before proceeding. Example: "The plan includes the following architecture choices that need your input: <list choices>. What is your preference for each?"
@@ -120,10 +142,10 @@ Before executing, check the plan in `.human/plans/<key>.md` for architecture cho
 Delegate to the **human-executor** agent:
 
 ```
-Task(subagent_type="human-executor", prompt="Execute the plan for ticket <ENG_TICKET_KEY>")
+Task(subagent_type="human-executor", prompt="Execute <ENG_TICKET_KEY> as a plan")
 ```
 
-The executor reads `.human/plans/<key>.md`, implements changes, and runs its own review checkpoint.
+The executor fetches the engineering ticket, reads the plan from the description, and implements it.
 
 **If `<pipeline_depth>` is "Plan + execute":** Stop here. Tell the user:
 - PM ticket: `<PM_TRACKER> #<PM_TICKET_KEY>`
@@ -161,6 +183,5 @@ Traceability:
 
 Artifacts:
 - Ideation:     .human/ideation/<slug>.md
-- Plan:         .human/plans/<key>.md
 - Review:       .human/reviews/<key>.md
 ```

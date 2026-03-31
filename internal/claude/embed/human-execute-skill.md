@@ -7,7 +7,7 @@ argument-hint: <ticket-key>
 Delegate to the **human-executor** agent using the Task tool:
 
 ```
-Task(subagent_type="human-executor", prompt="Execute the plan for ticket $ARGUMENTS")
+Task(subagent_type="human-executor", prompt="Execute $ARGUMENTS as a plan")
 ```
 
 After the agent finishes, tell the user what was done and whether the review checkpoint passed.
