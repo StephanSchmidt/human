@@ -606,7 +606,7 @@ func TestPipelineStage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind+"/"+tt.statusType, func(t *testing.T) {
-			got := pipelineStage(tt.kind, tt.status, tt.statusType)
+			got := pipelineStage(tt.kind, "", tt.status, tt.statusType)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -622,9 +622,13 @@ func TestPipelineStageStyle(t *testing.T) {
 }
 
 func TestPipelineName(t *testing.T) {
-	assert.Contains(t, pipelineName("shortcut"), "PM")
-	assert.Contains(t, pipelineName("linear"), "Eng")
-	assert.Contains(t, pipelineName("jira"), "jira")
+	// Inferred roles from kind.
+	assert.Contains(t, pipelineName("shortcut", ""), "PM")
+	assert.Contains(t, pipelineName("linear", ""), "Eng")
+	assert.Contains(t, pipelineName("jira", ""), "jira")
+	// Explicit roles override kind.
+	assert.Contains(t, pipelineName("jira", "pm"), "PM")
+	assert.Contains(t, pipelineName("github", "engineering"), "Eng")
 }
 
 // --- flattenIssues tests ---

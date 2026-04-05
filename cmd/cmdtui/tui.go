@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -33,6 +34,7 @@ const defaultWidth = 80
 type trackerIssues struct {
 	TrackerName string
 	TrackerKind string
+	TrackerRole string // "pm", "engineering", or empty
 	Project     string
 	Issues      []tracker.Issue
 	Err         error
@@ -170,6 +172,13 @@ type model struct {
 	confirmID       string                  // which pending op we're showing
 	confirmPrompt   string                  // e.g. "DeleteIssue KAN-1?"
 	confirmPIDs     map[int]bool            // PIDs of Claude instances with pending confirms
+
+	// Create ticket form overlay.
+	createActive  bool      // true when the create form is shown
+	createForm    *huh.Form // the huh form (implements tea.Model)
+	createTracker int       // selected tracker index (value bound to form)
+	createTitle   string    // bound to form
+	createDesc    string    // bound to form
 }
 
 func newModel(mon *monitor.Monitor) model {
@@ -198,6 +207,7 @@ type issuesResultMsg struct {
 
 type pendingConfirmsMsg  []daemon.PendingConfirm
 type confirmDecisionMsg  struct{ err error }
+type createResultMsg     struct{ key string; err error }
 
 // --- tea.Model ---
 
@@ -209,6 +219,11 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// When a destructive confirmation overlay is active, only handle y/n/Esc.
 	if m.confirmActive {
 		return m.handleConfirmKey(msg)
+	}
+
+	// When the create form is active, delegate all keys to it.
+	if m.createActive {
+		return m.handleCreateKey(msg)
 	}
 
 	switch msg.String() {
@@ -234,6 +249,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDispatch()
 	case "o":
 		return m.handleOpenBrowser()
+	case "n":
+		return m.handleCreateStart()
 	default:
 		return m.handleTabKey(msg)
 	}
@@ -267,11 +284,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case projectsMsg:
 		m.applyProjects(msg)
-	case logModeMsg:
-		m.logMode = string(msg)
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.applyWindowSize(msg)
 	case fastTickMsg:
 		return m.handleFastTick()
 	case fullTickMsg:
@@ -281,10 +295,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case issueTickMsg:
 		return m.handleIssueTick()
 	case issuesResultMsg:
-		m.issues = msg.results
-		m.issuesLoading = false
-		m.issuesFetched = time.Now()
-		m.clampCursor()
+		m.handleIssuesResult(msg)
 	case dispatchResultMsg:
 		m.handleDispatchResult(msg)
 	case openBrowserMsg:
@@ -293,10 +304,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handlePendingConfirms(msg)
 	case confirmDecisionMsg:
 		m.handleConfirmDecision(msg)
+	case createResultMsg:
+		return m.handleCreateResult(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+	default:
+		return m.handleDefault(msg)
 	}
 	return m, nil
 }
@@ -585,6 +600,206 @@ func fetchPendingConfirmsCmd() tea.Cmd {
 	}
 }
 
+// --- create ticket form ---
+
+// trackerOption is a unique tracker/project pair for the create form selector.
+type trackerOption struct {
+	Kind    string
+	Role    string
+	Project string
+}
+
+// applyWindowSize updates the terminal dimensions.
+func (m *model) applyWindowSize(msg tea.WindowSizeMsg) {
+	m.width = msg.Width
+	m.height = msg.Height
+}
+
+// handleDefault routes unmatched messages: logModeMsg, and create form delegation.
+func (m model) handleDefault(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if lm, ok := msg.(logModeMsg); ok {
+		m.logMode = string(lm)
+		return m, nil
+	}
+	if m.createActive && m.createForm != nil {
+		return m.updateCreateForm(msg)
+	}
+	return m, nil
+}
+
+// handleCreateStart builds the create form from loaded tracker/project pairs and activates it.
+func (m model) handleCreateStart() (tea.Model, tea.Cmd) {
+	// Extract unique (kind, role, project) tuples from loaded issues.
+	seen := make(map[trackerOption]bool)
+	var options []trackerOption
+	for _, g := range m.issues {
+		role := g.TrackerRole
+		if role == "" {
+			role = inferRole(g.TrackerKind)
+		}
+		opt := trackerOption{Kind: g.TrackerKind, Role: role, Project: g.Project}
+		if !seen[opt] {
+			seen[opt] = true
+			options = append(options, opt)
+		}
+	}
+	if len(options) == 0 {
+		m.dispatchStatus = "No trackers"
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+
+	// Default to first PM tracker.
+	m.createTracker = 0
+	for i, opt := range options {
+		if opt.Role == "pm" {
+			m.createTracker = i
+			break
+		}
+	}
+	m.createTitle = ""
+	m.createDesc = ""
+
+	selectOptions := make([]huh.Option[int], len(options))
+	for i, opt := range options {
+		selectOptions[i] = huh.NewOption(fmt.Sprintf("%s / %s", opt.Kind, opt.Project), i)
+	}
+	fields := []huh.Field{
+		huh.NewSelect[int]().
+			Title("Tracker").
+			Options(selectOptions...).
+			Value(&m.createTracker).
+			Inline(true),
+	}
+
+	fields = append(fields,
+		huh.NewInput().
+			Title("Title").
+			Value(&m.createTitle).
+			Validate(func(s string) error {
+				if strings.TrimSpace(s) == "" {
+					return fmt.Errorf("title is required")
+				}
+				return nil
+			}),
+		huh.NewText().
+			Title("Description").
+			Value(&m.createDesc).
+			Lines(5),
+	)
+
+	dialogWidth := min(60, m.width-10)
+	m.createForm = huh.NewForm(huh.NewGroup(fields...)).WithTheme(huh.ThemeCharm()).WithWidth(dialogWidth)
+	m.createActive = true
+
+	return m, m.createForm.Init()
+}
+
+// handleCreateKey delegates key messages to the create form.
+func (m model) handleCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "esc":
+		m.createActive = false
+		m.createForm = nil
+		return m, nil
+	}
+	return m.updateCreateForm(msg)
+}
+
+// updateCreateForm passes a message to the create form and checks its state.
+func (m model) updateCreateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	form, cmd := m.createForm.Update(msg)
+	m.createForm = form.(*huh.Form)
+
+	if m.createForm.State == huh.StateCompleted {
+		m.createActive = false
+		m.createForm = nil
+
+		// Resolve the selected tracker/project.
+		seen := make(map[trackerOption]bool)
+		var options []trackerOption
+		for _, g := range m.issues {
+			role := g.TrackerRole
+			if role == "" {
+				role = inferRole(g.TrackerKind)
+			}
+			opt := trackerOption{Kind: g.TrackerKind, Role: role, Project: g.Project}
+			if !seen[opt] {
+				seen[opt] = true
+				options = append(options, opt)
+			}
+		}
+		if m.createTracker >= 0 && m.createTracker < len(options) {
+			sel := options[m.createTracker]
+			return m, createTicketCmd(sel.Kind, sel.Project, m.createTitle, m.createDesc)
+		}
+		m.dispatchStatus = "Create failed: invalid tracker"
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+
+	if m.createForm.State == huh.StateAborted {
+		m.createActive = false
+		m.createForm = nil
+		return m, nil
+	}
+
+	return m, cmd
+}
+
+// handleIssuesResult processes an issues fetch result.
+func (m *model) handleIssuesResult(msg issuesResultMsg) {
+	m.issues = msg.results
+	m.issuesLoading = false
+	m.issuesFetched = time.Now()
+	m.clampCursor()
+}
+
+// handleCreateResult processes the result of a ticket creation.
+func (m model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.dispatchStatus = fmt.Sprintf("Create failed: %s", msg.err)
+	} else {
+		m.dispatchStatus = fmt.Sprintf("Created %s", msg.key)
+	}
+	m.dispatchAt = time.Now()
+	m.issuesLoading = true
+	return m, fetchIssuesCmd()
+}
+
+func createTicketCmd(trackerKind, project, title, description string) tea.Cmd {
+	return func() tea.Msg {
+		addr, token := daemonAddr()
+		if addr == "" {
+			return createResultMsg{err: fmt.Errorf("daemon not available")}
+		}
+		args := []string{trackerKind, "issue", "create",
+			"--project=" + project, title}
+		if description != "" {
+			args = append(args, "--description", description)
+		}
+		out, err := daemon.RunRemoteCapture(addr, token, args)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		return createResultMsg{key: strings.TrimSpace(string(out))}
+	}
+}
+
+// renderCreateDialog renders the create ticket form inside a centered bordered dialog.
+func renderCreateDialog(formView string, width, height int) string {
+	title := titleStyle.Render("New Ticket")
+	hints := subtleStyle.Render("Tab next  Enter submit  Esc cancel")
+
+	content := title + "\n\n" + formView + "\n" + hints
+	dialog := dialogStyle.Render(content)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, dialog)
+}
+
 func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
 	if m.issuesLoading {
 		return m, issueTickCmd()
@@ -600,6 +815,11 @@ func (m model) View() string {
 	w := m.width
 	if w < 40 {
 		w = defaultWidth
+	}
+
+	// Create ticket dialog — skip dashboard rendering entirely.
+	if m.createActive && m.createForm != nil {
+		return renderCreateDialog(m.createForm.View(), w, m.height)
 	}
 
 	var b strings.Builder
@@ -1051,7 +1271,7 @@ func renderFooter(w int, logMode, dispatchStatus string, showTabs bool) string {
 	if dispatchStatus != "" {
 		left += "  " + specialStyle.Render(dispatchStatus)
 	}
-	keys := "j/k nav  ⏎ send  o open  l log  q quit"
+	keys := "j/k nav  ⏎ send  o open  n new  l log  q quit"
 	if showTabs {
 		keys = "Tab switch  " + keys
 	}
@@ -1381,6 +1601,7 @@ func fromDaemonResults(results []daemon.TrackerIssuesResult) []trackerIssues {
 		out[i] = trackerIssues{
 			TrackerName: r.TrackerName,
 			TrackerKind: r.TrackerKind,
+			TrackerRole: r.TrackerRole,
 			Project:     r.Project,
 			Issues:      r.Issues,
 		}
@@ -1393,14 +1614,30 @@ func fromDaemonResults(results []daemon.TrackerIssuesResult) []trackerIssues {
 
 // --- render: issues ---
 
-// pipelineStage maps a tracker kind and status type to a human-readable
-// pipeline stage label. The pipeline model is:
-//
-//	PM (Shortcut):  Ready for Plan -> Planning -> Planned
-//	Eng (Linear):   Backlog -> In Dev -> Done -> Closed
-func pipelineStage(trackerKind, statusName, statusType string) string {
+// inferRole returns a role based on tracker kind when no explicit role is configured.
+func inferRole(trackerKind string) string {
 	switch trackerKind {
 	case "shortcut":
+		return "pm"
+	case "linear":
+		return "engineering"
+	default:
+		return ""
+	}
+}
+
+// pipelineStage maps a tracker role and status type to a human-readable
+// pipeline stage label. The pipeline model is:
+//
+//	PM:   Ready for Plan -> Planning -> Planned
+//	Eng:  Backlog -> In Dev -> Done -> Closed
+func pipelineStage(trackerKind, trackerRole, statusName, statusType string) string {
+	role := trackerRole
+	if role == "" {
+		role = inferRole(trackerKind)
+	}
+	switch role {
+	case "pm":
 		switch statusType {
 		case "unstarted":
 			return "Ready for Plan"
@@ -1411,7 +1648,7 @@ func pipelineStage(trackerKind, statusName, statusType string) string {
 		default:
 			return statusName
 		}
-	case "linear":
+	case "engineering":
 		switch statusType {
 		case "unstarted":
 			return "Backlog"
@@ -1444,12 +1681,16 @@ func pipelineStageStyle(statusType string) lipgloss.Style {
 	}
 }
 
-// pipelineName returns a display label for the tracker kind in pipeline context.
-func pipelineName(trackerKind string) string {
-	switch trackerKind {
-	case "shortcut":
+// pipelineName returns a display label based on the tracker's role.
+func pipelineName(trackerKind, trackerRole string) string {
+	role := trackerRole
+	if role == "" {
+		role = inferRole(trackerKind)
+	}
+	switch role {
+	case "pm":
 		return warningStyle.Render("PM")
-	case "linear":
+	case "engineering":
 		return specialStyle.Render("Eng")
 	default:
 		return subtleStyle.Render(trackerKind)
@@ -1493,7 +1734,7 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w, cursor in
 		}
 		first = false
 
-		pipelineLabel := pipelineName(g.TrackerKind)
+		pipelineLabel := pipelineName(g.TrackerKind, g.TrackerRole)
 		_, _ = fmt.Fprintf(&b, "    %s %s %s\n",
 			subtleStyle.Render("▸"),
 			pipelineLabel,
@@ -1501,7 +1742,7 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w, cursor in
 
 		for _, issue := range g.Issues {
 			title := truncate(issue.Title, w-30)
-			stage := pipelineStage(g.TrackerKind, issue.Status, issue.StatusType)
+			stage := pipelineStage(g.TrackerKind, g.TrackerRole, issue.Status, issue.StatusType)
 			stageStyled := pipelineStageStyle(issue.StatusType).Render(truncate(stage, 14))
 			keyStyle := titleStyle
 			prefix := "      "

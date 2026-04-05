@@ -38,6 +38,7 @@ var (
 	confirmStyle      = lipgloss.NewStyle().Bold(true).Foreground(humanOrange)
 	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(humanGold).Background(lipgloss.Color("#333355"))
 	inactiveTabStyle  = lipgloss.NewStyle().Foreground(humanPurple)
+	dialogStyle       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(humanGold).Padding(1, 2)
 )
 
 func modelColor(name string) string {
