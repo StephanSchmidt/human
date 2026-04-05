@@ -6,6 +6,7 @@ import "github.com/StephanSchmidt/human/internal/tracker"
 type TrackerIssuesResult struct {
 	TrackerName string          `json:"tracker_name"`
 	TrackerKind string          `json:"tracker_kind"`
+	TrackerRole string          `json:"tracker_role,omitempty"`
 	Project     string          `json:"project"`
 	Issues      []tracker.Issue `json:"issues"`
 	Err         string          `json:"error,omitempty"`

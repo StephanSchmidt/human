@@ -18,6 +18,7 @@ type TrackerEntry struct {
 	Type        string `json:"type"`
 	URL         string `json:"url"`
 	User        string `json:"user"`
+	Role        string `json:"role,omitempty"`
 	Description string `json:"description"`
 }
 
@@ -72,7 +73,7 @@ func RunTrackerList(out io.Writer, dir string, table bool, loader func(string) (
 
 	entries := make([]TrackerEntry, len(instances))
 	for i, inst := range instances {
-		entries[i] = TrackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Description: inst.Description}
+		entries[i] = TrackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Role: inst.Role, Description: inst.Description}
 	}
 
 	if table {
@@ -127,9 +128,9 @@ func PrintTrackerTable(out io.Writer, entries []TrackerEntry) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tURL\tUSER\tDESCRIPTION")
+	_, _ = fmt.Fprintln(w, "NAME\tTYPE\tROLE\tURL\tUSER\tDESCRIPTION")
 	for _, e := range entries {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Name, e.Type, e.URL, e.User, e.Description)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.Name, e.Type, e.Role, e.URL, e.User, e.Description)
 	}
 	return w.Flush()
 }

@@ -233,9 +233,26 @@ type Instance struct {
 	URL         string   // display URL
 	User        string   // display user (Jira only)
 	Description string   // optional human-readable description of what this tracker is for
+	Role        string   // "pm", "engineering", or empty (inferred from kind)
 	Safe        bool     // when true, destructive operations (deletes) are blocked
 	Projects    []string // projects to index (e.g. ["KAN", "INFRA"])
 	Provider    Provider
+}
+
+// InferRole returns the instance's role, falling back to kind-based inference
+// when no explicit role is configured.
+func (inst Instance) InferRole() string {
+	if inst.Role != "" {
+		return inst.Role
+	}
+	switch inst.Kind {
+	case "shortcut":
+		return "pm"
+	case "linear":
+		return "engineering"
+	default:
+		return ""
+	}
 }
 
 // Write interfaces (future — not implemented yet).

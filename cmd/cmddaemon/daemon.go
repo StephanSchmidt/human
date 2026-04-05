@@ -812,6 +812,7 @@ func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolve
 					r := daemon.TrackerIssuesResult{
 						TrackerName: inst.Name,
 						TrackerKind: inst.Kind,
+						TrackerRole: inst.InferRole(),
 						Project:     label,
 						Issues:      issues,
 					}

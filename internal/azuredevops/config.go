@@ -12,6 +12,7 @@ type Config struct {
 	Org         string   `mapstructure:"org"`
 	Token       string   `mapstructure:"token"`
 	Description string   `mapstructure:"description"`
+	Role        string   `mapstructure:"role"`
 	Safe        bool     `mapstructure:"safe"`
 	Projects    []string `mapstructure:"projects"`
 }
@@ -49,6 +50,7 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 			Kind:        "azuredevops",
 			URL:         cfg.URL,
 			Description: cfg.Description,
+			Role:        cfg.Role,
 			Safe:        cfg.Safe,
 			Projects:    cfg.Projects,
 			Provider:    New(cfg.URL, cfg.Org, cfg.Token),

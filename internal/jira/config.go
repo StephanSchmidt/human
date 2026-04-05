@@ -12,6 +12,7 @@ type Config struct {
 	User        string   `mapstructure:"user"`
 	Key         string   `mapstructure:"key"`
 	Description string   `mapstructure:"description"`
+	Role        string   `mapstructure:"role"`
 	Safe        bool     `mapstructure:"safe"`
 	Projects    []string `mapstructure:"projects"`
 }
@@ -49,6 +50,7 @@ var instanceSpec = config.InstanceSpec[Config, tracker.Instance]{
 			URL:         cfg.URL,
 			User:        cfg.User,
 			Description: cfg.Description,
+			Role:        cfg.Role,
 			Safe:        cfg.Safe,
 			Projects:    cfg.Projects,
 			Provider:    New(cfg.URL, cfg.User, cfg.Key),
