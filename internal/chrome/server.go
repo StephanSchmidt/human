@@ -3,6 +3,7 @@ package chrome
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net"
 
@@ -65,7 +66,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	if req.Token != s.Token {
+	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.Token)) != 1 {
 		s.writeAck(conn, false, "authentication failed: invalid token")
 		return
 	}

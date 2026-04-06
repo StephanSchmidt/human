@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -62,6 +63,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		_ = ln.Close()
 	}()
 
+	// Limit concurrent connections to prevent resource exhaustion.
+	const maxConns = 64
+	sem := make(chan struct{}, maxConns)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -71,7 +76,18 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			s.Logger.Warn().Err(err).Msg("accept error")
 			continue
 		}
-		go s.handleConn(conn)
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+				s.handleConn(conn)
+			}()
+		default:
+			s.Logger.Warn().Msg("connection limit reached, rejecting")
+			if conn != nil {
+				_ = conn.Close()
+			}
+		}
 	}
 }
 
@@ -91,7 +107,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
-	if req.Token != s.Token {
+	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.Token)) != 1 {
 		s.writeError(conn, "authentication failed: invalid token", 1)
 		return
 	}
@@ -350,10 +366,23 @@ type envEntry struct {
 	set   bool // whether the var was set before
 }
 
-// applyEnv sets the given env vars and returns their previous values.
+// allowedEnvVars is the set of environment variables that clients may inject.
+var allowedEnvVars = map[string]bool{
+	"NO_COLOR":        true,
+	"TERM":            true,
+	"COLUMNS":         true,
+	"HUMAN_SAFE_MODE": true,
+}
+
+// applyEnv sets allowed env vars and returns their previous values.
+// Keys not in the allowlist are silently ignored to prevent injection
+// of dangerous variables like LD_PRELOAD or PATH.
 func applyEnv(env map[string]string) []envEntry {
 	orig := make([]envEntry, 0, len(env))
 	for k, v := range env {
+		if !allowedEnvVars[k] {
+			continue
+		}
 		prev, wasSet := os.LookupEnv(k)
 		orig = append(orig, envEntry{key: k, value: prev, set: wasSet})
 		_ = os.Setenv(k, v)

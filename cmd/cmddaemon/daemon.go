@@ -326,8 +326,9 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	_, _ = fmt.Fprintf(out, "  Log: %s\n", logPath)
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Run in the container:")
-	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
-		daemonAddr, token, chromeFullAddr, proxyFullAddr)
+	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s... HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
+		daemonAddr, token[:8], chromeFullAddr, proxyFullAddr)
+	_, _ = fmt.Fprintln(out, "  # Full token: human daemon token")
 	return nil
 }
 
@@ -685,8 +686,9 @@ func printStartBanner(out io.Writer, token, addr, chromeAddr, proxyAddr, daemonA
 	}
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Run in the container:")
-	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
-		daemonAddr, token, chromeFullAddr, proxyFullAddr)
+	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s... HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
+		daemonAddr, token[:8], chromeFullAddr, proxyFullAddr)
+	_, _ = fmt.Fprintln(out, "  # Full token: human daemon token")
 	_, _ = fmt.Fprintf(out, "  export BROWSER=human-browser\n")
 	_, _ = fmt.Fprintln(out, "  ln -sf $(which human) /usr/local/bin/human-browser  # if not already installed")
 }
