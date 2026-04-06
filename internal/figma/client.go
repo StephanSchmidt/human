@@ -34,7 +34,7 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 
 // GetFile fetches file metadata and page listing.
 func (c *Client) GetFile(ctx context.Context, fileKey string) (*FileSummary, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/files/"+fileKey+"?depth=1", nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(fileKey)+"?depth=1", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (c *Client) GetFile(ctx context.Context, fileKey string) (*FileSummary, err
 // GetNodes fetches specific nodes and returns summaries.
 func (c *Client) GetNodes(ctx context.Context, fileKey string, nodeIDs []string) ([]NodeSummary, error) {
 	ids := encodeNodeIDs(nodeIDs)
-	path := "/v1/files/" + fileKey + "/nodes?ids=" + ids
+	path := "/v1/files/" + url.PathEscape(fileKey) + "/nodes?ids=" + ids
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -87,7 +87,7 @@ func (c *Client) GetNodes(ctx context.Context, fileKey string, nodeIDs []string)
 
 // GetFileComponents lists published components in a file.
 func (c *Client) GetFileComponents(ctx context.Context, fileKey string) ([]Component, error) {
-	path := "/v1/files/" + fileKey + "/components"
+	path := "/v1/files/" + url.PathEscape(fileKey) + "/components"
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -114,7 +114,7 @@ func (c *Client) GetFileComponents(ctx context.Context, fileKey string) ([]Compo
 
 // GetFileComments lists comments on a file.
 func (c *Client) GetFileComments(ctx context.Context, fileKey string) ([]FileComment, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/files/"+fileKey+"/comments", nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/files/"+url.PathEscape(fileKey)+"/comments", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +174,7 @@ func (c *Client) ExportImages(ctx context.Context, fileKey string, nodeIDs []str
 
 // ListProjects lists projects for a team.
 func (c *Client) ListProjects(ctx context.Context, teamID string) ([]Project, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/teams/"+teamID+"/projects", nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/teams/"+url.PathEscape(teamID)+"/projects", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (c *Client) ListProjects(ctx context.Context, teamID string) ([]Project, er
 
 // ListProjectFiles lists files in a project.
 func (c *Client) ListProjectFiles(ctx context.Context, projectID string) ([]ProjectFile, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/projects/"+projectID+"/files", nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/projects/"+url.PathEscape(projectID)+"/files", nil)
 	if err != nil {
 		return nil, err
 	}

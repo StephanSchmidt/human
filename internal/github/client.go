@@ -52,7 +52,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues", owner, repo)
+	path := fmt.Sprintf("/repos/%s/%s/issues", url.PathEscape(owner), url.PathEscape(repo))
 	state := "open"
 	if opts.IncludeAll {
 		state = "all"
@@ -125,7 +125,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
 	if err != nil {
 		return nil, err
@@ -157,7 +157,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 			"project", issue.Project)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues", owner, repo)
+	path := fmt.Sprintf("/repos/%s/%s/issues", url.PathEscape(owner), url.PathEscape(repo))
 	resp, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -189,7 +189,7 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 			"issueKey", issueKey)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
@@ -209,7 +209,7 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d/comments", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil)
 	if err != nil {
 		return nil, err
@@ -277,7 +277,7 @@ func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus s
 		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -298,7 +298,7 @@ func (c *Client) AssignIssue(ctx context.Context, key string, userID string) err
 		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -340,7 +340,7 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
@@ -367,7 +367,7 @@ func (c *Client) DeleteIssue(ctx context.Context, key string) error {
 		return errors.WrapWithDetails(err, "marshalling delete request", "key", key)
 	}
 
-	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "", bytes.NewReader(payload))
 	if err != nil {
 		return err

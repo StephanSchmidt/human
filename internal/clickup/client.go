@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -60,7 +61,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	var allTasks []cuTask
 	page := 0
 	for {
-		path := fmt.Sprintf("/api/v2/list/%s/task", listID)
+		path := fmt.Sprintf("/api/v2/list/%s/task", url.PathEscape(listID))
 		query := fmt.Sprintf("page=%d", page)
 		if !opts.UpdatedSince.IsZero() {
 			query += fmt.Sprintf("&date_updated_gt=%d", opts.UpdatedSince.UnixMilli())
@@ -94,7 +95,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 // GetIssue implements tracker.Getter.
 func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, error) {
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil, "")
@@ -132,7 +133,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		return nil, errors.WrapWithDetails(err, "marshalling create request")
 	}
 
-	path := fmt.Sprintf("/api/v2/list/%s/task", listID)
+	path := fmt.Sprintf("/api/v2/list/%s/task", url.PathEscape(listID))
 	resp, err := c.doRequest(ctx, http.MethodPost, path, "", bytes.NewReader(payload), "application/json")
 	if err != nil {
 		return nil, err
@@ -153,7 +154,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 
 // ListComments implements tracker.Commenter.
 func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.Comment, error) {
-	path := fmt.Sprintf("/api/v2/task/%s/comment", issueKey)
+	path := fmt.Sprintf("/api/v2/task/%s/comment", url.PathEscape(issueKey))
 	query := c.customIDQuery(issueKey)
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil, "")
@@ -179,7 +180,7 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 		return nil, errors.WrapWithDetails(err, "marshalling comment request", "issueKey", issueKey)
 	}
 
-	path := fmt.Sprintf("/api/v2/task/%s/comment", issueKey)
+	path := fmt.Sprintf("/api/v2/task/%s/comment", url.PathEscape(issueKey))
 	query := c.customIDQuery(issueKey)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {
@@ -197,7 +198,7 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 
 // DeleteIssue implements tracker.Deleter.
 func (c *Client) DeleteIssue(ctx context.Context, key string) error {
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 
 	resp, err := c.doRequest(ctx, http.MethodDelete, path, query, nil, "")
@@ -216,7 +217,7 @@ func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus s
 		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
 	}
 
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {
@@ -243,7 +244,7 @@ func (c *Client) AssignIssue(ctx context.Context, key string, userID string) err
 		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
 	}
 
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {
@@ -281,7 +282,7 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
 	}
 
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {
@@ -300,7 +301,7 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 // Fetches the task to find its list ID, then fetches the list to get statuses.
 func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status, error) {
 	// First, get the task to find its list ID.
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil, "")
 	if err != nil {
@@ -336,7 +337,7 @@ func (c *Client) fetchListStatuses(ctx context.Context, listID string) ([]cuStat
 	}
 	c.statusesMu.Unlock()
 
-	path := fmt.Sprintf("/api/v2/list/%s", listID)
+	path := fmt.Sprintf("/api/v2/list/%s", url.PathEscape(listID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "fetching list details", "listID", listID)
@@ -535,7 +536,7 @@ func (c *Client) TeamID() string {
 
 // ListSpaces lists all spaces in the workspace identified by teamID.
 func (c *Client) ListSpaces(ctx context.Context, teamID string) ([]Space, error) {
-	path := fmt.Sprintf("/api/v2/team/%s/space", teamID)
+	path := fmt.Sprintf("/api/v2/team/%s/space", url.PathEscape(teamID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, err
@@ -553,7 +554,7 @@ func (c *Client) ListSpaces(ctx context.Context, teamID string) ([]Space, error)
 
 // ListFolders lists all folders in the given space.
 func (c *Client) ListFolders(ctx context.Context, spaceID string) ([]Folder, error) {
-	path := fmt.Sprintf("/api/v2/space/%s/folder", spaceID)
+	path := fmt.Sprintf("/api/v2/space/%s/folder", url.PathEscape(spaceID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, err
@@ -571,7 +572,7 @@ func (c *Client) ListFolders(ctx context.Context, spaceID string) ([]Folder, err
 
 // ListLists lists all lists in the given folder.
 func (c *Client) ListLists(ctx context.Context, folderID string) ([]List, error) {
-	path := fmt.Sprintf("/api/v2/folder/%s/list", folderID)
+	path := fmt.Sprintf("/api/v2/folder/%s/list", url.PathEscape(folderID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, err
@@ -589,7 +590,7 @@ func (c *Client) ListLists(ctx context.Context, folderID string) ([]List, error)
 
 // ListFolderlessLists lists all lists directly under a space (not inside a folder).
 func (c *Client) ListFolderlessLists(ctx context.Context, spaceID string) ([]List, error) {
-	path := fmt.Sprintf("/api/v2/space/%s/list", spaceID)
+	path := fmt.Sprintf("/api/v2/space/%s/list", url.PathEscape(spaceID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, err
@@ -637,7 +638,7 @@ func (c *Client) ListWorkspaceMembers(ctx context.Context, teamID string) ([]Mem
 
 // GetCustomFields returns the custom field values on a task.
 func (c *Client) GetCustomFields(ctx context.Context, key string) ([]CustomFieldValue, error) {
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, query, nil, "")
 	if err != nil {
@@ -660,7 +661,7 @@ func (c *Client) SetCustomField(ctx context.Context, taskID, fieldID string, val
 	if err != nil {
 		return errors.WrapWithDetails(err, "marshalling custom field request", "taskID", taskID, "fieldID", fieldID)
 	}
-	path := fmt.Sprintf("/api/v2/task/%s/field/%s", taskID, fieldID)
+	path := fmt.Sprintf("/api/v2/task/%s/field/%s", url.PathEscape(taskID), url.PathEscape(fieldID))
 	query := c.customIDQuery(taskID)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {
@@ -674,7 +675,7 @@ func (c *Client) SetCustomField(ctx context.Context, taskID, fieldID string, val
 
 // GetMarkdownDescription fetches the task's markdown description source.
 func (c *Client) GetMarkdownDescription(ctx context.Context, key string) (string, error) {
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := "include_markdown_description=true"
 	if q := c.customIDQuery(key); q != "" {
 		query += "&" + q
@@ -696,7 +697,7 @@ func (c *Client) SetMarkdownDescription(ctx context.Context, key string, markdow
 	if err != nil {
 		return errors.WrapWithDetails(err, "marshalling markdown description", "key", key)
 	}
-	path := fmt.Sprintf("/api/v2/task/%s", key)
+	path := fmt.Sprintf("/api/v2/task/%s", url.PathEscape(key))
 	query := c.customIDQuery(key)
 	resp, err := c.doRequest(ctx, http.MethodPut, path, query, bytes.NewReader(payload), "application/json")
 	if err != nil {

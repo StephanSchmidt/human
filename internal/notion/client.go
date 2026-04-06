@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
@@ -84,7 +85,7 @@ func (c *Client) Search(ctx context.Context, query string) ([]SearchResult, erro
 // GetPage fetches a page's content and returns it as markdown.
 func (c *Client) GetPage(ctx context.Context, pageID string) (string, error) {
 	// Fetch page metadata for the title.
-	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/pages/"+pageID, nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, "/v1/pages/"+url.PathEscape(pageID), nil)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +117,7 @@ func (c *Client) QueryDatabase(ctx context.Context, dbID string) ([]DatabaseRow,
 		return nil, errors.WrapWithDetails(err, "marshalling database query request")
 	}
 
-	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/databases/"+dbID+"/query", bytes.NewReader(body))
+	resp, err := c.doRequest(ctx, http.MethodPost, "/v1/databases/"+url.PathEscape(dbID)+"/query", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -183,9 +184,9 @@ func (c *Client) getBlockChildren(ctx context.Context, blockID string, depth int
 	cursor := ""
 
 	for {
-		path := "/v1/blocks/" + blockID + "/children?page_size=100"
+		path := "/v1/blocks/" + url.PathEscape(blockID) + "/children?page_size=100"
 		if cursor != "" {
-			path += "&start_cursor=" + cursor
+			path += "&start_cursor=" + url.QueryEscape(cursor)
 		}
 
 		resp, err := c.doRequest(ctx, http.MethodGet, path, nil)

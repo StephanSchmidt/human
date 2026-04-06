@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -110,7 +111,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 // listGroupStories fetches all stories for a group via the group endpoint.
 func (c *Client) listGroupStories(ctx context.Context, groupID string) ([]scStory, error) {
-	path := fmt.Sprintf("/api/v3/groups/%s/stories", groupID)
+	path := fmt.Sprintf("/api/v3/groups/%s/stories", url.PathEscape(groupID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return nil, err
@@ -544,7 +545,7 @@ func (c *Client) resolveMemberName(ctx context.Context, memberID string) (string
 	}
 	c.membersMu.Unlock()
 
-	path := fmt.Sprintf("/api/v3/members/%s", memberID)
+	path := fmt.Sprintf("/api/v3/members/%s", url.PathEscape(memberID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
 		return "", nil // non-fatal: return empty name on failure
