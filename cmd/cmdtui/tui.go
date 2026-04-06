@@ -207,7 +207,7 @@ type issuesResultMsg struct {
 
 type pendingConfirmsMsg  []daemon.PendingConfirm
 type confirmDecisionMsg  struct{ err error }
-type createResultMsg     struct{ key string; err error }
+type createResultMsg     struct{ key string; trackerKind string; err error }
 
 // --- tea.Model ---
 
@@ -762,11 +762,26 @@ func (m *model) handleIssuesResult(msg issuesResultMsg) {
 func (m model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.dispatchStatus = fmt.Sprintf("Create failed: %s", msg.err)
-	} else {
-		m.dispatchStatus = fmt.Sprintf("Created %s", msg.key)
+		m.dispatchAt = time.Now()
+		return m, nil
 	}
+
+	m.dispatchStatus = fmt.Sprintf("Created %s", msg.key)
 	m.dispatchAt = time.Now()
 	m.issuesLoading = true
+
+	// Auto-dispatch /human-ready to an idle pane.
+	if !m.dispatching && m.snap != nil {
+		panes := m.filterPanes(m.snap.Panes)
+		for i := range panes {
+			if panes[i].State == claude.StateReady {
+				m.dispatching = true
+				prompt := "/human-ready " + msg.trackerKind + " " + msg.key
+				return m, tea.Batch(fetchIssuesCmd(), dispatchIssueCmd(panes[i], prompt, msg.key))
+			}
+		}
+	}
+
 	return m, fetchIssuesCmd()
 }
 
@@ -785,7 +800,11 @@ func createTicketCmd(trackerKind, project, title, description string) tea.Cmd {
 		if err != nil {
 			return createResultMsg{err: err}
 		}
-		return createResultMsg{key: strings.TrimSpace(string(out))}
+		key := strings.TrimSpace(string(out))
+		if i := strings.IndexByte(key, '\t'); i >= 0 {
+			key = key[:i]
+		}
+		return createResultMsg{key: key, trackerKind: trackerKind}
 	}
 }
 
