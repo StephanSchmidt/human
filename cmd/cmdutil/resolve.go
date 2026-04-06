@@ -67,7 +67,7 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 
 	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
 	p := instance.Provider
-	if safeFlag || instance.Safe {
+	if safeFlag || instance.Safe || os.Getenv("HUMAN_SAFE_MODE") == "1" {
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 
@@ -175,7 +175,7 @@ func resolveFromKey(ctx context.Context, cmd *cobra.Command, keyHint string, all
 func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, deps Deps) (*AutoResult, error) {
 	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
 	p := instance.Provider
-	if safeFlag || instance.Safe {
+	if safeFlag || instance.Safe || os.Getenv("HUMAN_SAFE_MODE") == "1" {
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 

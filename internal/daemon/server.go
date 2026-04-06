@@ -107,13 +107,9 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
-	if s.SafeMode {
-		req.Args = append([]string{"--safe"}, req.Args...)
-	}
-
 	s.Logger.Info().Strs("args", req.Args).Str("project_dir", projectDir).Msg("handling request")
 
-	if s.routeIntercept(conn, reader, req.Args, projectDir) {
+	if s.routeIntercept(conn, reader, req.Args, projectDir, req.ClientPID) {
 		return
 	}
 
@@ -123,9 +119,20 @@ func (s *Server) handleConn(conn net.Conn) {
 		return
 	}
 
-	// Apply client environment variables (e.g. NO_COLOR, TERM, COLUMNS)
-	// and set HUMAN_PROJECT_DIR so config.ResolveDir maps DirProject
-	// to the correct directory for this request.
+	// Apply client environment variables and execute the command.
+	s.executeCommand(conn, req, projectDir)
+}
+
+// executeCommand applies env vars (including safe mode) and runs the CLI command.
+func (s *Server) executeCommand(conn net.Conn, req Request, projectDir string) {
+	// Safe mode is enforced via env var so clients cannot override it
+	// via flag injection (e.g. --safe=false).
+	if s.SafeMode {
+		if req.Env == nil {
+			req.Env = make(map[string]string)
+		}
+		req.Env["HUMAN_SAFE_MODE"] = "1"
+	}
 	// Mutex ensures concurrent requests don't corrupt each other's env.
 	s.envMu.Lock()
 	origEnv := applyEnv(req.Env)
@@ -194,8 +201,9 @@ func (s *Server) handleLogMode(conn net.Conn, args []string) {
 
 // routeIntercept handles special commands that don't need subprocess execution.
 // projectDir is the resolved project directory for this request.
+// clientPID identifies the requesting client for authorization checks.
 // Returns true if the command was handled.
-func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []string, projectDir string) bool {
+func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []string, projectDir string, clientPID int) bool {
 	if len(args) == 0 {
 		return false
 	}
@@ -219,7 +227,7 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 		s.handlePendingConfirms(conn)
 		return true
 	case "confirm-op":
-		s.handleConfirmOp(conn, args[1:])
+		s.handleConfirmOp(conn, args[1:], clientPID)
 		return true
 	}
 
@@ -378,10 +386,11 @@ type destructiveOp struct {
 // should be intercepted. The daemon always intercepts — --yes is ignored
 // when the daemon is running; confirmation must come from the TUI.
 func detectDestructive(args []string) (destructiveOp, bool) {
-	// Strip flags (e.g. --safe, --yes) to find the tracker subcommand.
+	// Strip all flags to find positional subcommands only.
+	// This prevents bypass via arbitrary flags between "issue" and the verb.
 	cleaned := make([]string, 0, len(args))
 	for _, a := range args {
-		if a == "--yes" || a == "--safe" {
+		if strings.HasPrefix(a, "-") {
 			continue
 		}
 		cleaned = append(cleaned, a)
@@ -393,7 +402,7 @@ func detectDestructive(args []string) (destructiveOp, bool) {
 		return destructiveOp{}, false
 	}
 
-	// Find "issue" subcommand — it may not be at index 1 if --safe was prepended.
+	// Find "issue" subcommand. Flags are already stripped above.
 	trackerKind := ""
 	issueIdx := -1
 	for i, a := range cleaned {
@@ -401,10 +410,7 @@ func detectDestructive(args []string) (destructiveOp, bool) {
 			issueIdx = i
 			break
 		}
-		// Skip flags.
-		if !strings.HasPrefix(a, "-") {
-			trackerKind = a
-		}
+		trackerKind = a
 	}
 	if issueIdx < 0 || issueIdx+2 >= len(cleaned) {
 		return destructiveOp{}, false
@@ -464,7 +470,7 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 	case <-time.After(confirmTimeout):
 		s.Logger.Warn().Str("id", id).Msg("destructive confirmation timed out")
 		// Remove from store if still present (Cleanup may have already done it).
-		_ = s.PendingConfirms.Resolve(id, false)
+		_ = s.PendingConfirms.Resolve(id, false, 0)
 		approved = false
 	}
 
@@ -478,6 +484,12 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 
 	// Execute the original command.
 	s.envMu.Lock()
+	if s.SafeMode {
+		if req.Env == nil {
+			req.Env = make(map[string]string)
+		}
+		req.Env["HUMAN_SAFE_MODE"] = "1"
+	}
 	origEnv := applyEnv(req.Env)
 	prevProjectDir, hadProjectDir := os.LookupEnv("HUMAN_PROJECT_DIR")
 	if projectDir != "." {
@@ -535,8 +547,8 @@ func (s *Server) handlePendingConfirms(conn net.Conn) {
 }
 
 // handleConfirmOp resolves a pending confirmation with the given decision.
-// Expected args: [ID, "yes"|"no"].
-func (s *Server) handleConfirmOp(conn net.Conn, args []string) {
+// Expected args: [ID, "yes"|"no"]. approverPID prevents self-approval.
+func (s *Server) handleConfirmOp(conn net.Conn, args []string, approverPID int) {
 	if len(args) < 2 {
 		s.writeError(conn, "usage: confirm-op ID yes|no", 1)
 		return
@@ -548,7 +560,7 @@ func (s *Server) handleConfirmOp(conn net.Conn, args []string) {
 		s.writeError(conn, "confirmation store not available", 1)
 		return
 	}
-	if err := s.PendingConfirms.Resolve(id, approved); err != nil {
+	if err := s.PendingConfirms.Resolve(id, approved, approverPID); err != nil {
 		s.writeError(conn, err.Error(), 1)
 		return
 	}

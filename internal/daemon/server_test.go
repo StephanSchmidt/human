@@ -195,6 +195,9 @@ func safeCmdFactory() *cobra.Command {
 		Use: "check",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			safe, _ := cmd.Root().PersistentFlags().GetBool("safe")
+			if !safe {
+				safe = os.Getenv("HUMAN_SAFE_MODE") == "1"
+			}
 			if safe {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "safe-mode-active")
 			} else {
@@ -206,7 +209,7 @@ func safeCmdFactory() *cobra.Command {
 	return root
 }
 
-func TestServer_SafeModePrependsFlag(t *testing.T) {
+func TestServer_SafeModeSetsEnvVar(t *testing.T) {
 	token := "test-token-safe"
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -474,6 +477,22 @@ func TestDetectDestructive_NoIssueSubcommand(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDetectDestructive_FlagInsertionBypass(t *testing.T) {
+	// Flags between "issue" and "delete" must not break detection.
+	op, ok := detectDestructive([]string{"jira", "issue", "--tracker=jira", "delete", "KAN-1"})
+	assert.True(t, ok)
+	assert.Equal(t, "DeleteIssue", op.Operation)
+	assert.Equal(t, "KAN-1", op.Key)
+}
+
+func TestDetectDestructive_ArbitraryFlagsStripped(t *testing.T) {
+	op, ok := detectDestructive([]string{"--verbose", "linear", "--format=json", "issue", "edit", "HUM-1", "--title", "New"})
+	assert.True(t, ok)
+	assert.Equal(t, "EditIssue", op.Operation)
+	assert.Equal(t, "linear", op.Tracker)
+	assert.Equal(t, "HUM-1", op.Key)
+}
+
 // --- Server destructive confirmation tests ---
 
 func startTestServerWithConfirm(t *testing.T, token string) (addr string, cancel context.CancelFunc, store *PendingConfirmStore) {
@@ -564,8 +583,8 @@ func TestServer_DestructiveConfirm_Approved(t *testing.T) {
 	assert.Equal(t, "DeleteIssue", snap[0].Operation)
 	assert.Equal(t, "KAN-1", snap[0].Key)
 
-	// Approve it.
-	err := store.Resolve(snap[0].ID, true)
+	// Approve it (PID 0 = TUI/system approver).
+	err := store.Resolve(snap[0].ID, true, 0)
 	require.NoError(t, err)
 
 	r := <-ch
@@ -618,8 +637,8 @@ func TestServer_DestructiveConfirm_Rejected(t *testing.T) {
 	snap := store.Snapshot()
 	require.Len(t, snap, 1)
 
-	// Reject it.
-	err := store.Resolve(snap[0].ID, false)
+	// Reject it (PID 0 = TUI/system approver).
+	err := store.Resolve(snap[0].ID, false, 0)
 	require.NoError(t, err)
 
 	r := <-ch
@@ -671,7 +690,7 @@ func TestServer_DestructiveYes_StillRequiresConfirmation(t *testing.T) {
 	// Clean up: resolve it so the goroutine can finish.
 	snap := store.Snapshot()
 	if len(snap) > 0 {
-		_ = store.Resolve(snap[0].ID, false)
+		_ = store.Resolve(snap[0].ID, false, 0)
 	}
 
 	r := <-ch
