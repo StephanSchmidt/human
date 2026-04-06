@@ -320,6 +320,14 @@ func TestBuildPrompt(t *testing.T) {
 	assert.NotContains(t, prompt, "  fix") // trimmed
 }
 
+func TestBuildPrompt_StripsControlChars(t *testing.T) {
+	prompt := buildPrompt("fix \x00the\x1bbug\x07")
+	assert.Contains(t, prompt, "fix thebug")
+	assert.NotContains(t, prompt, "\x00")
+	assert.NotContains(t, prompt, "\x1b")
+	assert.NotContains(t, prompt, "\x07")
+}
+
 func TestDispatcher_FinderError(t *testing.T) {
 	source := &mockSource{
 		messages: []QueuedMessage{

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/rs/zerolog"
 )
@@ -199,5 +200,12 @@ func (d *Dispatcher) pruneSeen() {
 }
 
 func buildPrompt(messageText string) string {
-	return fmt.Sprintf(DefaultPromptTemplate, strings.TrimSpace(messageText))
+	// Strip control characters that could interfere with tmux/terminal.
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != ' ' && r != '\t' {
+			return -1
+		}
+		return r
+	}, messageText)
+	return fmt.Sprintf(DefaultPromptTemplate, strings.TrimSpace(cleaned))
 }
