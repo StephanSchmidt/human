@@ -520,7 +520,7 @@ func TestHostFinder_RemoteServerDiscovered(t *testing.T) {
 	}
 }
 
-func TestHostFinder_ChildOfRemoteMarkedAsR(t *testing.T) {
+func TestHostFinder_ChildOfRemoteConsolidated(t *testing.T) {
 	runner := &mockRunner{
 		byArgs: map[string]mockRunResult{
 			"pgrep -af claude remote": {output: []byte("99999 node /usr/bin/claude remote\n")},
@@ -545,22 +545,23 @@ func TestHostFinder_ChildOfRemoteMarkedAsR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(instances) != 2 {
-		t.Fatalf("expected 2 instances (server + child), got %d", len(instances))
+	// Server + child consolidated into one instance.
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 consolidated instance, got %d", len(instances))
 	}
-	// First is the remote server.
 	if instances[0].Source != "remote" {
-		t.Errorf("instances[0].Source = %q, want remote", instances[0].Source)
+		t.Errorf("Source = %q, want remote", instances[0].Source)
 	}
 	if !strings.Contains(instances[0].Label, "Host (R)") {
-		t.Errorf("instances[0].Label = %q, want Host (R)", instances[0].Label)
+		t.Errorf("Label = %q, want Host (R)", instances[0].Label)
 	}
-	// Second is the child, also marked (R).
-	if instances[1].Source != "host" {
-		t.Errorf("instances[1].Source = %q, want host", instances[1].Source)
+	// Label should contain both PIDs.
+	if !strings.Contains(instances[0].Label, "99999") || !strings.Contains(instances[0].Label, "12345") {
+		t.Errorf("Label = %q, want both PID 99999 and 12345", instances[0].Label)
 	}
-	if !strings.Contains(instances[1].Label, "Host (R)") {
-		t.Errorf("instances[1].Label = %q, want Host (R)", instances[1].Label)
+	// Server PID used as the instance PID.
+	if instances[0].PID != 99999 {
+		t.Errorf("PID = %d, want 99999 (server PID)", instances[0].PID)
 	}
 }
 
@@ -623,7 +624,7 @@ func TestHostFinder_RemoteFiltersFalsePositives(t *testing.T) {
 
 func TestHostFinder_InteractiveRemoteNotMarkedAsR(t *testing.T) {
 	// pgrep -af "claude remote" matches BOTH server-mode and interactive --remote-control.
-	// Only the server's children should get Host (R).
+	// Only the server's children should be consolidated into Host (R).
 	runner := &mockRunner{
 		byArgs: map[string]mockRunResult{
 			"pgrep -af claude remote": {output: []byte(
@@ -639,8 +640,8 @@ func TestHostFinder_InteractiveRemoteNotMarkedAsR(t *testing.T) {
 		11111: "/home/testuser/projects/alpha",
 		22222: "/home/testuser/projects/alpha",
 	}}
-	// PID 11111 is child of server (99999) → Host (R)
-	// PID 22222 is child of interactive remote (88888) → Host (no R)
+	// PID 11111 is child of server (99999) → consolidated into remote
+	// PID 22222 is child of interactive remote (88888) → regular Host
 	ppidResolver := &mockPPIDResolver{ppids: map[int]int{11111: 99999, 22222: 88888}}
 
 	finder := &HostFinder{
@@ -656,23 +657,105 @@ func TestHostFinder_InteractiveRemoteNotMarkedAsR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Expect: 1 remote server + 2 host instances = 3 total.
-	// The --remote-control process (88888) is filtered out by isClaudeRemoteCmd.
-	if len(instances) != 3 {
-		t.Fatalf("expected 3 instances, got %d", len(instances))
+	// Expect: 1 consolidated remote (server 99999 + child 11111) + 1 regular host (22222) = 2.
+	if len(instances) != 2 {
+		t.Fatalf("expected 2 instances, got %d", len(instances))
 	}
 
-	// instances[0] = remote server (R)
+	// instances[0] = consolidated remote (R) with both PIDs
 	if !strings.Contains(instances[0].Label, "Host (R)") {
-		t.Errorf("instances[0].Label = %q, want Host (R) for server", instances[0].Label)
+		t.Errorf("instances[0].Label = %q, want Host (R)", instances[0].Label)
 	}
-	// instances[1] = child of server → Host (R)
-	if !strings.Contains(instances[1].Label, "Host (R)") {
-		t.Errorf("instances[1].Label = %q, want Host (R) for server child", instances[1].Label)
+	if !strings.Contains(instances[0].Label, "99999") || !strings.Contains(instances[0].Label, "11111") {
+		t.Errorf("instances[0].Label = %q, want both PIDs 99999 and 11111", instances[0].Label)
 	}
-	// instances[2] = child of interactive remote → Host (no R)
-	if !strings.HasPrefix(instances[2].Label, "Host:") {
-		t.Errorf("instances[2].Label = %q, want prefix Host: (not Host (R)) for interactive remote child", instances[2].Label)
+	// instances[1] = child of interactive remote → regular Host (no R)
+	if !strings.HasPrefix(instances[1].Label, "Host:") {
+		t.Errorf("instances[1].Label = %q, want prefix Host: (not Host (R))", instances[1].Label)
+	}
+}
+
+func TestHostFinder_RemoteMultipleChildren(t *testing.T) {
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {output: []byte("99999 node /usr/bin/claude remote\n")},
+			"pgrep -a claude":         {output: []byte("11111 /usr/bin/claude\n22222 /usr/bin/claude\n33333 /usr/bin/claude\n")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{
+		99999: "/home/testuser/projects/alpha",
+		11111: "/home/testuser/projects/alpha",
+		22222: "/home/testuser/projects/alpha",
+		33333: "/home/testuser/projects/alpha",
+	}}
+	ppidResolver := &mockPPIDResolver{ppids: map[int]int{11111: 99999, 22222: 99999, 33333: 99999}}
+
+	finder := &HostFinder{
+		Runner:       runner,
+		HomeDir:      "/home/testuser",
+		CwdResolver:  resolver,
+		CommChecker:  alwaysClaude,
+		PPIDResolver: ppidResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// All consolidated into one instance.
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 consolidated instance, got %d", len(instances))
+	}
+	label := instances[0].Label
+	if !strings.Contains(label, "Host (R)") {
+		t.Errorf("Label = %q, want Host (R)", label)
+	}
+	// All 4 PIDs should appear.
+	for _, pid := range []string{"99999", "11111", "22222", "33333"} {
+		if !strings.Contains(label, pid) {
+			t.Errorf("Label = %q, want to contain PID %s", label, pid)
+		}
+	}
+}
+
+func TestBuildRemoteLabel(t *testing.T) {
+	tests := []struct {
+		name     string
+		server   remoteServerInfo
+		children []Instance
+		wantPIDs []string
+	}{
+		{
+			name:     "server only",
+			server:   remoteServerInfo{PID: 100, Cwd: "/home/user/dev/project"},
+			children: nil,
+			wantPIDs: []string{"100"},
+		},
+		{
+			name:   "server + children",
+			server: remoteServerInfo{PID: 100, Cwd: "/home/user/dev/project"},
+			children: []Instance{
+				{PID: 200},
+				{PID: 300},
+			},
+			wantPIDs: []string{"100", "200", "300"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inst := buildRemoteInstance("/home/user", tt.server, tt.children)
+			if !strings.Contains(inst.Label, "Host (R)") {
+				t.Errorf("Label = %q, want Host (R)", inst.Label)
+			}
+			for _, pid := range tt.wantPIDs {
+				if !strings.Contains(inst.Label, pid) {
+					t.Errorf("Label = %q, want PID %s", inst.Label, pid)
+				}
+			}
+			if inst.Source != "remote" {
+				t.Errorf("Source = %q, want remote", inst.Source)
+			}
+		})
 	}
 }
 

@@ -219,6 +219,12 @@ type HostFinder struct {
 	PPIDResolver     PPIDResolver     // nil defaults to ProcPPIDResolver
 }
 
+// remoteServerInfo holds metadata for a discovered "claude remote" server process.
+type remoteServerInfo struct {
+	PID int
+	Cwd string
+}
+
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 	resolver := h.CwdResolver
 	if resolver == nil {
@@ -240,25 +246,35 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		ppidResolver = ProcPPIDResolver{}
 	}
 
-	// Phase 1: discover "claude remote" server processes via pgrep -f.
-	remotePIDs, instances := h.findRemoteServers(ctx, resolver)
+	// Phase 1: discover "claude remote" server processes.
+	remoteServers := h.findRemoteServers(ctx, resolver)
+	remotePIDs := make(map[int]bool, len(remoteServers))
+	for pid := range remoteServers {
+		remotePIDs[pid] = true
+	}
 
-	// Phase 2: discover regular claude processes.
-	hostInstances := h.findHostProcesses(ctx, resolver, ctrChecker, sessResolver, ppidResolver, remotePIDs)
+	// Phase 2: discover regular claude processes, grouping remote children.
+	hostInstances, remoteChildren := h.findHostProcesses(ctx, resolver, ctrChecker, sessResolver, ppidResolver, remotePIDs)
+
+	// Phase 3: build one consolidated Instance per remote server.
+	var instances []Instance
+	for _, info := range remoteServers {
+		children := remoteChildren[info.PID]
+		instances = append(instances, buildRemoteInstance(h.HomeDir, info, children))
+	}
 	instances = append(instances, hostInstances...)
 
 	return instances, nil
 }
 
 // findRemoteServers discovers "claude remote" server processes via pgrep -f.
-// Returns a set of remote server PIDs and their Instance entries.
-func (h *HostFinder) findRemoteServers(ctx context.Context, resolver CwdResolver) (map[int]bool, []Instance) {
-	remotePIDs := map[int]bool{}
-	var instances []Instance
+// Returns a map of server PID → server info (no Instance entries emitted yet).
+func (h *HostFinder) findRemoteServers(ctx context.Context, resolver CwdResolver) map[int]remoteServerInfo {
+	servers := map[int]remoteServerInfo{}
 
 	remoteOut, remoteErr := h.Runner.Run(ctx, "pgrep", "-af", "claude remote")
 	if remoteErr != nil {
-		return remotePIDs, nil
+		return servers
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(remoteOut))
@@ -286,29 +302,19 @@ func (h *HostFinder) findRemoteServers(ctx context.Context, resolver CwdResolver
 			continue
 		}
 
-		remotePIDs[pidNum] = true
-
-		projectDir := CwdToProjectDir(cwd)
-		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
-		label := fmt.Sprintf("Host (R): %s (PID %s)", ShortProjectName(cwd), pid)
-
-		instances = append(instances, Instance{
-			Label:  label,
-			Source: "remote",
-			Walker: OSDirWalker{},
-			Root:   root,
-			PID:    pidNum,
-			Cwd:    cwd,
-		})
+		servers[pidNum] = remoteServerInfo{PID: pidNum, Cwd: cwd}
 	}
-	return remotePIDs, instances
+	return servers
 }
 
 // findHostProcesses discovers regular claude processes via pgrep -a.
-func (h *HostFinder) findHostProcesses(ctx context.Context, resolver CwdResolver, ctrChecker ContainerChecker, sessResolver SessionResolver, ppidResolver PPIDResolver, remotePIDs map[int]bool) []Instance {
+// Children of remote servers are grouped by server PID instead of returned directly.
+func (h *HostFinder) findHostProcesses(ctx context.Context, resolver CwdResolver, ctrChecker ContainerChecker, sessResolver SessionResolver, ppidResolver PPIDResolver, remotePIDs map[int]bool) ([]Instance, map[int][]Instance) {
+	remoteChildren := make(map[int][]Instance)
+
 	out, err := h.Runner.Run(ctx, "pgrep", "-a", "claude")
 	if err != nil {
-		return nil
+		return nil, remoteChildren
 	}
 
 	commCheck := h.CommChecker
@@ -360,28 +366,59 @@ func (h *HostFinder) findHostProcesses(ctx context.Context, resolver CwdResolver
 			continue
 		}
 
-		prefix := "Host"
-		if ppid := ppidResolver.ResolvePPID(pidNum); remotePIDs[ppid] {
-			prefix = "Host (R)"
-		}
-
 		projectDir := CwdToProjectDir(cwd)
 		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
-		label := fmt.Sprintf("%s: %s (PID %s)", prefix, ShortProjectName(cwd), pid)
-
 		filePath := resolveJSONLPath(sessResolver, pidNum, root)
 
-		instances = append(instances, Instance{
-			Label:    label,
+		inst := Instance{
 			Source:   "host",
 			Walker:   OSDirWalker{},
 			Root:     root,
 			PID:      pidNum,
 			Cwd:      cwd,
 			FilePath: filePath,
-		})
+		}
+
+		if ppid := ppidResolver.ResolvePPID(pidNum); remotePIDs[ppid] {
+			remoteChildren[ppid] = append(remoteChildren[ppid], inst)
+		} else {
+			inst.Label = fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
+			instances = append(instances, inst)
+		}
 	}
-	return instances
+	return instances, remoteChildren
+}
+
+// buildRemoteInstance creates a single consolidated Instance for a remote server
+// and its child sessions. The label lists all PIDs (server + children).
+// If children exist, the first child's JSONL data is used for session/usage display.
+func buildRemoteInstance(homeDir string, server remoteServerInfo, children []Instance) Instance {
+	pids := []string{strconv.Itoa(server.PID)}
+	for _, c := range children {
+		pids = append(pids, strconv.Itoa(c.PID))
+	}
+
+	label := fmt.Sprintf("Host (R): %s (PID %s)", ShortProjectName(server.Cwd), strings.Join(pids, ", "))
+
+	projectDir := CwdToProjectDir(server.Cwd)
+	root := filepath.Join(homeDir, ".claude", "projects", projectDir)
+
+	inst := Instance{
+		Label:  label,
+		Source: "remote",
+		Walker: OSDirWalker{},
+		Root:   root,
+		PID:    server.PID,
+		Cwd:    server.Cwd,
+	}
+
+	if len(children) > 0 {
+		inst.Walker = children[0].Walker
+		inst.Root = children[0].Root
+		inst.FilePath = children[0].FilePath
+	}
+
+	return inst
 }
 
 // isClaudeRemoteCmd checks if a command line represents a "claude remote" server invocation.
