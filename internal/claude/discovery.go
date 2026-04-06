@@ -186,6 +186,28 @@ func ShortProjectName(cwd string) string {
 // CommChecker verifies a process command name.
 type CommChecker func(pid int) bool
 
+// PPIDResolver resolves the parent PID for a process.
+type PPIDResolver interface {
+	ResolvePPID(pid int) int
+}
+
+// ProcPPIDResolver reads /proc/<pid>/status to get the parent PID.
+type ProcPPIDResolver struct{}
+
+func (ProcPPIDResolver) ResolvePPID(pid int) int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid)) // #nosec G304 — pid is an integer
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PPid:") {
+			ppid, _ := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "PPid:")))
+			return ppid
+		}
+	}
+	return 0
+}
+
 // HostFinder discovers Claude Code instances on the local host via pgrep.
 type HostFinder struct {
 	Runner           CommandRunner
@@ -194,15 +216,10 @@ type HostFinder struct {
 	ContainerChecker ContainerChecker // nil defaults to ProcContainerChecker
 	SessionResolver  SessionResolver  // nil defaults to FileSessionResolver{HomeDir: h.HomeDir}
 	CommChecker      CommChecker      // nil defaults to verifyProcComm
+	PPIDResolver     PPIDResolver     // nil defaults to ProcPPIDResolver
 }
 
 func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
-	out, err := h.Runner.Run(ctx, "pgrep", "-a", "claude")
-	if err != nil {
-		// pgrep exits 1 when no matches — not an error for us.
-		return nil, nil
-	}
-
 	resolver := h.CwdResolver
 	if resolver == nil {
 		resolver = ProcCwdResolver{}
@@ -218,8 +235,88 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		sessResolver = FileSessionResolver{HomeDir: h.HomeDir}
 	}
 
+	ppidResolver := h.PPIDResolver
+	if ppidResolver == nil {
+		ppidResolver = ProcPPIDResolver{}
+	}
+
+	// Phase 1: discover "claude remote" server processes via pgrep -f.
+	remotePIDs, instances := h.findRemoteServers(ctx, resolver)
+
+	// Phase 2: discover regular claude processes.
+	hostInstances := h.findHostProcesses(ctx, resolver, ctrChecker, sessResolver, ppidResolver, remotePIDs)
+	instances = append(instances, hostInstances...)
+
+	return instances, nil
+}
+
+// findRemoteServers discovers "claude remote" server processes via pgrep -f.
+// Returns a set of remote server PIDs and their Instance entries.
+func (h *HostFinder) findRemoteServers(ctx context.Context, resolver CwdResolver) (map[int]bool, []Instance) {
+	remotePIDs := map[int]bool{}
 	var instances []Instance
 
+	remoteOut, remoteErr := h.Runner.Run(ctx, "pgrep", "-af", "claude remote")
+	if remoteErr != nil {
+		return remotePIDs, nil
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(remoteOut))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		pid := parts[0]
+		cmdLine := parts[1]
+
+		if !isClaudeRemoteCmd(cmdLine) {
+			continue
+		}
+
+		pidNum, err := strconv.Atoi(pid)
+		if err != nil {
+			continue
+		}
+
+		cwd, err := resolver.ResolveCwd(pidNum)
+		if err != nil {
+			log.Debug().Err(err).Int("pid", pidNum).Msg("cannot resolve cwd for remote server, skipping")
+			continue
+		}
+
+		remotePIDs[pidNum] = true
+
+		projectDir := CwdToProjectDir(cwd)
+		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
+		label := fmt.Sprintf("Host (R): %s (PID %s)", ShortProjectName(cwd), pid)
+
+		instances = append(instances, Instance{
+			Label:  label,
+			Source: "remote",
+			Walker: OSDirWalker{},
+			Root:   root,
+			PID:    pidNum,
+			Cwd:    cwd,
+		})
+	}
+	return remotePIDs, instances
+}
+
+// findHostProcesses discovers regular claude processes via pgrep -a.
+func (h *HostFinder) findHostProcesses(ctx context.Context, resolver CwdResolver, ctrChecker ContainerChecker, sessResolver SessionResolver, ppidResolver PPIDResolver, remotePIDs map[int]bool) []Instance {
+	out, err := h.Runner.Run(ctx, "pgrep", "-a", "claude")
+	if err != nil {
+		return nil
+	}
+
+	commCheck := h.CommChecker
+	if commCheck == nil {
+		commCheck = verifyProcComm
+	}
+
+	var instances []Instance
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -230,13 +327,11 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		pid := parts[0]
 		cmdLine := parts[1]
 
-		// Extract the basename of the first token in the command.
 		cmdParts := strings.Fields(cmdLine)
 		if len(cmdParts) == 0 {
 			continue
 		}
-		base := filepath.Base(cmdParts[0])
-		if base != "claude" {
+		if filepath.Base(cmdParts[0]) != "claude" {
 			continue
 		}
 
@@ -245,31 +340,34 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			continue
 		}
 
-		commCheck := h.CommChecker
-		if commCheck == nil {
-			commCheck = verifyProcComm
+		if remotePIDs[pidNum] {
+			continue
 		}
+
 		if !commCheck(pidNum) {
 			log.Debug().Int("pid", pidNum).Msg("proc comm mismatch, skipping")
 			continue
 		}
 
-		// Skip processes running inside containers — DockerFinder handles those.
 		if ctrChecker.IsContainerized(pidNum) {
 			log.Trace().Int("pid", pidNum).Msg("skipping containerized process")
 			continue
 		}
 
-		// Resolve the working directory for this PID.
 		cwd, err := resolver.ResolveCwd(pidNum)
 		if err != nil {
 			log.Debug().Err(err).Int("pid", pidNum).Msg("cannot resolve cwd, skipping")
 			continue
 		}
 
+		prefix := "Host"
+		if ppid := ppidResolver.ResolvePPID(pidNum); remotePIDs[ppid] {
+			prefix = "Host (R)"
+		}
+
 		projectDir := CwdToProjectDir(cwd)
 		root := filepath.Join(h.HomeDir, ".claude", "projects", projectDir)
-		label := fmt.Sprintf("Host: %s (PID %s)", ShortProjectName(cwd), pid)
+		label := fmt.Sprintf("%s: %s (PID %s)", prefix, ShortProjectName(cwd), pid)
 
 		filePath := resolveJSONLPath(sessResolver, pidNum, root)
 
@@ -283,7 +381,35 @@ func (h *HostFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			FilePath: filePath,
 		})
 	}
-	return instances, nil
+	return instances
+}
+
+// isClaudeRemoteCmd checks if a command line represents a "claude remote" server invocation.
+// It matches server-mode subcommands ("claude remote", "claude remote-control") but NOT
+// interactive-mode flags ("claude --remote-control", "claude --rc") since those sessions
+// are locally controllable and should not be labeled (R) in the TUI.
+// It also filters false positives like grep/zsh eval matches by requiring the claude
+// token to be a path (contains /) or the first token in the command.
+func isClaudeRemoteCmd(cmdLine string) bool {
+	fields := strings.Fields(cmdLine)
+	for i, f := range fields {
+		if filepath.Base(f) != "claude" {
+			continue
+		}
+		if i+1 >= len(fields) {
+			continue
+		}
+		next := fields[i+1]
+		if next != "remote" && next != "remote-control" {
+			continue
+		}
+		// Accept if the claude token is a path (contains /) or is the first token
+		// in the command (bare "claude remote").
+		if strings.Contains(f, "/") || i == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyProcComm checks that /proc/<pid>/comm matches "claude".

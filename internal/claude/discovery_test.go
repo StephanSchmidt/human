@@ -19,9 +19,23 @@ import (
 type mockRunner struct {
 	output []byte
 	err    error
+	// byArgs maps a key derived from arguments to specific outputs.
+	// When set, Run checks args against this map before falling back to output/err.
+	byArgs map[string]mockRunResult
 }
 
-func (m *mockRunner) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+type mockRunResult struct {
+	output []byte
+	err    error
+}
+
+func (m *mockRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	if m.byArgs != nil {
+		key := name + " " + strings.Join(args, " ")
+		if r, ok := m.byArgs[key]; ok {
+			return r.output, r.err
+		}
+	}
 	return m.output, m.err
 }
 
@@ -113,10 +127,25 @@ func (m *mockSessionResolver) ResolveSessionID(pid int) (string, error) {
 	return sid, nil
 }
 
+// --- mock PPIDResolver ---
+
+type mockPPIDResolver struct {
+	ppids map[int]int
+}
+
+func (m *mockPPIDResolver) ResolvePPID(pid int) int {
+	return m.ppids[pid]
+}
+
 // --- HostFinder tests ---
 
 func TestHostFinder_NoProcesses(t *testing.T) {
-	runner := &mockRunner{output: nil, err: errors.New("exit 1")}
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {err: errors.New("exit 1")},
+		},
+	}
 	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CommChecker: alwaysClaude}
 
 	instances, err := finder.FindInstances(context.Background())
@@ -130,7 +159,10 @@ func TestHostFinder_NoProcesses(t *testing.T) {
 
 func TestHostFinder_FindsClaude(t *testing.T) {
 	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude --some-flag\n67890 /usr/bin/claude\n"),
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude --some-flag\n67890 /usr/bin/claude\n")},
+		},
 	}
 	resolver := &mockCwdResolver{
 		cwds: map[int]string{
@@ -178,7 +210,10 @@ func TestHostFinder_FindsClaude(t *testing.T) {
 
 func TestHostFinder_IgnoresNonClaude(t *testing.T) {
 	runner := &mockRunner{
-		output: []byte("111 /usr/bin/human-claude\n222 /usr/bin/claude-helper\n"),
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("111 /usr/bin/human-claude\n222 /usr/bin/claude-helper\n")},
+		},
 	}
 	finder := &HostFinder{Runner: runner, HomeDir: "/home/testuser", CommChecker: alwaysClaude}
 
@@ -193,7 +228,10 @@ func TestHostFinder_IgnoresNonClaude(t *testing.T) {
 
 func TestHostFinder_CwdResolutionFails(t *testing.T) {
 	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n")},
+		},
 	}
 	resolver := &mockCwdResolver{
 		cwds: map[int]string{
@@ -217,7 +255,10 @@ func TestHostFinder_CwdResolutionFails(t *testing.T) {
 
 func TestHostFinder_SameProject(t *testing.T) {
 	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n")},
+		},
 	}
 	resolver := &mockCwdResolver{
 		cwds: map[int]string{
@@ -245,7 +286,10 @@ func TestHostFinder_SameProject(t *testing.T) {
 
 func TestHostFinder_SkipsContainerizedProcesses(t *testing.T) {
 	runner := &mockRunner{
-		output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n"),
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n67890 /usr/bin/claude\n")},
+		},
 	}
 	resolver := &mockCwdResolver{
 		cwds: map[int]string{
@@ -293,7 +337,12 @@ func TestHostFinder_SessionResolvesToJSONL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
 	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: sessionID}}
 
@@ -334,7 +383,12 @@ func TestHostFinder_SessionExistsButJSONLMissing_NoFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
 	// Session file points to a JSONL that doesn't exist yet.
 	sessResolver := &mockSessionResolver{sessions: map[int]string{12345: "new-session-pending"}}
@@ -373,7 +427,12 @@ func TestHostFinder_NoSessionFile_FallsBackToNewest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
 	// No session for this PID — simulates missing session file.
 	sessResolver := &mockSessionResolver{sessions: map[int]string{}}
@@ -400,7 +459,12 @@ func TestHostFinder_NoSessionFile_FallsBackToNewest(t *testing.T) {
 
 func TestHostFinder_NoJSONL(t *testing.T) {
 	// When no JSONL exists at all, instance should still be created.
-	runner := &mockRunner{output: []byte("12345 /usr/bin/claude\n")}
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
 	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
 
 	finder := &HostFinder{
@@ -419,6 +483,224 @@ func TestHostFinder_NoJSONL(t *testing.T) {
 	}
 	if instances[0].Source != "host" {
 		t.Errorf("Source = %q, want host", instances[0].Source)
+	}
+}
+
+func TestHostFinder_RemoteServerDiscovered(t *testing.T) {
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {output: []byte("99999 node /usr/bin/claude remote\n")},
+			"pgrep -a claude":         {err: errors.New("exit 1")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{99999: "/home/testuser/projects/alpha"}}
+
+	finder := &HostFinder{
+		Runner:      runner,
+		HomeDir:     "/home/testuser",
+		CwdResolver: resolver,
+		CommChecker: alwaysClaude,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if instances[0].Source != "remote" {
+		t.Errorf("Source = %q, want remote", instances[0].Source)
+	}
+	if !strings.Contains(instances[0].Label, "Host (R)") {
+		t.Errorf("Label = %q, want to contain Host (R)", instances[0].Label)
+	}
+	if !strings.Contains(instances[0].Label, "PID 99999") {
+		t.Errorf("Label = %q, want to contain PID 99999", instances[0].Label)
+	}
+}
+
+func TestHostFinder_ChildOfRemoteMarkedAsR(t *testing.T) {
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {output: []byte("99999 node /usr/bin/claude remote\n")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{
+		99999: "/home/testuser/projects/alpha",
+		12345: "/home/testuser/projects/alpha",
+	}}
+	ppidResolver := &mockPPIDResolver{ppids: map[int]int{12345: 99999}}
+
+	finder := &HostFinder{
+		Runner:       runner,
+		HomeDir:      "/home/testuser",
+		CwdResolver:  resolver,
+		CommChecker:  alwaysClaude,
+		PPIDResolver: ppidResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("expected 2 instances (server + child), got %d", len(instances))
+	}
+	// First is the remote server.
+	if instances[0].Source != "remote" {
+		t.Errorf("instances[0].Source = %q, want remote", instances[0].Source)
+	}
+	if !strings.Contains(instances[0].Label, "Host (R)") {
+		t.Errorf("instances[0].Label = %q, want Host (R)", instances[0].Label)
+	}
+	// Second is the child, also marked (R).
+	if instances[1].Source != "host" {
+		t.Errorf("instances[1].Source = %q, want host", instances[1].Source)
+	}
+	if !strings.Contains(instances[1].Label, "Host (R)") {
+		t.Errorf("instances[1].Label = %q, want Host (R)", instances[1].Label)
+	}
+}
+
+func TestHostFinder_NoRemoteServer(t *testing.T) {
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("12345 /usr/bin/claude\n")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{12345: "/home/testuser/projects/alpha"}}
+
+	finder := &HostFinder{
+		Runner:      runner,
+		HomeDir:     "/home/testuser",
+		CwdResolver: resolver,
+		CommChecker: alwaysClaude,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if !strings.HasPrefix(instances[0].Label, "Host:") {
+		t.Errorf("Label = %q, want prefix Host: (not Host (R))", instances[0].Label)
+	}
+}
+
+func TestHostFinder_RemoteFiltersFalsePositives(t *testing.T) {
+	// pgrep -af matches grep/zsh eval lines — verify they are filtered out.
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {output: []byte("55555 /usr/bin/zsh -c eval pgrep -af claude remote\n99999 node /usr/bin/claude remote\n")},
+			"pgrep -a claude":         {err: errors.New("exit 1")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{99999: "/home/testuser/projects/alpha"}}
+
+	finder := &HostFinder{
+		Runner:      runner,
+		HomeDir:     "/home/testuser",
+		CwdResolver: resolver,
+		CommChecker: alwaysClaude,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance (filter out zsh), got %d", len(instances))
+	}
+	if instances[0].PID != 99999 {
+		t.Errorf("PID = %d, want 99999", instances[0].PID)
+	}
+}
+
+func TestHostFinder_InteractiveRemoteNotMarkedAsR(t *testing.T) {
+	// pgrep -af "claude remote" matches BOTH server-mode and interactive --remote-control.
+	// Only the server's children should get Host (R).
+	runner := &mockRunner{
+		byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {output: []byte(
+				"99999 node /usr/bin/claude remote\n" +
+					"88888 node /usr/bin/claude --remote-control\n",
+			)},
+			"pgrep -a claude": {output: []byte("11111 /usr/bin/claude\n22222 /usr/bin/claude\n")},
+		},
+	}
+	resolver := &mockCwdResolver{cwds: map[int]string{
+		99999: "/home/testuser/projects/alpha",
+		88888: "/home/testuser/projects/alpha",
+		11111: "/home/testuser/projects/alpha",
+		22222: "/home/testuser/projects/alpha",
+	}}
+	// PID 11111 is child of server (99999) → Host (R)
+	// PID 22222 is child of interactive remote (88888) → Host (no R)
+	ppidResolver := &mockPPIDResolver{ppids: map[int]int{11111: 99999, 22222: 88888}}
+
+	finder := &HostFinder{
+		Runner:       runner,
+		HomeDir:      "/home/testuser",
+		CwdResolver:  resolver,
+		CommChecker:  alwaysClaude,
+		PPIDResolver: ppidResolver,
+	}
+
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expect: 1 remote server + 2 host instances = 3 total.
+	// The --remote-control process (88888) is filtered out by isClaudeRemoteCmd.
+	if len(instances) != 3 {
+		t.Fatalf("expected 3 instances, got %d", len(instances))
+	}
+
+	// instances[0] = remote server (R)
+	if !strings.Contains(instances[0].Label, "Host (R)") {
+		t.Errorf("instances[0].Label = %q, want Host (R) for server", instances[0].Label)
+	}
+	// instances[1] = child of server → Host (R)
+	if !strings.Contains(instances[1].Label, "Host (R)") {
+		t.Errorf("instances[1].Label = %q, want Host (R) for server child", instances[1].Label)
+	}
+	// instances[2] = child of interactive remote → Host (no R)
+	if !strings.HasPrefix(instances[2].Label, "Host:") {
+		t.Errorf("instances[2].Label = %q, want prefix Host: (not Host (R)) for interactive remote child", instances[2].Label)
+	}
+}
+
+func TestIsClaudeRemoteCmd(t *testing.T) {
+	tests := []struct {
+		cmdLine string
+		want    bool
+	}{
+		{"node /usr/bin/claude remote", true},
+		{"node /home/linuxbrew/.linuxbrew/bin/claude remote", true},
+		{"/usr/bin/claude remote-control", true},
+		{"node /usr/bin/claude remote --verbose", true},
+		{"/usr/bin/zsh -c eval pgrep -af claude remote", false},
+		{"/usr/bin/claude --some-flag", false},
+		{"/usr/bin/claude", false},
+		{"grep claude remote", false},
+		{"claude remote", true},
+		// Interactive-mode flags — NOT server mode, should be false.
+		{"node /usr/bin/claude --remote-control", false},
+		{"node /usr/bin/claude --rc", false},
+		{"node /usr/bin/claude --remote-control My Project", false},
+		{"/usr/bin/claude --remote-control", false},
+	}
+	for _, tt := range tests {
+		got := isClaudeRemoteCmd(tt.cmdLine)
+		if got != tt.want {
+			t.Errorf("isClaudeRemoteCmd(%q) = %v, want %v", tt.cmdLine, got, tt.want)
+		}
 	}
 }
 
@@ -636,13 +918,19 @@ func TestDockerFinder_ListError(t *testing.T) {
 
 func TestCombinedFinder_AggregatesResults(t *testing.T) {
 	f1 := &HostFinder{
-		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
+		Runner: &mockRunner{byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("100 /usr/bin/claude\n")},
+		}},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
 		CommChecker: alwaysClaude,
 	}
 	f2 := &HostFinder{
-		Runner:      &mockRunner{output: []byte("200 /usr/bin/claude\n")},
+		Runner: &mockRunner{byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("200 /usr/bin/claude\n")},
+		}},
 		HomeDir:     "/home/user2",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{200: "/home/user2/project-b"}},
 		CommChecker: alwaysClaude,
@@ -660,7 +948,10 @@ func TestCombinedFinder_AggregatesResults(t *testing.T) {
 
 func TestCombinedFinder_SkipsFailingFinder(t *testing.T) {
 	good := &HostFinder{
-		Runner:      &mockRunner{output: []byte("100 /usr/bin/claude\n")},
+		Runner: &mockRunner{byArgs: map[string]mockRunResult{
+			"pgrep -af claude remote": {err: errors.New("exit 1")},
+			"pgrep -a claude":         {output: []byte("100 /usr/bin/claude\n")},
+		}},
 		HomeDir:     "/home/user1",
 		CwdResolver: &mockCwdResolver{cwds: map[int]string{100: "/home/user1/project-a"}},
 		CommChecker: alwaysClaude,
