@@ -1,7 +1,9 @@
 package cmdproxy
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"os/exec"
@@ -153,6 +155,20 @@ func fetchCACertFromDaemon() ([]byte, error) {
 
 	if len(resp) == 0 {
 		return nil, errors.WithDetails("daemon returned empty CA cert")
+	}
+
+	// Validate the response is a proper CA certificate to guard against
+	// MITM injection of rogue certificates over the plaintext TCP channel.
+	block, _ := pem.Decode(resp)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.WithDetails("daemon returned invalid PEM data")
+	}
+	cert, parseErr := x509.ParseCertificate(block.Bytes)
+	if parseErr != nil {
+		return nil, errors.WrapWithDetails(parseErr, "daemon returned unparseable certificate")
+	}
+	if !cert.IsCA {
+		return nil, errors.WithDetails("daemon returned a non-CA certificate")
 	}
 
 	return resp, nil
