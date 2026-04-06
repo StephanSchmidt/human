@@ -51,7 +51,7 @@ func (s *TelegramSource) AckMessage(ctx context.Context, updateID int) error {
 
 func (s *TelegramSource) isAllowed(user *telegram.User) bool {
 	if len(s.AllowedUsers) == 0 {
-		return true
+		return false // default-deny: require explicit allowlist
 	}
 	if user == nil {
 		return false

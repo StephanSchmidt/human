@@ -54,7 +54,38 @@ func TestTelegramSource_FetchMessages(t *testing.T) {
 		},
 	}
 
+	// No AllowedUsers configured → default-deny, all messages filtered.
 	source := &TelegramSource{Client: fetcher}
+	messages, err := source.FetchMessages(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, messages)
+}
+
+func TestTelegramSource_FetchMessages_WithAllowedUsers(t *testing.T) {
+	fetcher := &stubFetcher{
+		updates: []telegram.Update{
+			{
+				UpdateID: 100,
+				Message: &telegram.Message{
+					MessageID: 1,
+					From:      &telegram.User{ID: 42, FirstName: "John", LastName: "Doe"},
+					Chat:      telegram.Chat{ID: 42, Type: "private"},
+					Text:      "fix the bug",
+				},
+			},
+			{
+				UpdateID: 101,
+				Message: &telegram.Message{
+					MessageID: 2,
+					From:      &telegram.User{ID: 43, FirstName: "Jane"},
+					Chat:      telegram.Chat{ID: 43, Type: "private"},
+					Text:      "add feature",
+				},
+			},
+		},
+	}
+
+	source := &TelegramSource{Client: fetcher, AllowedUsers: []int64{42, 43}}
 	messages, err := source.FetchMessages(context.Background())
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
