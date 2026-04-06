@@ -44,7 +44,10 @@ func (t *McpTranslator) Serve(ctx context.Context, conn net.Conn) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, t.ClaudePath, "--claude-in-chrome-mcp") // #nosec G204 -- path from exec.LookPath in cmd_daemon.go
-	cmd.Env = append(os.Environ(), "CLAUDE_CHROME_PERMISSION_MODE=skip_all_permission_checks")
+	// Only pass safe env vars — exclude tracker tokens and other credentials.
+	cmd.Env = filteredEnv("PATH", "HOME", "USER", "TERM", "SHELL", "LANG",
+		"HUMAN_CHROME_ADDR", "HUMAN_DAEMON_ADDR", "HUMAN_DAEMON_TOKEN")
+	cmd.Env = append(cmd.Env, "CLAUDE_CHROME_PERMISSION_MODE=skip_all_permission_checks")
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -259,4 +262,24 @@ func writeJSONLine(w io.Writer, v any) error {
 		return errors.WrapWithDetails(err, "writing JSON-RPC message")
 	}
 	return nil
+}
+
+// filteredEnv returns a copy of os.Environ containing only the named keys.
+func filteredEnv(keys ...string) []string {
+	allowed := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		allowed[k] = true
+	}
+	var out []string
+	for _, entry := range os.Environ() {
+		for i := range entry {
+			if entry[i] == '=' {
+				if allowed[entry[:i]] {
+					out = append(out, entry)
+				}
+				break
+			}
+		}
+	}
+	return out
 }
