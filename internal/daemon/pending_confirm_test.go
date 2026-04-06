@@ -40,7 +40,7 @@ func TestPendingConfirmStore_ResolveApproved(t *testing.T) {
 	}
 	store.Add(pc)
 
-	err := store.Resolve("op-2", true)
+	err := store.Resolve("op-2", true, 0)
 	require.NoError(t, err)
 
 	decision := <-pc.Decision
@@ -57,7 +57,7 @@ func TestPendingConfirmStore_ResolveRejected(t *testing.T) {
 	}
 	store.Add(pc)
 
-	err := store.Resolve("op-3", false)
+	err := store.Resolve("op-3", false, 0)
 	require.NoError(t, err)
 
 	decision := <-pc.Decision
@@ -68,7 +68,7 @@ func TestPendingConfirmStore_ResolveRejected(t *testing.T) {
 func TestPendingConfirmStore_ResolveNotFound(t *testing.T) {
 	store := NewPendingConfirmStore()
 
-	err := store.Resolve("nonexistent", true)
+	err := store.Resolve("nonexistent", true, 0)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "nonexistent")
 }
@@ -120,6 +120,43 @@ func TestPendingConfirmStore_Len(t *testing.T) {
 	store.Add(&PendingConfirmation{ID: "b", Decision: make(chan bool, 1)})
 	assert.Equal(t, 2, store.Len())
 
-	_ = store.Resolve("a", true)
+	_ = store.Resolve("a", true, 0)
 	assert.Equal(t, 1, store.Len())
+}
+
+func TestPendingConfirmStore_SelfApprovalRejected(t *testing.T) {
+	store := NewPendingConfirmStore()
+
+	pc := &PendingConfirmation{
+		ID:        "op-self",
+		ClientPID: 12345,
+		Decision:  make(chan bool, 1),
+	}
+	store.Add(pc)
+
+	// Same PID as requester → rejected.
+	err := store.Resolve("op-self", true, 12345)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "self-approval not allowed")
+	assert.Equal(t, 1, store.Len()) // still pending
+
+	// Different PID → allowed.
+	err = store.Resolve("op-self", true, 99999)
+	require.NoError(t, err)
+	assert.Equal(t, 0, store.Len())
+}
+
+func TestPendingConfirmStore_ZeroPIDAlwaysAllowed(t *testing.T) {
+	store := NewPendingConfirmStore()
+
+	pc := &PendingConfirmation{
+		ID:        "op-zero",
+		ClientPID: 0,
+		Decision:  make(chan bool, 1),
+	}
+	store.Add(pc)
+
+	// PID 0 approver is always allowed (system/timeout/TUI).
+	err := store.Resolve("op-zero", true, 0)
+	require.NoError(t, err)
 }

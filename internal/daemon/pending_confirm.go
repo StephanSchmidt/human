@@ -45,13 +45,19 @@ func (s *PendingConfirmStore) Add(pc *PendingConfirmation) {
 }
 
 // Resolve sends the decision to the waiting goroutine and removes the entry.
-// Returns an error if the ID is not found.
-func (s *PendingConfirmStore) Resolve(id string, approved bool) error {
+// approverPID is the PID of the client resolving the confirmation; if it
+// matches the original requester's PID (and is non-zero), the call is
+// rejected to prevent self-approval of destructive operations.
+func (s *PendingConfirmStore) Resolve(id string, approved bool, approverPID int) error {
 	s.mu.Lock()
 	pc, ok := s.ops[id]
 	if !ok {
 		s.mu.Unlock()
 		return fmt.Errorf("no pending confirmation with id %q", id)
+	}
+	if approverPID != 0 && approverPID == pc.ClientPID {
+		s.mu.Unlock()
+		return fmt.Errorf("self-approval not allowed: requester and approver are the same client (PID %d)", approverPID)
 	}
 	delete(s.ops, id)
 	s.mu.Unlock()
