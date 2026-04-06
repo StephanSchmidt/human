@@ -644,7 +644,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 	assert.Contains(t, data, "ghcr.io/devcontainers/features/node:1")
 	assert.Contains(t, data, "ghcr.io/stephanschmidt/treehouse/human:1")
 	assert.Contains(t, data, `"BROWSER": "human-browser"`)
-	assert.Contains(t, data, ".human,target=/home/vscode/.human,type=bind")
+	assert.Contains(t, data, ".human/ca.crt,target=/home/vscode/.human/ca.crt,type=bind,readonly")
 	assert.Contains(t, data, `"HUMAN_DAEMON_ADDR": "host.docker.internal:19285"`)
 	assert.Contains(t, data, `"HUMAN_DAEMON_TOKEN": "${localEnv:HUMAN_DAEMON_TOKEN}"`)
 	assert.Contains(t, data, `"HUMAN_CHROME_ADDR": "host.docker.internal:19286"`)

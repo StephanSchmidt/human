@@ -196,7 +196,7 @@ func buildDevcontainerConfig(proxy, intercept bool, stacks []StackType) devconta
 		Name:         "human secure container",
 		Image:        "mcr.microsoft.com/devcontainers/base:ubuntu",
 		Features:     features,
-		Mounts:       []string{"source=${localEnv:HOME}/.human,target=/home/vscode/.human,type=bind,consistency=cached"},
+		Mounts:       []string{"source=${localEnv:HOME}/.human/ca.crt,target=/home/vscode/.human/ca.crt,type=bind,readonly"},
 		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
 		ForwardPorts: []int{19285, 19286},
 		RemoteEnv: map[string]string{ // #nosec G101 -- not a credential, just env var name referencing localEnv
