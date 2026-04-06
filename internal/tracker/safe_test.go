@@ -80,7 +80,8 @@ func TestSafeProvider_WriteMethodsPassThrough(t *testing.T) {
 	assert.Equal(t, "c-2", comment.ID)
 
 	err = sp.TransitionIssue(ctx, "KAN-1", "In Progress")
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked by safe mode")
 
 	err = sp.AssignIssue(ctx, "KAN-1", "user-1")
 	require.NoError(t, err)
@@ -90,10 +91,9 @@ func TestSafeProvider_WriteMethodsPassThrough(t *testing.T) {
 	assert.Equal(t, "user-1", userID)
 
 	title := "Updated"
-	edited, err := sp.EditIssue(ctx, "KAN-1", tracker.EditOptions{Title: &title})
-	require.NoError(t, err)
-	require.NotNil(t, edited)
-	assert.Equal(t, "KAN-1", edited.Key)
+	_, err = sp.EditIssue(ctx, "KAN-1", tracker.EditOptions{Title: &title})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "blocked by safe mode")
 }
 
 func TestSafeProvider_DeleteIssueBlocked(t *testing.T) {

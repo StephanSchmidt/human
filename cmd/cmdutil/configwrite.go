@@ -39,7 +39,7 @@ func AutoSaveTrackerConfig(parsed *tracker.ParsedURL, configDir string) error {
 	// If file doesn't exist, create it with the section.
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		content := section + ":\n" + entry
-		return os.WriteFile(configFile, []byte(content), 0o644) // #nosec G306 -- .humanconfig.yaml is a project config file, not secrets
+		return os.WriteFile(configFile, []byte(content), 0o600)
 	}
 
 	// File exists — append the entry to the appropriate section.

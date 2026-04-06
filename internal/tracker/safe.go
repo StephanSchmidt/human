@@ -6,8 +6,9 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 )
 
-// SafeProvider wraps a Provider and blocks destructive operations.
-// Only DeleteIssue is blocked; all other methods delegate to the inner provider.
+// SafeProvider wraps a Provider and blocks mutating operations.
+// DeleteIssue, EditIssue, and TransitionIssue are blocked; read operations
+// and assignments delegate to the inner provider.
 type SafeProvider struct {
 	inner        Provider
 	instanceName string
@@ -45,8 +46,10 @@ func (s *SafeProvider) AddComment(ctx context.Context, issueKey string, body str
 	return s.inner.AddComment(ctx, issueKey, body)
 }
 
-func (s *SafeProvider) TransitionIssue(ctx context.Context, key string, targetStatus string) error {
-	return s.inner.TransitionIssue(ctx, key, targetStatus)
+func (s *SafeProvider) TransitionIssue(_ context.Context, _ string, _ string) error {
+	return errors.WithDetails("operation blocked by safe mode: %s on %s",
+		"operation", "TransitionIssue",
+		"instance", s.instanceName)
 }
 
 func (s *SafeProvider) AssignIssue(ctx context.Context, key string, userID string) error {
@@ -57,8 +60,10 @@ func (s *SafeProvider) GetCurrentUser(ctx context.Context) (string, error) {
 	return s.inner.GetCurrentUser(ctx)
 }
 
-func (s *SafeProvider) EditIssue(ctx context.Context, key string, opts EditOptions) (*Issue, error) {
-	return s.inner.EditIssue(ctx, key, opts)
+func (s *SafeProvider) EditIssue(_ context.Context, _ string, _ EditOptions) (*Issue, error) {
+	return nil, errors.WithDetails("operation blocked by safe mode: %s on %s",
+		"operation", "EditIssue",
+		"instance", s.instanceName)
 }
 
 func (s *SafeProvider) ListStatuses(ctx context.Context, key string) ([]Status, error) {

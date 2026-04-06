@@ -127,8 +127,9 @@ func IsSensitiveFile(name string) FileKind {
 		return FileKindJSON
 	}
 
-	// YAML files with secrets
-	if lower == "secrets.yml" || lower == "secrets.yaml" {
+	// YAML files with secrets (including .humanconfig with tracker credentials)
+	switch lower {
+	case "secrets.yml", "secrets.yaml", ".humanconfig", ".humanconfig.yaml", ".humanconfig.yml":
 		return FileKindYAML
 	}
 

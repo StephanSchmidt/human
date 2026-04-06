@@ -34,7 +34,18 @@ func (n *SecNode) WrapChild(_ context.Context, ops fs.InodeEmbedder) fs.InodeEmb
 }
 
 func (n *SecNode) fileKind() FileKind {
-	return IsSensitiveFile(filepath.Base(n.Path(n.root())))
+	// Check the FUSE path name first.
+	if kind := IsSensitiveFile(filepath.Base(n.Path(n.root()))); kind != FileKindNone {
+		return kind
+	}
+	// Also resolve symlinks to check the real target's name,
+	// preventing bypass via symlinks with non-sensitive names.
+	real := n.realPath()
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil || resolved == real {
+		return FileKindNone
+	}
+	return IsSensitiveFile(filepath.Base(resolved))
 }
 
 func (n *SecNode) root() *fs.Inode {
