@@ -1,11 +1,11 @@
+//go:build !cgo
+
 package vault
 
 import (
 	"context"
 	"strings"
 	"sync"
-
-	"github.com/1password/onepassword-sdk-go"
 
 	"github.com/StephanSchmidt/human/errors"
 )
@@ -17,17 +17,13 @@ const secretRefPrefix = "1pw://"
 const sdkRefPrefix = "op://"
 
 // OnePassword resolves 1pw:// secret references using the 1Password Go SDK.
-// It lazily initializes the SDK client on first use via the desktop app
-// integration, which triggers biometric/master password authentication.
+// When built without CGO, CreateClient always returns an error directing
+// users to the op CLI fallback.
 type OnePassword struct {
-	// Account is the 1Password account name (shown top-left in the desktop app sidebar).
-	Account string
-	// IntegrationName identifies this integration to 1Password.
-	IntegrationName string
-	// IntegrationVersion identifies the version to 1Password.
+	Account            string
+	IntegrationName    string
 	IntegrationVersion string
 
-	// clientFactory overrides SDK client creation for testing.
 	clientFactory func(ctx context.Context) (secretResolver, error)
 
 	once    sync.Once
@@ -40,9 +36,8 @@ type secretResolver interface {
 	Resolve(ctx context.Context, ref string) (string, error)
 }
 
-// NewOnePassword creates a 1Password provider using the SDK.
-// The account parameter is the 1Password account name used for desktop app
-// integration (biometric/master password authentication).
+// NewOnePassword creates a 1Password provider.
+// Without CGO the SDK is unavailable; Resolve will return an error.
 func NewOnePassword(account string) *OnePassword {
 	return &OnePassword{
 		Account:            account,
@@ -56,8 +51,8 @@ func (o *OnePassword) CanResolve(ref string) bool {
 	return strings.HasPrefix(ref, secretRefPrefix)
 }
 
-// Resolve uses the 1Password SDK to retrieve the secret value for the given reference.
-// It translates the 1pw:// prefix to op:// before calling the SDK.
+// Resolve attempts to retrieve the secret. Without CGO this always fails
+// unless a clientFactory is injected (tests).
 func (o *OnePassword) Resolve(ref string) (string, error) {
 	o.once.Do(func() {
 		o.client, o.initErr = o.createClient()
@@ -66,7 +61,6 @@ func (o *OnePassword) Resolve(ref string) (string, error) {
 		return "", errors.WrapWithDetails(o.initErr, "initializing 1Password SDK")
 	}
 
-	// Translate 1pw:// → op:// for the SDK.
 	sdkRef := sdkRefPrefix + strings.TrimPrefix(ref, secretRefPrefix)
 
 	val, err := o.client.Resolve(context.Background(), sdkRef)
@@ -76,18 +70,9 @@ func (o *OnePassword) Resolve(ref string) (string, error) {
 	return val, nil
 }
 
-// createClient initializes the 1Password SDK client using desktop app integration.
 func (o *OnePassword) createClient() (secretResolver, error) {
 	if o.clientFactory != nil {
 		return o.clientFactory(context.Background())
 	}
-
-	client, err := onepassword.NewClient(context.Background(),
-		onepassword.WithDesktopAppIntegration(o.Account),
-		onepassword.WithIntegrationInfo(o.IntegrationName, o.IntegrationVersion),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return client.Secrets(), nil
+	return nil, errors.WithDetails("1Password SDK requires CGO; use op CLI fallback (vault provider: 1password on WSL)")
 }
