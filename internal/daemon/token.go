@@ -27,7 +27,13 @@ func GenerateToken() (string, error) {
 func TokenPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		dir = filepath.Join(os.TempDir(), ".config")
+		// Fall back to ~/.config instead of /tmp to avoid world-accessible storage.
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			dir = filepath.Join(".", ".config")
+		} else {
+			dir = filepath.Join(home, ".config")
+		}
 	}
 	return filepath.Join(dir, "human", "daemon-token")
 }

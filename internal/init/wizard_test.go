@@ -206,7 +206,7 @@ func TestGenerateConfig_SingleJira(t *testing.T) {
 	assert.Contains(t, got, "name: work")
 	assert.Contains(t, got, "url: https://myorg.atlassian.net")
 	assert.Contains(t, got, "user: me@example.com")
-	assert.Contains(t, got, `description: "Product backlog"`)
+	assert.Contains(t, got, "description: Product backlog")
 	assert.Contains(t, got, "export JIRA_WORK_KEY=your-key")
 }
 

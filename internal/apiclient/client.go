@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
@@ -17,6 +18,7 @@ const DefaultTimeout = 30 * time.Second
 
 // ValidateURL checks that rawURL is a valid HTTP(S) URL.
 // This guards against SSRF by rejecting non-HTTP schemes.
+// HTTP URLs are accepted but logged as insecure; prefer HTTPS.
 func ValidateURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -27,6 +29,9 @@ func ValidateURL(rawURL string) error {
 	}
 	if u.Host == "" {
 		return errors.WithDetails("URL must have a host", "url", rawURL)
+	}
+	if u.Scheme == "http" {
+		fmt.Fprintf(os.Stderr, "warning: using insecure HTTP for %s — credentials may be transmitted in plaintext\n", u.Host)
 	}
 	return nil
 }

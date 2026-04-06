@@ -158,7 +158,9 @@ func GenerateConfig(instances []serviceInstance) (string, error) {
 		})
 	}
 
-	tmpl, err := template.New("config").Parse(configTemplate)
+	tmpl, err := template.New("config").Funcs(template.FuncMap{
+		"yamlSafe": yamlSafeString,
+	}).Parse(configTemplate)
 	if err != nil {
 		return "", errors.WrapWithDetails(err, "parsing config template")
 	}
@@ -174,18 +176,18 @@ func GenerateConfig(instances []serviceInstance) (string, error) {
 const configTemplate = `{{- range $i, $section := .Sections }}{{ if $i }}
 {{ end }}{{ $section.ConfigKey }}:
 {{- range $section.Instances }}
-  - name: {{ .Name }}
+  - name: {{ .Name | yamlSafe }}
 {{- if .URL }}
-    url: {{ .URL }}
+    url: {{ .URL | yamlSafe }}
 {{- end }}
 {{- if .User }}
-    user: {{ .User }}
+    user: {{ .User | yamlSafe }}
 {{- end }}
 {{- if .Org }}
-    org: {{ .Org }}
+    org: {{ .Org | yamlSafe }}
 {{- end }}
 {{- if .Description }}
-    description: "{{ .Description }}"
+    description: {{ .Description | yamlSafe }}
 {{- end }}
 {{- range .EnvComments }}
     # {{ . }}
@@ -193,6 +195,19 @@ const configTemplate = `{{- range $i, $section := .Sections }}{{ if $i }}
 {{- end }}
 {{- end }}
 `
+
+// yamlSafeString returns s quoted if it contains characters that could
+// break YAML structure or inject fields, otherwise returns it as-is.
+func yamlSafeString(s string) string {
+	if strings.ContainsAny(s, "\"\n\r\\{}[]|>&*!") {
+		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		escaped = strings.ReplaceAll(escaped, "\n", `\n`)
+		escaped = strings.ReplaceAll(escaped, "\r", `\r`)
+		return `"` + escaped + `"`
+	}
+	return s
+}
 
 // StackType describes a language stack that can be added as a devcontainer feature.
 type StackType struct {

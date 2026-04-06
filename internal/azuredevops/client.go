@@ -48,7 +48,7 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 
 	var clauses []string
 	if project != "" {
-		clauses = append(clauses, fmt.Sprintf("[System.TeamProject] = '%s'", project))
+		clauses = append(clauses, fmt.Sprintf("[System.TeamProject] = '%s'", strings.ReplaceAll(project, "'", "''")))
 	}
 	if !opts.IncludeAll {
 		clauses = append(clauses, "[System.State] <> 'Done' AND [System.State] <> 'Removed'")
@@ -118,7 +118,7 @@ func (c *Client) GetIssue(ctx context.Context, key string) (*tracker.Issue, erro
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "api-version=7.1", nil, "")
 	if err != nil {
 		return nil, err
@@ -151,7 +151,7 @@ func (c *Client) CreateIssue(ctx context.Context, issue *tracker.Issue) (*tracke
 		return nil, errors.WrapWithDetails(err, "marshalling create request", "project", project)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/$Issue", c.org, project)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/$Issue", url.PathEscape(c.org), url.PathEscape(project))
 	resp, err := c.doRequest(ctx, http.MethodPost, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
 	if err != nil {
 		return nil, err
@@ -194,7 +194,7 @@ func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status
 	}
 
 	// Fetch the work item to determine its type.
-	wiPath := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	wiPath := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	wiResp, err := c.doRequest(ctx, http.MethodGet, wiPath, "api-version=7.1", nil, "")
 	if err != nil {
 		return nil, err
@@ -246,7 +246,7 @@ func (c *Client) TransitionIssue(ctx context.Context, key string, targetStatus s
 		return errors.WrapWithDetails(err, "marshalling transition request", "key", key)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
 	if err != nil {
 		return err
@@ -270,7 +270,7 @@ func (c *Client) AssignIssue(ctx context.Context, key string, userID string) err
 		return errors.WrapWithDetails(err, "marshalling assign request", "key", key)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
 	if err != nil {
 		return err
@@ -281,7 +281,7 @@ func (c *Client) AssignIssue(ctx context.Context, key string, userID string) err
 
 // GetCurrentUser implements tracker.CurrentUserGetter.
 func (c *Client) GetCurrentUser(ctx context.Context) (string, error) {
-	path := fmt.Sprintf("/%s/_apis/connectionData", c.org)
+	path := fmt.Sprintf("/%s/_apis/connectionData", url.PathEscape(c.org))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "api-version=7.1", nil, "")
 	if err != nil {
 		return "", err
@@ -313,7 +313,7 @@ func (c *Client) EditIssue(ctx context.Context, key string, opts tracker.EditOpt
 		return nil, errors.WrapWithDetails(err, "marshalling edit request", "key", key)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
 	if err != nil {
 		return nil, err
@@ -343,7 +343,7 @@ func (c *Client) DeleteIssue(ctx context.Context, key string) error {
 		return errors.WrapWithDetails(err, "marshalling delete request", "key", key)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/%d", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodPatch, path, "api-version=7.1", bytes.NewReader(body), "application/json-patch+json")
 	if err != nil {
 		return err
@@ -364,7 +364,7 @@ func (c *Client) AddComment(ctx context.Context, issueKey string, body string) (
 		return nil, errors.WrapWithDetails(err, "marshalling comment request", "issueKey", issueKey)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workItems/%d/comments", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workItems/%d/comments", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, "api-version=7.1-preview.4", bytes.NewReader(payload), "application/json")
 	if err != nil {
 		return nil, err
@@ -384,7 +384,7 @@ func (c *Client) ListComments(ctx context.Context, issueKey string) ([]tracker.C
 		return nil, err
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workItems/%d/comments", c.org, project, id)
+	path := fmt.Sprintf("/%s/%s/_apis/wit/workItems/%d/comments", url.PathEscape(c.org), url.PathEscape(project), id)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "api-version=7.1-preview.4", nil, "")
 	if err != nil {
 		return nil, err
@@ -487,7 +487,7 @@ func (c *Client) toTrackerIssue(wi adoWorkItem, project string) tracker.Issue {
 // or to the organization when project is empty.
 func (c *Client) apisPath(project, resource string) string {
 	if project != "" {
-		return fmt.Sprintf("/%s/%s/_apis/%s", c.org, project, resource)
+		return fmt.Sprintf("/%s/%s/_apis/%s", url.PathEscape(c.org), url.PathEscape(project), resource)
 	}
-	return fmt.Sprintf("/%s/_apis/%s", c.org, resource)
+	return fmt.Sprintf("/%s/_apis/%s", url.PathEscape(c.org), resource)
 }
