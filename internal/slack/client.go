@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/apiclient"
@@ -65,7 +66,10 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 
 // ListMessages returns recent messages from the configured Slack channel.
 func (c *Client) ListMessages(ctx context.Context, limit int) ([]MessageSummary, error) {
-	query := fmt.Sprintf("channel=%s&limit=%d", c.channel, limit)
+	qv := url.Values{}
+	qv.Set("channel", c.channel)
+	qv.Set("limit", fmt.Sprintf("%d", limit))
+	query := qv.Encode()
 	resp, err := c.api.Do(ctx, http.MethodGet, "/conversations.history", query, nil)
 	if err != nil {
 		return nil, err

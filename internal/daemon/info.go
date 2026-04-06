@@ -51,7 +51,7 @@ func InfoPath() string {
 // WriteInfo writes the daemon info as JSON to InfoPath with restricted permissions.
 func WriteInfo(info DaemonInfo) error {
 	path := InfoPath()
-	if err := fs.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := fs.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(info, "", "  ")

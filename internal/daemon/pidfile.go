@@ -14,7 +14,7 @@ func PidPath() string {
 		return filepath.Join(".", ".human", "daemon.pid")
 	}
 	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
+	_ = os.MkdirAll(dir, 0o700)
 	return filepath.Join(dir, "daemon.pid")
 }
 
@@ -25,7 +25,7 @@ func LogPath() string {
 		return filepath.Join(".", ".human", "daemon.log")
 	}
 	dir := filepath.Join(home, ".human")
-	_ = os.MkdirAll(dir, 0o750)
+	_ = os.MkdirAll(dir, 0o700)
 	return filepath.Join(dir, "daemon.log")
 }
 

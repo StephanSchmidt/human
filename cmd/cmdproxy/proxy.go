@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -186,6 +187,11 @@ func readDaemonInfo() (daemon.DaemonInfo, error) {
 	sudoUser := os.Getenv("SUDO_USER")
 	if sudoUser == "" {
 		return daemon.DaemonInfo{}, err
+	}
+
+	// Validate SUDO_USER to prevent path traversal.
+	if strings.Contains(sudoUser, "/") || strings.Contains(sudoUser, "..") {
+		return daemon.DaemonInfo{}, errors.WithDetails("invalid SUDO_USER value")
 	}
 
 	// Try /home/<SUDO_USER>/.human/daemon.json

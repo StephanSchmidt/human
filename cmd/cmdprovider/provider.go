@@ -1,10 +1,12 @@
 package cmdprovider
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -316,9 +318,15 @@ func RunCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, proj
 }
 
 // RunDeleteIssue deletes an issue.
-// Confirmation is handled by the daemon interceptor; the --yes flag is only
-// used by the daemon to mark that confirmation was already obtained.
-func RunDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, _ bool) error {
+// When yes is false, the user is prompted for confirmation before proceeding.
+func RunDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, yes bool) error {
+	if !yes {
+		fmt.Fprintf(os.Stderr, "Delete %s? [y/N] ", key)
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() || (scanner.Text() != "" && scanner.Text()[0] != 'y' && scanner.Text()[0] != 'Y') {
+			return errors.WithDetails("delete cancelled by user")
+		}
+	}
 	if err := p.DeleteIssue(ctx, key); err != nil {
 		return err
 	}

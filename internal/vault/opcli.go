@@ -35,6 +35,12 @@ func (o *OpCLI) CanResolve(ref string) bool {
 func (o *OpCLI) Resolve(ref string) (string, error) {
 	sdkRef := sdkRefPrefix + strings.TrimPrefix(ref, secretRefPrefix)
 
+	// Validate that the resolved reference starts with the expected op:// prefix
+	// to prevent arbitrary argument injection.
+	if !strings.HasPrefix(sdkRef, "op://") {
+		return "", errors.WithDetails("invalid secret reference: must start with op://")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

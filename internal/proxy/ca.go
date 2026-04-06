@@ -82,7 +82,7 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 	}
 	keyPEMBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, nil, nil, errors.WrapWithDetails(err, "creating CA directory", "dir", dir)
 	}
 	if err := os.WriteFile(certPath, certPEMBlock, 0o644); err != nil { // #nosec G306 -- CA cert must be readable for trust installation

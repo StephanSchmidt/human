@@ -245,7 +245,7 @@ func (li *LoggingInterceptor) logTraffic(entry TrafficLog) {
 		return
 	}
 
-	if err := os.MkdirAll(li.LogDir, 0o750); err != nil {
+	if err := os.MkdirAll(li.LogDir, 0o700); err != nil {
 		li.Logger.Warn().Err(err).Msg("failed to create traffic log dir")
 		return
 	}

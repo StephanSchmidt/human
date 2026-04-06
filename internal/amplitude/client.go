@@ -2,7 +2,7 @@ package amplitude
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"net/url"
 
@@ -253,20 +253,23 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string) (
 	return c.api.Do(ctx, method, path, rawQuery, nil)
 }
 
+// eventTypeObj is the JSON shape for an Amplitude event type parameter.
+type eventTypeObj struct {
+	EventType string `json:"event_type"`
+}
+
 // buildEventJSON returns a JSON-encoded event type object for query parameters.
 func buildEventJSON(eventType string) string {
-	return fmt.Sprintf(`{"event_type":"%s"}`, eventType)
+	b, _ := json.Marshal(eventTypeObj{EventType: eventType})
+	return string(b)
 }
 
 // buildFunnelEventsJSON returns a JSON array of event type objects for funnel query parameters.
 func buildFunnelEventsJSON(events []string) string {
-	result := "["
+	objs := make([]eventTypeObj, len(events))
 	for i, e := range events {
-		if i > 0 {
-			result += ","
-		}
-		result += fmt.Sprintf(`{"event_type":"%s"}`, e)
+		objs[i] = eventTypeObj{EventType: e}
 	}
-	result += "]"
-	return result
+	b, _ := json.Marshal(objs)
+	return string(b)
 }

@@ -819,7 +819,7 @@ func TestCmd_IssueDelete_Success(t *testing.T) {
 
 	var buf bytes.Buffer
 	root.SetOut(&buf)
-	root.SetArgs([]string{"jira", "issue", "delete", "KAN-1"})
+	root.SetArgs([]string{"jira", "issue", "delete", "KAN-1", "--yes"})
 	err := root.Execute()
 	require.NoError(t, err)
 	assert.True(t, deleted)

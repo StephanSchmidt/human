@@ -310,6 +310,8 @@ func sanitizeFTSQuery(query string) string {
 	for i, w := range words {
 		// Strip existing quotes to avoid double-quoting.
 		w = strings.Trim(w, `"`)
+		// Escape internal double quotes by doubling them per FTS5 rules.
+		w = strings.ReplaceAll(w, `"`, `""`)
 		words[i] = `"` + w + `"`
 	}
 	return strings.Join(words, " ")
