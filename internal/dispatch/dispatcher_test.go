@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -326,6 +327,32 @@ func TestBuildPrompt_StripsControlChars(t *testing.T) {
 	assert.NotContains(t, prompt, "\x00")
 	assert.NotContains(t, prompt, "\x1b")
 	assert.NotContains(t, prompt, "\x07")
+}
+
+// Oversized messages are truncated to the byte cap with a marker, so a
+// compromised allowlisted account cannot flood a Claude agent with a
+// multi-KB jailbreak. The marker lets Claude see that text was cut.
+func TestBuildPrompt_TruncatesOversizedInput(t *testing.T) {
+	input := strings.Repeat("x", 5000)
+	prompt := buildPrompt(input)
+
+	assert.Contains(t, prompt, "[truncated]")
+
+	// The prompt has a prefix from DefaultPromptTemplate. The message
+	// portion (what follows the prefix) must be <= maxMessageTextLen plus
+	// the " [truncated]" marker, not 5000.
+	prefix := fmt.Sprintf(DefaultPromptTemplate, "")
+	messagePart := strings.TrimPrefix(prompt, prefix)
+	assert.LessOrEqual(t, len(messagePart), maxMessageTextLen+len(" [truncated]"))
+	assert.Greater(t, len(messagePart), maxMessageTextLen) // truncation actually happened
+}
+
+// A message exactly at the cap is left untouched — no off-by-one.
+func TestBuildPrompt_AtCapNotTruncated(t *testing.T) {
+	input := strings.Repeat("y", maxMessageTextLen)
+	prompt := buildPrompt(input)
+	assert.NotContains(t, prompt, "[truncated]")
+	assert.Contains(t, prompt, input)
 }
 
 func TestDispatcher_FinderError(t *testing.T) {

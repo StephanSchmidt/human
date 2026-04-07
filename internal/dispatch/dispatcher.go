@@ -19,6 +19,14 @@ const DefaultPollInterval = 10 * time.Second
 // Must be a single line — tmux send-keys treats newlines as Enter keypresses.
 const DefaultPromptTemplate = `The following task was sent via Telegram. Create an implementation ticket on Linear (HUM) for it, then execute the plan: %s`
 
+// maxMessageTextLen caps the number of bytes of Telegram message text that
+// reach the Claude prompt. Telegram allows messages up to 4096 characters,
+// and 2000 is a round cap well above any realistic task description while
+// below the point where tmux buffer behavior or prompt bloat become
+// concerns. Text longer than this is truncated with a " [truncated]"
+// marker so Claude sees that something was cut.
+const maxMessageTextLen = 2000
+
 // MessageSource fetches and acknowledges Telegram messages.
 type MessageSource interface {
 	FetchMessages(ctx context.Context) ([]QueuedMessage, error)
@@ -207,5 +215,13 @@ func buildPrompt(messageText string) string {
 		}
 		return r
 	}, messageText)
-	return fmt.Sprintf(DefaultPromptTemplate, strings.TrimSpace(cleaned))
+	cleaned = strings.TrimSpace(cleaned)
+	// Cap message length so oversized prompts cannot flood a Claude agent.
+	// Byte-level truncation is sufficient here: tmux does not care about
+	// rune boundaries, and the " [truncated]" marker lets Claude see that
+	// the message was cut regardless of whether we sliced mid-rune.
+	if len(cleaned) > maxMessageTextLen {
+		cleaned = cleaned[:maxMessageTextLen] + " [truncated]"
+	}
+	return fmt.Sprintf(DefaultPromptTemplate, cleaned)
 }
