@@ -12,7 +12,7 @@
 
 [https://gethuman.sh](https://gethuman.sh)
 
-**The secure Developer OS for AI-powered engineering.** Claude is the engine. human is everything else. Trackers. Skills. Agents. Docs. Designs. Analytics. One install.
+**The AI Software Factory.** Tickets, docs, designs, and analytics in. Shipped code out. One secure pipeline from idea to review. Claude on the line, human on the floor. You in control.
 
 - **Pipeline Dashboard** — Monitor running agents, token usage, tracker issues, and pipeline state in real time
 - **Secure Devcontainer** — OAuth, MCP, browser access, Chrome Bridge, firewall — all configured out of the box
