@@ -89,6 +89,21 @@ func TestLoadInstances_missingFile(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
+func TestInstance_ConfigWarnings_emptyAllowlist(t *testing.T) {
+	inst := &Instance{Name: "bot", AllowedUsers: nil}
+	warnings := inst.ConfigWarnings()
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], `Telegram instance "bot"`)
+	assert.Contains(t, warnings[0], "empty allowed_users")
+	assert.Contains(t, warnings[0], "default-deny")
+}
+
+func TestInstance_ConfigWarnings_populatedAllowlist(t *testing.T) {
+	inst := &Instance{Name: "bot", AllowedUsers: []int64{42}}
+	warnings := inst.ConfigWarnings()
+	assert.Empty(t, warnings)
+}
+
 // allowed_chats is optional but must round-trip through LoadInstances so
 // group-chat dispatch can be opted in via .humanconfig.
 func TestLoadInstances_allowedChats(t *testing.T) {

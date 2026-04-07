@@ -509,6 +509,15 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNo
 	}
 
 	inst := instances[0]
+
+	// Surface config health warnings before we start the dispatcher so
+	// misconfigurations (e.g. Telegram enabled with an empty allowlist,
+	// which silently rejects every message) are visible to the operator
+	// at startup, not just in retrospect via the rejection counter.
+	for _, w := range inst.ConfigWarnings() {
+		logger.Warn().Msg(w)
+	}
+
 	runner := claude.OSCommandRunner{}
 	homeDir, _ := os.UserHomeDir()
 

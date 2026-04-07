@@ -1,6 +1,8 @@
 package telegram
 
 import (
+	"fmt"
+
 	"github.com/StephanSchmidt/human/internal/config"
 )
 
@@ -26,6 +28,23 @@ type Instance struct {
 	AllowedUsers []int64
 	AllowedChats []int64 // see Config.AllowedChats
 	NotifyChatID int64   // Chat ID for proactive notifications
+}
+
+// ConfigWarnings returns human-readable warnings about this instance's
+// configuration relative to the auth rule enforced by IsAllowed. An empty
+// slice means the configuration is healthy. Warnings surface silent
+// misconfigurations like "Telegram is enabled but the allowlist is empty,
+// so every message will be rejected" — the runtime behavior is still safe
+// (default-deny), but operators deserve to know.
+func (i *Instance) ConfigWarnings() []string {
+	var warnings []string
+	if len(i.AllowedUsers) == 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"Telegram instance %q has empty allowed_users; all messages will be rejected (default-deny). Add user IDs to allowed_users in .humanconfig.",
+			i.Name,
+		))
+	}
+	return warnings
 }
 
 // LoadConfigs reads a .humanconfig YAML file from dir and returns the
