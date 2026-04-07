@@ -516,6 +516,7 @@ func startTelegramDispatcher(ctx context.Context, logger zerolog.Logger, extraNo
 		Source: &dispatch.TelegramSource{
 			Client:       inst.Client,
 			AllowedUsers: inst.AllowedUsers,
+			Logger:       logger,
 		},
 		Finder: &dispatch.TmuxAgentFinder{
 			InstanceFinder: &claude.HostFinder{Runner: runner, HomeDir: homeDir},

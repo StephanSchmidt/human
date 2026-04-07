@@ -59,6 +59,11 @@ func TestTelegramSource_FetchMessages(t *testing.T) {
 	messages, err := source.FetchMessages(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, messages)
+
+	// Rejected updates must be acked so they do not linger in the Telegram
+	// pending queue, and the rejection counter must reflect them.
+	assert.Equal(t, []int{100, 101}, fetcher.acked)
+	assert.Equal(t, uint64(2), source.RejectedCount())
 }
 
 func TestTelegramSource_FetchMessages_WithAllowedUsers(t *testing.T) {
@@ -112,6 +117,11 @@ func TestTelegramSource_FetchMessages_FilteredByAllowedUsers(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, messages, 1)
 	assert.Equal(t, "allowed", messages[0].Text)
+
+	// The allowed update (100) must NOT be pre-acked here — the dispatcher
+	// acks after successful dispatch. Only the rejected update (101) is.
+	assert.Equal(t, []int{101}, fetcher.acked)
+	assert.Equal(t, uint64(1), source.RejectedCount())
 }
 
 func TestTelegramSource_FetchMessages_NilMessage(t *testing.T) {
@@ -125,6 +135,12 @@ func TestTelegramSource_FetchMessages_NilMessage(t *testing.T) {
 	messages, err := source.FetchMessages(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, messages)
+
+	// Malformed updates (nil Message) are skipped but NOT acked and NOT
+	// counted as rejections — they may represent a future Telegram update
+	// shape we should not silently consume.
+	assert.Empty(t, fetcher.acked)
+	assert.Equal(t, uint64(0), source.RejectedCount())
 }
 
 func TestTelegramSource_FetchMessages_Error(t *testing.T) {
@@ -132,6 +148,29 @@ func TestTelegramSource_FetchMessages_Error(t *testing.T) {
 	source := &TelegramSource{Client: fetcher}
 	_, err := source.FetchMessages(context.Background())
 	require.Error(t, err)
+}
+
+// A failing ack on a rejected update must not abort the batch — the counter
+// still increments and the failure is logged but swallowed so subsequent
+// updates still get processed.
+func TestTelegramSource_FetchMessages_AckFailureOnReject(t *testing.T) {
+	fetcher := &stubFetcher{
+		updates: []telegram.Update{
+			{UpdateID: 100, Message: &telegram.Message{From: &telegram.User{ID: 99}, Chat: telegram.Chat{ID: 99, Type: "private"}, Text: "eve"}},
+			{UpdateID: 101, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: 42, Type: "private"}, Text: "alice"}},
+		},
+		ackErr: fmt.Errorf("telegram unavailable"),
+	}
+	source := &TelegramSource{Client: fetcher, AllowedUsers: []int64{42}}
+	messages, err := source.FetchMessages(context.Background())
+	require.NoError(t, err)
+
+	// Allowed message still comes through.
+	require.Len(t, messages, 1)
+	assert.Equal(t, "alice", messages[0].Text)
+
+	// Rejection counter still increments even though the ack call failed.
+	assert.Equal(t, uint64(1), source.RejectedCount())
 }
 
 func TestTelegramSource_AckMessage(t *testing.T) {
