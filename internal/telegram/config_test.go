@@ -89,6 +89,23 @@ func TestLoadInstances_missingFile(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
+// allowed_chats is optional but must round-trip through LoadInstances so
+// group-chat dispatch can be opted in via .humanconfig.
+func TestLoadInstances_allowedChats(t *testing.T) {
+	dir := t.TempDir()
+	writeTestConfig(t, dir, "telegrams:\n  - name: mybot\n    token: \"123456:ABC\"\n    allowed_users: [42, 43]\n    allowed_chats: [-1001234567890, -1009876543210]\n")
+
+	unsetEnv(t, "TELEGRAM_TOKEN")
+	unsetEnv(t, "TELEGRAM_MYBOT_TOKEN")
+
+	instances, err := LoadInstances(dir)
+	require.NoError(t, err)
+	require.Len(t, instances, 1)
+
+	assert.Equal(t, []int64{42, 43}, instances[0].AllowedUsers)
+	assert.Equal(t, []int64{-1001234567890, -1009876543210}, instances[0].AllowedChats)
+}
+
 func TestLoadInstances_missingTokenSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeTestConfig(t, dir, "telegrams:\n  - name: mybot\n")

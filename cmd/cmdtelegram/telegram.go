@@ -49,7 +49,7 @@ func BuildTelegramCommands() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runTelegramList(cmd.Context(), inst.Client, cmd.OutOrStdout(), listLimit, listTable, inst.AllowedUsers)
+			return runTelegramList(cmd.Context(), inst.Client, cmd.OutOrStdout(), listLimit, listTable, inst.AllowedUsers, inst.AllowedChats)
 		},
 	}
 	listCmd.Flags().BoolVar(&listTable, "table", false, "Output as human-readable table instead of JSON")
@@ -71,7 +71,7 @@ func BuildTelegramCommands() *cobra.Command {
 			if err != nil {
 				return errors.WithDetails("UPDATE_ID must be an integer", "value", args[0])
 			}
-			return runTelegramGet(cmd.Context(), inst.Client, cmd.OutOrStdout(), updateID, getTable, inst.AllowedUsers)
+			return runTelegramGet(cmd.Context(), inst.Client, cmd.OutOrStdout(), updateID, getTable, inst.AllowedUsers, inst.AllowedChats)
 		},
 	}
 	getCmd.Flags().BoolVar(&getTable, "table", false, "Output as human-readable table instead of JSON")
@@ -124,12 +124,12 @@ func resolveTelegramInstance(cmd *cobra.Command) (*telegram.Instance, error) {
 
 // --- Business logic functions ---
 
-func runTelegramList(ctx context.Context, client telegramMessageLister, out io.Writer, limit int, table bool, allowedUsers []int64) error {
+func runTelegramList(ctx context.Context, client telegramMessageLister, out io.Writer, limit int, table bool, allowedUsers, allowedChats []int64) error {
 	updates, err := client.GetUpdates(ctx, limit)
 	if err != nil {
 		return err
 	}
-	updates = filterUpdates(updates, allowedUsers)
+	updates = filterUpdates(updates, allowedUsers, allowedChats)
 	summaries := toMessageSummaries(updates)
 	if len(summaries) == 0 {
 		_, _ = fmt.Fprintln(out, "No pending messages")
@@ -141,7 +141,7 @@ func runTelegramList(ctx context.Context, client telegramMessageLister, out io.W
 	return printTelegramListJSON(out, summaries)
 }
 
-func runTelegramGet(ctx context.Context, client telegramMessageGetter, out io.Writer, updateID int, table bool, allowedUsers []int64) error {
+func runTelegramGet(ctx context.Context, client telegramMessageGetter, out io.Writer, updateID int, table bool, allowedUsers, allowedChats []int64) error {
 	update, err := client.GetUpdate(ctx, updateID)
 	if err != nil {
 		return err
@@ -149,8 +149,8 @@ func runTelegramGet(ctx context.Context, client telegramMessageGetter, out io.Wr
 	if update == nil {
 		return errors.WithDetails("update not found", "updateID", updateID)
 	}
-	if !isAllowedUser(update, allowedUsers) {
-		return errors.WithDetails("update not from an allowed user", "updateID", updateID)
+	if !isAllowedUpdate(update, allowedUsers, allowedChats) {
+		return errors.WithDetails("update not from an allowed (user, chat) pair", "updateID", updateID)
 	}
 	detail := toMessageDetail(update)
 	if table {
@@ -169,32 +169,26 @@ func runTelegramAck(ctx context.Context, client telegramAcker, out io.Writer, up
 
 // --- Filtering ---
 
-func filterUpdates(updates []telegram.Update, allowedUsers []int64) []telegram.Update {
-	if len(allowedUsers) == 0 {
-		return updates
-	}
+// filterUpdates keeps only updates from allowed (user, chat) pairs.
+// Uses the same telegram.IsAllowed rule as the dispatcher — in particular,
+// an empty allowedUsers list is default-deny (no more CLI/dispatcher
+// asymmetry), and group chats require explicit opt-in via allowedChats.
+func filterUpdates(updates []telegram.Update, allowedUsers, allowedChats []int64) []telegram.Update {
 	var filtered []telegram.Update
 	for _, u := range updates {
-		if isAllowedUser(&u, allowedUsers) {
+		if isAllowedUpdate(&u, allowedUsers, allowedChats) {
 			filtered = append(filtered, u)
 		}
 	}
 	return filtered
 }
 
-func isAllowedUser(u *telegram.Update, allowedUsers []int64) bool {
-	if len(allowedUsers) == 0 {
-		return true
-	}
-	if u.Message == nil || u.Message.From == nil {
+func isAllowedUpdate(u *telegram.Update, allowedUsers, allowedChats []int64) bool {
+	if u.Message == nil {
 		return false
 	}
-	for _, id := range allowedUsers {
-		if u.Message.From.ID == id {
-			return true
-		}
-	}
-	return false
+	ok, _ := telegram.IsAllowed(u.Message.From, u.Message.Chat, allowedUsers, allowedChats)
+	return ok
 }
 
 // --- Conversion helpers ---

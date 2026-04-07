@@ -107,8 +107,8 @@ func TestTelegramSource_FetchMessages_WithAllowedUsers(t *testing.T) {
 func TestTelegramSource_FetchMessages_FilteredByAllowedUsers(t *testing.T) {
 	fetcher := &stubFetcher{
 		updates: []telegram.Update{
-			{UpdateID: 100, Message: &telegram.Message{From: &telegram.User{ID: 42, FirstName: "John"}, Chat: telegram.Chat{ID: 42}, Text: "allowed"}},
-			{UpdateID: 101, Message: &telegram.Message{From: &telegram.User{ID: 99, FirstName: "Eve"}, Chat: telegram.Chat{ID: 99}, Text: "blocked"}},
+			{UpdateID: 100, Message: &telegram.Message{From: &telegram.User{ID: 42, FirstName: "John"}, Chat: telegram.Chat{ID: 42, Type: "private"}, Text: "allowed"}},
+			{UpdateID: 101, Message: &telegram.Message{From: &telegram.User{ID: 99, FirstName: "Eve"}, Chat: telegram.Chat{ID: 99, Type: "private"}, Text: "blocked"}},
 		},
 	}
 
@@ -148,6 +148,64 @@ func TestTelegramSource_FetchMessages_Error(t *testing.T) {
 	source := &TelegramSource{Client: fetcher}
 	_, err := source.FetchMessages(context.Background())
 	require.Error(t, err)
+}
+
+// A message from an allowlisted user in a group chat is rejected by default —
+// group-chat dispatch is a distinct trust surface from private DMs and must
+// be opted in per chat via AllowedChats.
+func TestTelegramSource_FetchMessages_GroupChatDeniedByDefault(t *testing.T) {
+	fetcher := &stubFetcher{
+		updates: []telegram.Update{
+			{UpdateID: 200, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: -1001, Type: "group"}, Text: "do a thing"}},
+		},
+	}
+	source := &TelegramSource{Client: fetcher, AllowedUsers: []int64{42}}
+	messages, err := source.FetchMessages(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, messages)
+	assert.Equal(t, []int{200}, fetcher.acked)
+	assert.Equal(t, uint64(1), source.RejectedCount())
+}
+
+// The same user in the same group chat is accepted once that chat is listed
+// in AllowedChats.
+func TestTelegramSource_FetchMessages_GroupChatAllowedWhenOptedIn(t *testing.T) {
+	fetcher := &stubFetcher{
+		updates: []telegram.Update{
+			{UpdateID: 200, Message: &telegram.Message{From: &telegram.User{ID: 42, FirstName: "Alice"}, Chat: telegram.Chat{ID: -1001, Type: "supergroup"}, Text: "do a thing"}},
+		},
+	}
+	source := &TelegramSource{
+		Client:       fetcher,
+		AllowedUsers: []int64{42},
+		AllowedChats: []int64{-1001},
+	}
+	messages, err := source.FetchMessages(context.Background())
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	assert.Equal(t, "do a thing", messages[0].Text)
+	assert.Empty(t, fetcher.acked) // allowed → not acked here; dispatcher acks after send
+	assert.Equal(t, uint64(0), source.RejectedCount())
+}
+
+// Listing a chat in AllowedChats does not create a back-door for
+// non-allowlisted users in that chat.
+func TestTelegramSource_FetchMessages_GroupChatAllowlistDoesNotBypassUser(t *testing.T) {
+	fetcher := &stubFetcher{
+		updates: []telegram.Update{
+			{UpdateID: 200, Message: &telegram.Message{From: &telegram.User{ID: 99}, Chat: telegram.Chat{ID: -1001, Type: "group"}, Text: "eve here"}},
+		},
+	}
+	source := &TelegramSource{
+		Client:       fetcher,
+		AllowedUsers: []int64{42},
+		AllowedChats: []int64{-1001},
+	}
+	messages, err := source.FetchMessages(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, messages)
+	assert.Equal(t, []int{200}, fetcher.acked)
+	assert.Equal(t, uint64(1), source.RejectedCount())
 }
 
 // A failing ack on a rejected update must not abort the batch — the counter

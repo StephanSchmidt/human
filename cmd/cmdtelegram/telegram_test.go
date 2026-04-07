@@ -55,7 +55,7 @@ func TestRunTelegramList_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"update_id": 100`)
 	assert.Contains(t, buf.String(), `"from": "John Doe"`)
@@ -82,7 +82,7 @@ func TestRunTelegramList_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, true, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, true, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "UPDATE ID")
 	assert.Contains(t, buf.String(), "FROM")
@@ -101,7 +101,7 @@ func TestRunTelegramList_Empty(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "No pending messages")
 }
@@ -114,7 +114,7 @@ func TestRunTelegramList_EmptyTable(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, true, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, true, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "No pending messages")
 }
@@ -127,7 +127,7 @@ func TestRunTelegramList_Error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	assert.EqualError(t, err, "network error")
 }
 
@@ -152,7 +152,7 @@ func TestRunTelegramList_NilMessageSkipped(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, nil)
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.NotContains(t, buf.String(), `"update_id": 100`)
 	assert.Contains(t, buf.String(), `"update_id": 101`)
@@ -188,7 +188,7 @@ func TestRunTelegramList_AllowedUsersFilters(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42})
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"update_id": 100`)
 	assert.NotContains(t, buf.String(), `"update_id": 101`)
@@ -214,7 +214,7 @@ func TestRunTelegramList_AllowedUsersAllFiltered(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42})
+	err := runTelegramList(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "No pending messages")
 }
@@ -240,7 +240,7 @@ func TestRunTelegramGet_JSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramGet(context.Background(), client, &buf, 100, false, nil)
+	err := runTelegramGet(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"update_id": 100`)
 	assert.Contains(t, buf.String(), `"from": "John Doe"`)
@@ -269,7 +269,7 @@ func TestRunTelegramGet_Table(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramGet(context.Background(), client, &buf, 100, true, nil)
+	err := runTelegramGet(context.Background(), client, &buf, 100, true, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Update ID:")
 	assert.Contains(t, buf.String(), "From:")
@@ -287,7 +287,7 @@ func TestRunTelegramGet_Error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramGet(context.Background(), client, &buf, 999, false, nil)
+	err := runTelegramGet(context.Background(), client, &buf, 999, false, []int64{42}, nil)
 	assert.EqualError(t, err, "not found")
 }
 
@@ -309,9 +309,9 @@ func TestRunTelegramGet_AllowedUserBlocked(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramGet(context.Background(), client, &buf, 100, false, []int64{42})
+	err := runTelegramGet(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not from an allowed user")
+	assert.Contains(t, err.Error(), "not from an allowed (user, chat) pair")
 }
 
 func TestRunTelegramGet_AllowedUserPasses(t *testing.T) {
@@ -332,7 +332,7 @@ func TestRunTelegramGet_AllowedUserPasses(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := runTelegramGet(context.Background(), client, &buf, 100, false, []int64{42})
+	err := runTelegramGet(context.Background(), client, &buf, 100, false, []int64{42}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), `"update_id": 100`)
 }
@@ -409,22 +409,25 @@ func TestPrintTelegramListTable_empty(t *testing.T) {
 
 // --- filtering tests ---
 
-func TestFilterUpdates_noAllowedUsers(t *testing.T) {
+// Empty allowlist is now default-deny (matching the dispatcher). Before
+// [SC-77] this branch returned every update, which was the documented
+// asymmetry between CLI and daemon.
+func TestFilterUpdates_emptyAllowlistDeniesAll(t *testing.T) {
 	updates := []telegram.Update{
-		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}}},
-		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 99}}},
+		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: 42, Type: "private"}}},
+		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 99}, Chat: telegram.Chat{ID: 99, Type: "private"}}},
 	}
-	result := filterUpdates(updates, nil)
-	assert.Len(t, result, 2)
+	result := filterUpdates(updates, nil, nil)
+	assert.Empty(t, result)
 }
 
 func TestFilterUpdates_filtersCorrectly(t *testing.T) {
 	updates := []telegram.Update{
-		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}}},
-		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 99}}},
-		{UpdateID: 3, Message: &telegram.Message{From: &telegram.User{ID: 42}}},
+		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: 42, Type: "private"}}},
+		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 99}, Chat: telegram.Chat{ID: 99, Type: "private"}}},
+		{UpdateID: 3, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: 42, Type: "private"}}},
 	}
-	result := filterUpdates(updates, []int64{42})
+	result := filterUpdates(updates, []int64{42}, nil)
 	assert.Len(t, result, 2)
 	assert.Equal(t, 1, result[0].UpdateID)
 	assert.Equal(t, 3, result[1].UpdateID)
@@ -433,20 +436,32 @@ func TestFilterUpdates_filtersCorrectly(t *testing.T) {
 func TestFilterUpdates_nilMessageFiltered(t *testing.T) {
 	updates := []telegram.Update{
 		{UpdateID: 1, Message: nil},
-		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 42}}},
+		{UpdateID: 2, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: 42, Type: "private"}}},
 	}
-	result := filterUpdates(updates, []int64{42})
+	result := filterUpdates(updates, []int64{42}, nil)
 	assert.Len(t, result, 1)
 	assert.Equal(t, 2, result[0].UpdateID)
 }
 
-func TestIsAllowedUser_emptyList(t *testing.T) {
-	u := &telegram.Update{Message: &telegram.Message{From: &telegram.User{ID: 99}}}
-	assert.True(t, isAllowedUser(u, nil))
-	assert.True(t, isAllowedUser(u, []int64{}))
+// Allowlisted user in a group chat is filtered out unless the group ID is
+// in AllowedChats — the same rule the dispatcher enforces.
+func TestFilterUpdates_groupChatDefaultDenied(t *testing.T) {
+	updates := []telegram.Update{
+		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: -1001, Type: "group"}}},
+	}
+	result := filterUpdates(updates, []int64{42}, nil)
+	assert.Empty(t, result)
 }
 
-func TestIsAllowedUser_nilMessage(t *testing.T) {
+func TestFilterUpdates_groupChatAllowedWhenOptedIn(t *testing.T) {
+	updates := []telegram.Update{
+		{UpdateID: 1, Message: &telegram.Message{From: &telegram.User{ID: 42}, Chat: telegram.Chat{ID: -1001, Type: "supergroup"}}},
+	}
+	result := filterUpdates(updates, []int64{42}, []int64{-1001})
+	assert.Len(t, result, 1)
+}
+
+func TestIsAllowedUpdate_nilMessage(t *testing.T) {
 	u := &telegram.Update{Message: nil}
-	assert.False(t, isAllowedUser(u, []int64{42}))
+	assert.False(t, isAllowedUpdate(u, []int64{42}, nil))
 }

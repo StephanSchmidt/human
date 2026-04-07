@@ -20,15 +20,16 @@ type TelegramFetcher interface {
 type TelegramSource struct {
 	Client       TelegramFetcher
 	AllowedUsers []int64
+	AllowedChats []int64 // see telegram.Config.AllowedChats
 	Logger       zerolog.Logger
 
 	rejectedCount uint64 // atomic
 }
 
-// FetchMessages returns pending Telegram messages filtered by allowed users.
-// Disallowed updates are acknowledged (via AckUpdate) so they do not remain in
-// the Telegram pending queue, logged at WARN with structured fields, and
-// counted in RejectedCount() for observability.
+// FetchMessages returns pending Telegram messages filtered by allowed
+// (user, chat) pairs. Disallowed updates are acknowledged (via AckUpdate) so
+// they do not remain in the Telegram pending queue, logged at WARN with
+// structured fields, and counted in RejectedCount() for observability.
 func (s *TelegramSource) FetchMessages(ctx context.Context) ([]QueuedMessage, error) {
 	updates, err := s.Client.GetUpdates(ctx, 100)
 	if err != nil {
@@ -43,8 +44,9 @@ func (s *TelegramSource) FetchMessages(ctx context.Context) ([]QueuedMessage, er
 			// message if the shape changes upstream.
 			continue
 		}
-		if !s.isAllowed(u.Message.From) {
-			s.rejectUpdate(ctx, u, "not_in_allowlist")
+		ok, reason := telegram.IsAllowed(u.Message.From, u.Message.Chat, s.AllowedUsers, s.AllowedChats)
+		if !ok {
+			s.rejectUpdate(ctx, u, reason)
 			continue
 		}
 		messages = append(messages, QueuedMessage{
@@ -70,7 +72,7 @@ func (s *TelegramSource) RejectedCount() uint64 {
 
 // rejectUpdate acks a disallowed update, logs it at WARN with structured
 // fields (but not the message body), and bumps the rejection counter.
-func (s *TelegramSource) rejectUpdate(ctx context.Context, u telegram.Update, reason string) {
+func (s *TelegramSource) rejectUpdate(ctx context.Context, u telegram.Update, reason telegram.AuthzReason) {
 	atomic.AddUint64(&s.rejectedCount, 1)
 
 	var userID int64
@@ -83,7 +85,7 @@ func (s *TelegramSource) rejectUpdate(ctx context.Context, u telegram.Update, re
 		Int64("chatID", u.Message.Chat.ID).
 		Str("chatType", u.Message.Chat.Type).
 		Int("textLen", len(u.Message.Text)).
-		Str("reason", reason).
+		Str("reason", string(reason)).
 		Msg("rejected Telegram update")
 
 	if err := s.Client.AckUpdate(ctx, u.UpdateID); err != nil {
@@ -92,21 +94,6 @@ func (s *TelegramSource) rejectUpdate(ctx context.Context, u telegram.Update, re
 			Int("updateID", u.UpdateID).
 			Msg("failed to ack rejected Telegram update")
 	}
-}
-
-func (s *TelegramSource) isAllowed(user *telegram.User) bool {
-	if len(s.AllowedUsers) == 0 {
-		return false // default-deny: require explicit allowlist
-	}
-	if user == nil {
-		return false
-	}
-	for _, id := range s.AllowedUsers {
-		if user.ID == id {
-			return true
-		}
-	}
-	return false
 }
 
 func formatFrom(user *telegram.User) string {

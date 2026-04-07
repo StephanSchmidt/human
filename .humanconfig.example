@@ -46,6 +46,11 @@ telegrams:
   - name: bot
     notify_chat_id: 123456789  # Chat ID for destructive operation notifications
     allowed_users: [123456789]
+    # allowed_chats gates group / supergroup / channel dispatch. Private
+    # chats (1:1 with the bot) do not need an entry here — being in
+    # allowed_users is sufficient. Group dispatch is default-deny and
+    # must be opted in per chat, e.g. allowed_chats: [-1001234567890].
+    # allowed_chats: []
     # token comes from env: export TELEGRAM_BOT_TOKEN=xxx
 
 slacks:
