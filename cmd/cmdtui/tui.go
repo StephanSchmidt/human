@@ -841,6 +841,11 @@ func (m model) View() string {
 		return renderCreateDialog(m.createForm.View(), w, m.height)
 	}
 
+	// Confirm dialog — skip dashboard rendering entirely.
+	if m.confirmActive {
+		return renderConfirmDialog(m.confirmPrompt, w, m.height)
+	}
+
 	var b strings.Builder
 
 	// Header line: title left, usage window right.
@@ -902,11 +907,7 @@ func (m model) View() string {
 
 	// Footer.
 	b.WriteByte('\n')
-	if m.confirmActive {
-		b.WriteString(renderConfirmFooter(w, m.confirmPrompt))
-	} else {
-		b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
-	}
+	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
 	b.WriteByte('\n')
 
 	return b.String()
@@ -1272,14 +1273,12 @@ func renderPanes(panes []claude.TmuxPane) string {
 
 // --- render: footer ---
 
-func renderConfirmFooter(w int, prompt string) string {
-	left := confirmStyle.Render("  ⚠ " + prompt)
-	right := confirmStyle.Render("y confirm  n abort")
-	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 2
-	if gap < 1 {
-		gap = 1
-	}
-	return left + strings.Repeat(" ", gap) + right
+func renderConfirmDialog(prompt string, width, height int) string {
+	title := confirmStyle.Render("⚠ " + prompt)
+	hints := subtleStyle.Render("y confirm  n abort")
+	content := title + "\n\n" + hints
+	dialog := confirmDialogStyle.Render(content)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, dialog)
 }
 
 func renderFooter(w int, logMode, dispatchStatus string, showTabs bool) string {
