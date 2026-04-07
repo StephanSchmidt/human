@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# commit-msg hook: require an issue reference in every commit message.
+#
+# Accepted formats (matching all trackers supported by human):
+#   Issue #123                  — numeric (Shortcut, GitHub, etc.)
+#   Issue HUM-30                — prefixed (Jira, Linear, ClickUp)
+#   [SC-57, HUM-48]             — bracket style
+#   octocat/repo#42             — GitHub / GitLab
+#   MyProject/42                — Azure DevOps
+#
+# Exempt: merge commits, reverts, fixup/squash commits.
+# Bypass:  git commit --no-verify
+
+msg=$(cat "$1")
+
+# Exempt automated commit types
+if echo "$msg" | head -1 | grep -qE '^(Merge |Revert "|fixup! |squash! )'; then
+  exit 0
+fi
+
+# Exempt commits that only touch documentation.
+# Uses an allow-list of prose paths; any non-doc file re-enables the rule.
+# Note: internal/claude/embed/*.md is intentionally NOT exempted — those
+# markdown files are compiled into the binary via go:embed and ship as code.
+staged=$(git diff --cached --name-only)
+if [ -n "$staged" ]; then
+  non_docs=$(echo "$staged" | grep -vE '^(README\.md|CLAUDE\.md|LICENSE|CHANGELOG\.md|CONTRIBUTING\.md|CODE_OF_CONDUCT\.md|docs/)' || true)
+  if [ -z "$non_docs" ]; then
+    exit 0
+  fi
+fi
+
+# Check for an issue reference
+#   1. Issue #N              — numeric reference
+#   2. Issue PREFIX-N        — Jira / Linear / ClickUp
+#   3. [PREFIX-N             — bracket convention (matches opening bracket + key)
+#   4. owner/repo#N          — GitHub / GitLab
+#   5. Project/N             — Azure DevOps (word/digits, not owner/repo#N)
+if echo "$msg" | grep -qE '(Issue\s+#[0-9]+|Issue\s+[A-Z]+-[0-9]+|\[[A-Z]+-[0-9]+|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[0-9]+|[A-Za-z][A-Za-z0-9._-]*/[0-9]+)'; then
+  exit 0
+fi
+
+echo >&2 "ERROR: Commit message must contain an issue reference."
+echo >&2 ""
+echo >&2 "Accepted formats:"
+echo >&2 "  Issue #123                 (numeric)"
+echo >&2 "  Issue HUM-30               (Jira, Linear, ClickUp)"
+echo >&2 "  [SC-57, HUM-48]            (bracket style)"
+echo >&2 "  octocat/repo#42            (GitHub, GitLab)"
+echo >&2 "  MyProject/42               (Azure DevOps)"
+echo >&2 ""
+echo >&2 "Bypass with: git commit --no-verify"
+exit 1

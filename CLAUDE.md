@@ -99,6 +99,8 @@ For accessing Github **ALWAYS** use 'gh'
 
 When asked to commit, go through changes and create atomar commits that have one connected change each.
 
+Every commit message **must** contain an issue reference, **unless** the commit touches only documentation (`README.md`, `CLAUDE.md`, `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, or anything under `docs/`). Any commit that touches code or config — including a mixed docs+code commit — still needs a ref. Accepted formats: `Issue #123`, `Issue HUM-30`, `[SC-57]`, `octocat/repo#42`, `MyProject/42`. A `commit-msg` hook enforces this — activate with `make hooks`.
+
 # Code
 
 **ALWAYS** use WithDetails for error creation.
