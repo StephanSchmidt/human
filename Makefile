@@ -1,4 +1,4 @@
-.PHONY: all build install test test-integration coverage lint sec secrets check clean upgrade-deps release
+.PHONY: all build install test test-integration coverage lint sec secrets check clean upgrade-deps release hooks unhooks
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
@@ -25,7 +25,7 @@ lint:
 
 sec:
 	go tool gosec ./...
-	go tool govulncheck ./...
+	./scripts/govulncheck.sh
 
 secrets:
 	go tool gitleaks git -v
@@ -47,6 +47,12 @@ upgrade-deps:
 
 tokens:
 	@find . -name '*.go' ! -path './vendor/*' -exec cat {} + | wc -w | awk '{printf "%d words (~%d tokens)\n", $$1, int($$1 * 1.3)}'
+
+hooks:
+	git config core.hooksPath .githooks
+
+unhooks:
+	git config --unset core.hooksPath
 
 release:
 	@test -z "$$(git status --porcelain)" || (echo "error: working tree is dirty" && exit 1)
