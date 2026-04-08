@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // DestructiveEntry represents a destructive operation log record.
@@ -63,6 +65,7 @@ func (d *DestructiveProvider) Close() error {
 func (d *DestructiveProvider) logEntry(ctx context.Context, entry DestructiveEntry) {
 	data, marshalErr := json.Marshal(entry)
 	if marshalErr != nil {
+		log.Warn().Err(marshalErr).Msg("destructive log: marshal failed")
 		return
 	}
 	data = append(data, '\n')
@@ -73,7 +76,9 @@ func (d *DestructiveProvider) logEntry(ctx context.Context, entry DestructiveEnt
 	// single slow upstream and risks recursive deadlock with self-notifying
 	// composite notifiers.
 	d.mu.Lock()
-	_, _ = d.logFile.Write(data)
+	if _, writeErr := d.logFile.Write(data); writeErr != nil {
+		log.Warn().Err(writeErr).Msg("destructive log: append failed")
+	}
 	notifier := d.notifier
 	d.mu.Unlock()
 

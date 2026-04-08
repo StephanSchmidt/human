@@ -6,6 +6,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // AuditEntry represents a single audit log record written as a JSON line.
@@ -63,13 +65,16 @@ func (a *AuditProvider) log(operation, key string, d time.Duration, err error) {
 
 	data, marshalErr := json.Marshal(entry)
 	if marshalErr != nil {
+		log.Warn().Err(marshalErr).Msg("audit log: marshal failed")
 		return
 	}
 	data = append(data, '\n')
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	_, _ = a.logFile.Write(data)
+	if _, writeErr := a.logFile.Write(data); writeErr != nil {
+		log.Warn().Err(writeErr).Msg("audit log: append failed")
+	}
 }
 
 func (a *AuditProvider) ListIssues(ctx context.Context, opts ListOptions) ([]Issue, error) {

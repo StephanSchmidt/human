@@ -75,14 +75,16 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
+	auditCleanup := func() {}
 	if auditErr != nil {
 		fmt.Fprintln(os.Stderr, "warning: audit logging disabled:", auditErr)
-		return p, func() {}, nil
+	} else {
+		p = ap
+		auditCleanup = func() { _ = ap.Close() }
 	}
-	p = ap
 
 	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, os.Stderr)
-	return p, func() { dpCleanup(); _ = ap.Close() }, nil
+	return p, func() { dpCleanup(); auditCleanup() }, nil
 }
 
 // ResolveAutoProvider loads all instances, applies flag overrides, and resolves
@@ -188,14 +190,16 @@ func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, de
 
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
+	auditCleanup := func() {}
 	if auditErr != nil {
 		_, _ = fmt.Fprintln(errW, "warning: audit logging disabled:", auditErr)
-		return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() {}}, nil
+	} else {
+		p = ap
+		auditCleanup = func() { _ = ap.Close() }
 	}
-	p = ap
 
 	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, errW)
-	return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() { dpCleanup(); _ = ap.Close() }}, nil
+	return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() { dpCleanup(); auditCleanup() }}, nil
 }
 
 // matchInstanceByKindAndURL finds a configured instance matching the tracker kind
