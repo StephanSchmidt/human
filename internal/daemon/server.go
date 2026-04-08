@@ -44,10 +44,14 @@ type Server struct {
 	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
 	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
 
-	envMu sync.Mutex // protects os.Setenv/os.Unsetenv during concurrent requests
+	envMu sync.Mutex     // protects os.Setenv/os.Unsetenv during concurrent requests
+	wg    sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
+// On shutdown it waits for all in-flight handler goroutines to return before
+// closing, so a client request that's already accepted is never torn down
+// mid-flight by listener close alone.
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	lc := net.ListenConfig{}
 	ln, err := lc.Listen(ctx, "tcp", s.Addr)
@@ -71,6 +75,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		conn, err := ln.Accept()
 		if err != nil {
 			if ctx.Err() != nil {
+				// Wait for any in-flight handlers before returning so the
+				// caller observes a fully-quiesced server.
+				s.wg.Wait()
 				return nil
 			}
 			s.Logger.Warn().Err(err).Msg("accept error")
@@ -78,7 +85,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		}
 		select {
 		case sem <- struct{}{}:
+			s.wg.Add(1)
 			go func() {
+				defer s.wg.Done()
 				defer func() { <-sem }()
 				s.handleConn(conn)
 			}()

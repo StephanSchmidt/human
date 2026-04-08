@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -19,7 +20,14 @@ import (
 type Monitor struct {
 	finder       claude.InstanceFinder
 	dockerClient claude.DockerClient
-	parsers      map[string]*logparser.FileParser
+
+	// parsersMu guards parsers. Although the TUI currently serialises
+	// FetchFull/FetchQuick via its own m.fetching flag, future callers
+	// (background health checks, parallel tests) must not rely on that
+	// invariant — concurrent map access on parsers would otherwise crash
+	// the program.
+	parsersMu sync.Mutex
+	parsers   map[string]*logparser.FileParser
 }
 
 // New creates a Monitor. dockerClient may be nil when Docker is unavailable.
@@ -153,6 +161,8 @@ func (m *Monitor) parseSessions(instances []claude.Instance) map[string]logparse
 	byPath := make(map[string]logparser.SessionState)
 	reader := logparser.OSFileReader{}
 	active := make(map[string]bool, len(instances))
+	m.parsersMu.Lock()
+	defer m.parsersMu.Unlock()
 	for _, inst := range instances {
 		if inst.FilePath == "" {
 			continue

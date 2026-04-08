@@ -32,6 +32,17 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, errors.WrapWithDetails(err, "open index database", "path", dbPath)
 	}
 
+	// SQLite serialises writers; cap connections to one writer at a time
+	// so callers experience clean queueing instead of "database is locked"
+	// errors when multiple goroutines hit the index concurrently.
+	db.SetMaxOpenConns(1)
+
+	// Wait up to 5 seconds for the writer lock before giving up.
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		_ = db.Close()
+		return nil, errors.WrapWithDetails(err, "set busy_timeout")
+	}
+
 	// WAL mode for better concurrent read performance.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = db.Close()

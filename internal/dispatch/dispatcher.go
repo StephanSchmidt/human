@@ -89,7 +89,6 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	if interval == 0 {
 		interval = DefaultPollInterval
 	}
-	d.seen = make(map[int]bool)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -108,14 +107,18 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 func (d *Dispatcher) tick(ctx context.Context) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	d.fetchMessages(ctx)
-	if len(d.queue) == 0 {
+	if d.queueLen() == 0 {
 		return
 	}
 	d.dispatchMessages(ctx)
+}
+
+// queueLen returns the current queue length under the lock.
+func (d *Dispatcher) queueLen() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.queue)
 }
 
 func (d *Dispatcher) fetchMessages(ctx context.Context) {
@@ -125,6 +128,10 @@ func (d *Dispatcher) fetchMessages(ctx context.Context) {
 		return
 	}
 
+	d.mu.Lock()
+	if d.seen == nil {
+		d.seen = make(map[int]bool)
+	}
 	for _, msg := range messages {
 		if d.seen[msg.UpdateID] {
 			continue
@@ -133,6 +140,27 @@ func (d *Dispatcher) fetchMessages(ctx context.Context) {
 		d.queue = append(d.queue, msg)
 		d.Logger.Info().Int("updateID", msg.UpdateID).Str("from", msg.From).Msg("queued message")
 	}
+	d.mu.Unlock()
+}
+
+// popQueue removes and returns the head of the queue under the lock.
+// Returns ok=false if the queue is empty.
+func (d *Dispatcher) popQueue() (QueuedMessage, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.queue) == 0 {
+		return QueuedMessage{}, false
+	}
+	msg := d.queue[0]
+	d.queue = d.queue[1:]
+	return msg, true
+}
+
+// requeueFront puts a message back at the head of the queue.
+func (d *Dispatcher) requeueFront(msg QueuedMessage) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.queue = append([]QueuedMessage{msg}, d.queue...)
 }
 
 func (d *Dispatcher) dispatchMessages(ctx context.Context) {
@@ -142,28 +170,26 @@ func (d *Dispatcher) dispatchMessages(ctx context.Context) {
 		return
 	}
 	if len(agents) == 0 {
-		d.Logger.Debug().Int("queued", len(d.queue)).Msg("no idle agents available")
+		d.Logger.Debug().Int("queued", d.queueLen()).Msg("no idle agents available")
 		return
 	}
 
 	dispatched := 0
 	for _, agent := range agents {
-		if len(d.queue) == 0 {
+		msg, ok := d.popQueue()
+		if !ok {
 			break
 		}
-
-		msg := d.queue[0]
 		prompt := buildPrompt(msg.Text)
 
 		d.Logger.Info().Str("agent", agent.Label).Int("updateID", msg.UpdateID).Int("promptLen", len(prompt)).Msg("sending prompt via tmux send-keys")
 
 		if err := d.Sender.SendPrompt(ctx, agent, prompt); err != nil {
 			d.Logger.Warn().Err(err).Str("agent", agent.Label).Int("updateID", msg.UpdateID).Msg("send-keys failed, re-queuing")
+			d.requeueFront(msg)
 			continue
 		}
 
-		// Sent successfully — dequeue.
-		d.queue = d.queue[1:]
 		dispatched++
 
 		d.Logger.Info().Str("agent", agent.Label).Int("updateID", msg.UpdateID).Str("from", msg.From).Msg("send-keys succeeded, dispatched message")
@@ -179,7 +205,7 @@ func (d *Dispatcher) dispatchMessages(ctx context.Context) {
 	}
 
 	if dispatched > 0 {
-		d.Logger.Info().Int("dispatched", dispatched).Int("remaining", len(d.queue)).Msg("dispatch cycle complete")
+		d.Logger.Info().Int("dispatched", dispatched).Int("remaining", d.queueLen()).Msg("dispatch cycle complete")
 	}
 
 	d.pruneSeen()
@@ -191,7 +217,10 @@ func (d *Dispatcher) dispatchMessages(ctx context.Context) {
 const maxSeenSize = 1000
 
 // pruneSeen evicts the oldest entries from the seen map when it exceeds maxSeenSize.
+// Holds d.mu for the duration since seen is shared state.
 func (d *Dispatcher) pruneSeen() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if len(d.seen) <= maxSeenSize {
 		return
 	}

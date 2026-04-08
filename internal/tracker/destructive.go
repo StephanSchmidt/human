@@ -67,12 +67,18 @@ func (d *DestructiveProvider) logEntry(ctx context.Context, entry DestructiveEnt
 	}
 	data = append(data, '\n')
 
+	// Capture the notifier under the lock so the field is read safely, then
+	// release the lock before calling out to the network. Holding d.mu across
+	// a notifier round-trip would serialise every destructive op behind a
+	// single slow upstream and risks recursive deadlock with self-notifying
+	// composite notifiers.
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	_, _ = d.logFile.Write(data)
+	notifier := d.notifier
+	d.mu.Unlock()
 
-	if d.notifier != nil {
-		d.notifier.NotifyDestructive(ctx, entry)
+	if notifier != nil {
+		notifier.NotifyDestructive(ctx, entry)
 	}
 }
 
