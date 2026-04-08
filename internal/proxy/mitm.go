@@ -278,6 +278,7 @@ func (li *LoggingInterceptor) dialUpstream(ctx context.Context, hostname string)
 	}
 
 	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: 30 * time.Second},
 		Config: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			ServerName: hostname,

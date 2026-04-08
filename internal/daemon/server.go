@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -103,12 +104,23 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 func (s *Server) handleConn(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
-	reader := bufio.NewReader(conn)
+	// Bound the time and size of the request line. The deadline must be
+	// applied to the raw conn BEFORE the bufio.Reader is created so the
+	// underlying read inherits it; the LimitReader caps the request to
+	// 1 MiB so a malicious client can't OOM the daemon by streaming an
+	// unbounded JSON line.
+	const maxRequestBytes = 1 << 20
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	limited := io.LimitReader(conn, maxRequestBytes)
+	reader := bufio.NewReader(limited)
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
 		s.writeError(conn, "failed to read request", 1)
 		return
 	}
+	// Clear the deadline once the request is parsed; the rest of the
+	// handler runs long-lived operations that must not inherit it.
+	_ = conn.SetReadDeadline(time.Time{})
 
 	var req Request
 	if err := json.Unmarshal(line, &req); err != nil {

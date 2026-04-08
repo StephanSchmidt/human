@@ -5,11 +5,22 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/StephanSchmidt/human/errors"
 )
+
+// proxyMaxConns caps concurrent in-flight HTTPS proxy connections.
+const proxyMaxConns = 256
+
+// proxyHelloDeadline bounds the time the proxy waits for the TLS
+// ClientHello before closing an idle connection.
+const proxyHelloDeadline = 10 * time.Second
+
+// proxyDialTimeout bounds upstream connection establishment.
+const proxyDialTimeout = 30 * time.Second
 
 // Server is a transparent HTTPS proxy that reads the SNI from TLS ClientHello
 // to block/allow domains without decrypting traffic. Domains listed in the
@@ -49,6 +60,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		closeLn()
 	}()
 
+	sem := make(chan struct{}, proxyMaxConns)
+
 	for {
 		conn, acceptErr := ln.Accept()
 		if acceptErr != nil {
@@ -61,18 +74,35 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		if conn == nil {
 			continue
 		}
-		go s.handleConn(ctx, conn)
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+				s.handleConn(ctx, conn)
+			}()
+		default:
+			s.Logger.Warn().Msg("https proxy connection limit reached, rejecting")
+			_ = conn.Close()
+		}
 	}
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
+	// Bound the wait for the TLS ClientHello so a stalled connection
+	// can't sit on a goroutine forever.
+	_ = conn.SetReadDeadline(time.Now().Add(proxyHelloDeadline))
+
 	peeked, serverName, err := PeekClientHello(conn)
 	if err != nil {
 		s.Logger.Debug().Err(err).Msg("SNI extraction failed")
 		return
 	}
+
+	// Hello complete — clear the deadline so the long-lived forwarded
+	// stream isn't subject to it.
+	_ = conn.SetReadDeadline(time.Time{})
 
 	if serverName == "" {
 		s.Logger.Debug().Msg("no SNI in ClientHello, blocking")
@@ -114,6 +144,6 @@ func (s *Server) dialer() func(ctx context.Context, network, address string) (ne
 	if s.Dialer != nil {
 		return s.Dialer
 	}
-	d := &net.Dialer{}
+	d := &net.Dialer{Timeout: proxyDialTimeout}
 	return d.DialContext
 }

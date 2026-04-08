@@ -6,11 +6,20 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/StephanSchmidt/human/errors"
 )
+
+// chromeMaxConns caps concurrent chrome-proxy sessions so a flood of
+// connecting clients cannot exhaust file descriptors.
+const chromeMaxConns = 32
+
+// chromeAuthDeadline bounds the time the server will wait for the
+// initial auth line before closing the connection.
+const chromeAuthDeadline = 5 * time.Second
 
 // Server listens for chrome-proxy connections on its own TCP port.
 type Server struct {
@@ -37,6 +46,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		_ = ln.Close()
 	}()
 
+	sem := make(chan struct{}, chromeMaxConns)
+
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -46,12 +57,24 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			s.Logger.Warn().Err(err).Msg("chrome proxy accept error")
 			continue
 		}
-		go s.handleConn(ctx, conn)
+		select {
+		case sem <- struct{}{}:
+			go func() {
+				defer func() { <-sem }()
+				s.handleConn(ctx, conn)
+			}()
+		default:
+			s.Logger.Warn().Msg("chrome proxy connection limit reached, rejecting")
+			_ = conn.Close()
+		}
 	}
 }
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
+
+	// Bound the time we wait for the initial auth line.
+	_ = conn.SetReadDeadline(time.Now().Add(chromeAuthDeadline))
 
 	// Read the auth request (single JSON line).
 	scanner := bufio.NewScanner(conn)
@@ -59,6 +82,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		s.writeAck(conn, false, "failed to read request")
 		return
 	}
+
+	// Clear the deadline once auth is parsed; the translator below runs
+	// long-lived sessions and must not inherit the auth-line deadline.
+	_ = conn.SetReadDeadline(time.Time{})
 
 	var req proxyRequest
 	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
