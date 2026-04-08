@@ -1,6 +1,7 @@
 package notion
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -209,6 +210,28 @@ func TestRenderBlock_table_empty(t *testing.T) {
 		Table: &tableBlock{TableWidth: 2},
 	}
 	assert.Equal(t, "", renderBlock(block))
+}
+
+// TestRenderBlock_table_noColumnHeader asserts that when the source table
+// has HasColumnHeader=false, no source row is silently promoted to a
+// header — the output instead includes a synthetic empty header row and
+// every source row appears as data.
+func TestRenderBlock_table_noColumnHeader(t *testing.T) {
+	block := notionBlock{
+		Type:  "table",
+		Table: &tableBlock{TableWidth: 2, HasColumnHeader: false},
+		Children: []notionBlock{
+			{Type: "table_row", TableRow: &tableRowBlock{Cells: [][]notionRichText{rt("A"), rt("1")}}},
+			{Type: "table_row", TableRow: &tableRowBlock{Cells: [][]notionRichText{rt("B"), rt("2")}}},
+		},
+	}
+	out := renderBlock(block)
+	// First non-empty line is the synthetic empty header.
+	assert.Contains(t, out, "| A | 1 |")
+	assert.Contains(t, out, "| B | 2 |")
+	// Both source rows must appear as data — neither should be missing.
+	assert.Equal(t, 1, strings.Count(out, "| A | 1 |"))
+	assert.Equal(t, 1, strings.Count(out, "| B | 2 |"))
 }
 
 func TestRichTextToMarkdown_bold(t *testing.T) {

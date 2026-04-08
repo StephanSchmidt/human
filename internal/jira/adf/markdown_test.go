@@ -617,7 +617,9 @@ func TestToMarkdown_table_no_header(t *testing.T) {
 			tableRow("tableCell", "c", "d"),
 		},
 	}
-	expected := "| a | b |\n|---|---|\n| c | d |\n\n"
+	// No header in source → synthetic empty header, then both rows as data.
+	// Neither source row should be silently promoted to a header.
+	expected := "| | |\n|---|---|\n| a | b |\n| c | d |\n\n"
 	assert.Equal(t, expected, ToMarkdown(node))
 }
 

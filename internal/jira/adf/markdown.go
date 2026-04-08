@@ -286,23 +286,37 @@ func renderTable(node map[string]any) string {
 	firstCells := nodeChildren(firstRow)
 	isHeader := len(firstCells) > 0 && nodeType(firstCells[0]) == "tableHeader"
 
-	// Render first row
-	b.WriteString(renderTableRow(firstCells))
-	// Separator
-	b.WriteString("|")
-	for range firstCells {
-		b.WriteString("---|")
+	if isHeader {
+		// First row is a real header row: render it, then the separator, then
+		// the remaining rows as data.
+		b.WriteString(renderTableRow(firstCells))
+		b.WriteString("|")
+		for range firstCells {
+			b.WriteString("---|")
+		}
+		b.WriteString("\n")
+		for _, row := range rows[1:] {
+			cells := nodeChildren(row)
+			b.WriteString(renderTableRow(cells))
+		}
+	} else {
+		// No header row in the source. Emit a synthetic empty header row so
+		// the resulting markdown is well-formed, then render every row from
+		// the source as data — no row is silently promoted to a header.
+		b.WriteString("|")
+		for range firstCells {
+			b.WriteString(" |")
+		}
+		b.WriteString("\n|")
+		for range firstCells {
+			b.WriteString("---|")
+		}
+		b.WriteString("\n")
+		for _, row := range rows {
+			cells := nodeChildren(row)
+			b.WriteString(renderTableRow(cells))
+		}
 	}
-	b.WriteString("\n")
-
-	// Remaining rows
-	for _, row := range rows[1:] {
-		cells := nodeChildren(row)
-		b.WriteString(renderTableRow(cells))
-	}
-
-	// If first row was not a header, we still used it as the header line already
-	_ = isHeader
 	b.WriteString("\n")
 	return b.String()
 }

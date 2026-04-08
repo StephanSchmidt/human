@@ -153,25 +153,45 @@ func renderTable(block notionBlock) string {
 		return ""
 	}
 
-	var sb strings.Builder
-	for i, child := range block.Children {
+	hasColumnHeader := block.Table != nil && block.Table.HasColumnHeader
+
+	// Pre-render every row so we can emit a synthetic empty header when the
+	// source table has no header of its own.
+	var rendered []string
+	var cellCount int
+	for _, child := range block.Children {
 		if child.TableRow == nil {
 			continue
 		}
-		row := child.TableRow.Cells
-		var cells []string
-		for _, cell := range row {
+		cells := make([]string, 0, len(child.TableRow.Cells))
+		for _, cell := range child.TableRow.Cells {
 			cells = append(cells, richTextToMarkdown(cell))
 		}
-		sb.WriteString("| " + strings.Join(cells, " | ") + " |\n")
+		if cellCount == 0 {
+			cellCount = len(cells)
+		}
+		rendered = append(rendered, "| "+strings.Join(cells, " | ")+" |\n")
+	}
+	if len(rendered) == 0 || cellCount == 0 {
+		return ""
+	}
 
-		// Add separator after header row.
-		if i == 0 {
-			var sep []string
-			for range cells {
-				sep = append(sep, "---")
-			}
-			sb.WriteString("| " + strings.Join(sep, " | ") + " |\n")
+	separator := "|" + strings.Repeat(" --- |", cellCount) + "\n"
+
+	var sb strings.Builder
+	if hasColumnHeader {
+		sb.WriteString(rendered[0])
+		sb.WriteString(separator)
+		for _, line := range rendered[1:] {
+			sb.WriteString(line)
+		}
+	} else {
+		// Synthesize an empty header row so the markdown table is well-formed
+		// and no source row is silently promoted to a header.
+		sb.WriteString("|" + strings.Repeat("  |", cellCount) + "\n")
+		sb.WriteString(separator)
+		for _, line := range rendered {
+			sb.WriteString(line)
 		}
 	}
 	sb.WriteString("\n")
