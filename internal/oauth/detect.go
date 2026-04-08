@@ -41,7 +41,7 @@ func DetectRedirect(rawURL string) *RedirectInfo {
 	}
 
 	port, err := strconv.Atoi(portStr)
-	if err != nil || port <= 0 {
+	if err != nil || port <= 0 || port > 65535 {
 		return nil
 	}
 

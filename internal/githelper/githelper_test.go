@@ -78,7 +78,7 @@ func TestGetPRInfo_error(t *testing.T) {
 func TestGetCommitInfo_withSHA(t *testing.T) {
 	h := &Helper{Runner: &mockRunner{fn: func(name string, args ...string) ([]byte, error) {
 		assert.Equal(t, "git", name)
-		assert.Equal(t, []string{"log", "-1", "--format=%H%n%s", "abc1234"}, args)
+		assert.Equal(t, []string{"log", "-1", "--format=%H%n%s", "abc1234", "--"}, args)
 		return []byte("abc1234567890abcdef1234567890abcdef123456\nFix login bug\n"), nil
 	}}}
 

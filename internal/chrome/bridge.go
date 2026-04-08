@@ -63,9 +63,16 @@ func (b *Bridge) ListenAndServe(ctx context.Context) error {
 
 	sockPath := filepath.Join(dir, fmt.Sprintf("%d.sock", os.Getpid()))
 
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		return errors.WrapWithDetails(err, "listening on unix socket", "path", sockPath)
+	// Narrow umask around Listen so the socket inode is created with
+	// 0600 from birth. Without this there is a small TOCTOU window
+	// between Listen and Chmod where another local user could connect.
+	var ln net.Listener
+	var listenErr error
+	withRestrictiveUmask(func() {
+		ln, listenErr = net.Listen("unix", sockPath)
+	})
+	if listenErr != nil {
+		return errors.WrapWithDetails(listenErr, "listening on unix socket", "path", sockPath)
 	}
 
 	// Match native host socket permissions (0600) so Claude Code's

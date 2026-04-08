@@ -47,9 +47,21 @@ func (r *SocketRelay) ListenAndServe(ctx context.Context) error {
 	// Remove stale socket file if it exists.
 	_ = os.Remove(sockPath)
 
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		return errors.WrapWithDetails(err, "socket relay listen failed",
+	// Match the bridge: narrow umask around Listen so the socket
+	// inode is born 0600 instead of relying on the 0700 parent dir
+	// alone. Chmod follows as defence in depth.
+	var ln net.Listener
+	var listenErr error
+	withRestrictiveUmask(func() {
+		ln, listenErr = net.Listen("unix", sockPath)
+	})
+	if listenErr != nil {
+		return errors.WrapWithDetails(listenErr, "socket relay listen failed",
+			"path", sockPath)
+	}
+	if chmodErr := os.Chmod(sockPath, 0o600); chmodErr != nil {
+		_ = ln.Close()
+		return errors.WrapWithDetails(chmodErr, "socket relay chmod failed",
 			"path", sockPath)
 	}
 	defer func() {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
@@ -52,7 +53,14 @@ func (c *Client) SetHTTPDoer(doer apiclient.HTTPDoer) {
 // GetUpdates fetches pending updates from the Telegram Bot API.
 // It does not pass an offset, so this is a read-only peek at pending messages.
 func (c *Client) GetUpdates(ctx context.Context, limit int) ([]Update, error) {
-	path := fmt.Sprintf("/bot%s/getUpdates?limit=%d&allowed_updates=[\"message\"]", c.token, limit)
+	// Escape both the token and the allowed_updates literal so tokens
+	// containing whitespace, slashes, or URL-reserved characters cannot
+	// produce a malformed path. The Bot API only supports URL auth, so
+	// the token must stay in the path — escaping is the best we can do.
+	q := url.Values{}
+	q.Set("limit", fmt.Sprintf("%d", limit))
+	q.Set("allowed_updates", `["message"]`)
+	path := fmt.Sprintf("/bot%s/getUpdates?%s", url.PathEscape(c.token), q.Encode())
 	resp, err := c.doRequest(ctx, http.MethodGet, path)
 	if err != nil {
 		return nil, err
@@ -89,7 +97,7 @@ func (c *Client) GetUpdate(ctx context.Context, updateID int) (*Update, error) {
 // getUpdates with offset = updateID + 1. This permanently removes those
 // updates from the pending queue.
 func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
-	path := fmt.Sprintf("/bot%s/getUpdates?offset=%d&limit=0", c.token, updateID+1)
+	path := fmt.Sprintf("/bot%s/getUpdates?offset=%d&limit=0", url.PathEscape(c.token), updateID+1)
 	resp, err := c.doRequest(ctx, http.MethodGet, path)
 	if err != nil {
 		return err
@@ -107,7 +115,7 @@ func (c *Client) AckUpdate(ctx context.Context, updateID int) error {
 
 // SendMessage sends a text message to the given chat via the Telegram Bot API.
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
-	path := fmt.Sprintf("/bot%s/sendMessage", c.token)
+	path := fmt.Sprintf("/bot%s/sendMessage", url.PathEscape(c.token))
 	body, err := json.Marshal(struct {
 		ChatID int64  `json:"chat_id"`
 		Text   string `json:"text"`

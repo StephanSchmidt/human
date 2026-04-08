@@ -369,12 +369,18 @@ func (c *Client) doRequest(ctx context.Context, method, path, rawQuery string, b
 // customIDQuery returns query parameters for custom task ID resolution.
 // When teamID is set and the key looks like a custom ID (contains a hyphen
 // with an uppercase prefix), it returns the query params for custom_task_ids.
+// teamID comes from .humanconfig and may contain characters that break
+// query encoding, so it is escaped through url.Values like every other
+// query site in this file.
 func (c *Client) customIDQuery(key string) string {
 	if c.teamID == "" {
 		return ""
 	}
 	if looksLikeCustomID(key) {
-		return fmt.Sprintf("custom_task_ids=true&team_id=%s", c.teamID)
+		v := url.Values{}
+		v.Set("custom_task_ids", "true")
+		v.Set("team_id", c.teamID)
+		return v.Encode()
 	}
 	return ""
 }

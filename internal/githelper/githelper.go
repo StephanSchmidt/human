@@ -82,7 +82,10 @@ func (h *Helper) GetCommitInfo(ctx context.Context, sha string) (*CommitInfo, er
 	if sha == "" {
 		sha = "HEAD"
 	}
-	out, err := h.Runner.Run(ctx, "git", "log", "-1", "--format=%H%n%s", sha)
+	// Put the sha before the `--` separator so a user-supplied value
+	// starting with `-` is still interpreted as a revision, not as an
+	// option — defence in depth for CLI-sourced shas.
+	out, err := h.Runner.Run(ctx, "git", "log", "-1", "--format=%H%n%s", sha, "--")
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "fetching commit info", "sha", sha)
 	}
