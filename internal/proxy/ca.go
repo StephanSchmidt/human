@@ -32,11 +32,36 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 	certPEM, certErr := os.ReadFile(certPath) // #nosec G304 -- dir is from ~/.human/
 	keyPEM, keyErr := os.ReadFile(keyPath)     // #nosec G304 -- dir is from ~/.human/
 
-	if certErr == nil && keyErr == nil {
+	certExists := certErr == nil
+	keyExists := keyErr == nil
+	certMissing := os.IsNotExist(certErr)
+	keyMissing := os.IsNotExist(keyErr)
+
+	// Non-ENOENT read errors on either file are real failures and must
+	// propagate so we never silently replace something the user trusts.
+	if certErr != nil && !certMissing {
+		return nil, nil, nil, errors.WrapWithDetails(certErr, "reading CA cert", "path", certPath)
+	}
+	if keyErr != nil && !keyMissing {
+		return nil, nil, nil, errors.WrapWithDetails(keyErr, "reading CA key", "path", keyPath)
+	}
+
+	// Both files present: parse and return the existing CA.
+	if certExists && keyExists {
 		return parseCA(certPEM, keyPEM)
 	}
 
-	// Generate new CA.
+	// Exactly one of the files is present. Refuse to continue — the user
+	// either intentionally removed one and should be made aware, or this
+	// is a partial restore we must not silently complete.
+	if certExists != keyExists {
+		return nil, nil, nil, errors.WithDetails(
+			"CA cert and key must both exist or both be missing",
+			"certPath", certPath, "certExists", certExists,
+			"keyPath", keyPath, "keyExists", keyExists)
+	}
+
+	// Generate new CA (both files missing).
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, nil, errors.WrapWithDetails(err, "generating CA key")

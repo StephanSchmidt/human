@@ -110,3 +110,25 @@ func TestLeafCache_differentDomains(t *testing.T) {
 
 	assert.NotEqual(t, leaf1.Leaf.SerialNumber, leaf2.Leaf.SerialNumber)
 }
+
+func TestLoadOrCreateCA_refusesWhenOnlyCertExists(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed only ca.crt — leave ca.key missing.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ca.crt"), []byte("dummy"), 0o600))
+
+	_, _, _, err := LoadOrCreateCA(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both exist or both be missing")
+}
+
+func TestLoadOrCreateCA_refusesWhenOnlyKeyExists(t *testing.T) {
+	dir := t.TempDir()
+
+	// Seed only ca.key — leave ca.crt missing.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "ca.key"), []byte("dummy"), 0o600))
+
+	_, _, _, err := LoadOrCreateCA(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both exist or both be missing")
+}
