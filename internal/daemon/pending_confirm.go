@@ -1,9 +1,10 @@
 package daemon
 
 import (
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/StephanSchmidt/human/errors"
 )
 
 const confirmTimeout = 5 * time.Minute
@@ -45,19 +46,26 @@ func (s *PendingConfirmStore) Add(pc *PendingConfirmation) {
 }
 
 // Resolve sends the decision to the waiting goroutine and removes the entry.
-// approverPID is the PID of the client resolving the confirmation; if it
-// matches the original requester's PID (and is non-zero), the call is
-// rejected to prevent self-approval of destructive operations.
+// approverPID is the PID of the client resolving the confirmation and must
+// be a positive integer. A call whose approverPID matches the original
+// requester's PID is rejected — requester and approver must be distinct
+// clients.
+//
+// Resolve is for client-initiated decisions. Internal lifecycle events
+// (timeouts, encode failures) must use ResolveTimeout instead.
 func (s *PendingConfirmStore) Resolve(id string, approved bool, approverPID int) error {
+	if approverPID <= 0 {
+		return errors.WithDetails("approverPID must be a positive integer: got %d", "id", id, "approverPID", approverPID)
+	}
 	s.mu.Lock()
 	pc, ok := s.ops[id]
 	if !ok {
 		s.mu.Unlock()
-		return fmt.Errorf("no pending confirmation with id %q", id)
+		return errors.WithDetails("no pending confirmation with id %q", "id", id)
 	}
-	if approverPID != 0 && approverPID == pc.ClientPID {
+	if approverPID == pc.ClientPID {
 		s.mu.Unlock()
-		return fmt.Errorf("self-approval not allowed: requester and approver are the same client (PID %d)", approverPID)
+		return errors.WithDetails("requester and approver must be distinct clients (id=%q, pid=%d)", "id", id, "pid", approverPID)
 	}
 	delete(s.ops, id)
 	s.mu.Unlock()
@@ -65,6 +73,30 @@ func (s *PendingConfirmStore) Resolve(id string, approved bool, approverPID int)
 	// Send decision outside the lock to avoid blocking.
 	pc.Decision <- approved
 	return nil
+}
+
+// ResolveTimeout removes a pending confirmation without a client approver.
+// It is used by internal lifecycle events (request timeouts, response-write
+// failures) that need to unblock the waiting goroutine. The decision is
+// always "not approved".
+//
+// Returns nil even when the id is unknown — the caller is typically running
+// in a deferred cleanup path where the entry may have already been resolved
+// by another lifecycle event, and that is not a failure.
+func (s *PendingConfirmStore) ResolveTimeout(id string) {
+	s.mu.Lock()
+	pc, ok := s.ops[id]
+	if !ok {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.ops, id)
+	s.mu.Unlock()
+
+	select {
+	case pc.Decision <- false:
+	default:
+	}
 }
 
 // Snapshot returns all pending confirmations as wire types for the TUI.

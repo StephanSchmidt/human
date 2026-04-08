@@ -499,7 +499,7 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 	case <-time.After(confirmTimeout):
 		s.Logger.Warn().Str("id", id).Msg("destructive confirmation timed out")
 		// Remove from store if still present (Cleanup may have already done it).
-		_ = s.PendingConfirms.Resolve(id, false, 0)
+		s.PendingConfirms.ResolveTimeout(id)
 		approved = false
 	}
 

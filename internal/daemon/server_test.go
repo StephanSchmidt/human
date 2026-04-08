@@ -549,7 +549,7 @@ func TestServer_DestructiveConfirm_Approved(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 
 		enc := json.NewEncoder(conn)
-		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-1"}})
+		_ = enc.Encode(Request{Token: token, ClientPID: 1111, Args: []string{"jira", "issue", "delete", "KAN-1"}})
 
 		reader := bufio.NewReader(conn)
 		line1, err := reader.ReadBytes('\n')
@@ -583,8 +583,8 @@ func TestServer_DestructiveConfirm_Approved(t *testing.T) {
 	assert.Equal(t, "DeleteIssue", snap[0].Operation)
 	assert.Equal(t, "KAN-1", snap[0].Key)
 
-	// Approve it (PID 0 = TUI/system approver).
-	err := store.Resolve(snap[0].ID, true, 0)
+	// Approve it as a distinct client (different PID from the requester).
+	err := store.Resolve(snap[0].ID, true, 2222)
 	require.NoError(t, err)
 
 	r := <-ch
@@ -615,7 +615,7 @@ func TestServer_DestructiveConfirm_Rejected(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 
 		enc := json.NewEncoder(conn)
-		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-2"}})
+		_ = enc.Encode(Request{Token: token, ClientPID: 1111, Args: []string{"jira", "issue", "delete", "KAN-2"}})
 
 		reader := bufio.NewReader(conn)
 		line1, _ := reader.ReadBytes('\n')
@@ -637,8 +637,8 @@ func TestServer_DestructiveConfirm_Rejected(t *testing.T) {
 	snap := store.Snapshot()
 	require.Len(t, snap, 1)
 
-	// Reject it (PID 0 = TUI/system approver).
-	err := store.Resolve(snap[0].ID, false, 0)
+	// Reject it as a distinct client.
+	err := store.Resolve(snap[0].ID, false, 2222)
 	require.NoError(t, err)
 
 	r := <-ch
@@ -667,7 +667,7 @@ func TestServer_DestructiveYes_StillRequiresConfirmation(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 
 		enc := json.NewEncoder(conn)
-		_ = enc.Encode(Request{Token: token, Args: []string{"jira", "issue", "delete", "KAN-3", "--yes"}})
+		_ = enc.Encode(Request{Token: token, ClientPID: 1111, Args: []string{"jira", "issue", "delete", "KAN-3", "--yes"}})
 
 		reader := bufio.NewReader(conn)
 		line1, err := reader.ReadBytes('\n')
@@ -687,10 +687,10 @@ func TestServer_DestructiveYes_StillRequiresConfirmation(t *testing.T) {
 	}
 	assert.Equal(t, 1, store.Len())
 
-	// Clean up: resolve it so the goroutine can finish.
+	// Clean up: resolve it so the goroutine can finish. Use a distinct PID.
 	snap := store.Snapshot()
 	if len(snap) > 0 {
-		_ = store.Resolve(snap[0].ID, false, 0)
+		_ = store.Resolve(snap[0].ID, false, 2222)
 	}
 
 	r := <-ch
