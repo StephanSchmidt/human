@@ -41,6 +41,8 @@ func SetLogMode(mode LogMode) { globalLogMode.Store(int32(mode)) }
 func GetLogMode() LogMode { return LogMode(globalLogMode.Load()) }
 
 // LogModeString returns the string representation of a LogMode.
+// An unknown value is reported as "off" rather than a more permissive
+// mode so a corrupted value can never silently escalate logging.
 func LogModeString(m LogMode) string {
 	switch m {
 	case LogModeFull:
@@ -50,11 +52,13 @@ func LogModeString(m LogMode) string {
 	case LogModeOff:
 		return "off"
 	default:
-		return "full"
+		return "off"
 	}
 }
 
-// ParseLogMode parses a string into a LogMode.
+// ParseLogMode parses a string into a LogMode. Unknown input returns
+// LogModeOff along with the parse error, so a typo in config cannot
+// accidentally widen what gets captured.
 func ParseLogMode(s string) (LogMode, error) {
 	switch strings.ToLower(s) {
 	case "full":
@@ -64,7 +68,7 @@ func ParseLogMode(s string) (LogMode, error) {
 	case "off":
 		return LogModeOff, nil
 	default:
-		return LogModeFull, fmt.Errorf("unknown log mode %q (use off, meta, or full)", s)
+		return LogModeOff, fmt.Errorf("unknown log mode %q (use off, meta, or full)", s)
 	}
 }
 
@@ -207,12 +211,12 @@ func (li *LoggingInterceptor) proxyHTTP(ctx context.Context, client, upstream ne
 		resp.Body = io.NopCloser(io.TeeReader(resp.Body, LimitWriter(&respBodyBuf, maxBodyLog)))
 
 		// Write response to client (this streams SSE events through).
-		if err := resp.Write(client); err != nil {
-			_ = resp.Body.Close()
-			return errors.WrapWithDetails(err, "writing to client", "hostname", hostname)
-		}
+		writeErr := resp.Write(client)
 		_ = resp.Body.Close()
 
+		// Persist whatever we captured before the write failure so
+		// logs retain the partial response for debugging; otherwise a
+		// single broken streaming write throws away the entire body.
 		li.logTraffic(TrafficLog{
 			Timestamp: time.Now(),
 			Direction: "response",
@@ -222,6 +226,10 @@ func (li *LoggingInterceptor) proxyHTTP(ctx context.Context, client, upstream ne
 			Body:      respBodyBuf.String(),
 			BodySize:  int64(respBodyBuf.Len()),
 		})
+
+		if writeErr != nil {
+			return errors.WrapWithDetails(writeErr, "writing to client", "hostname", hostname)
+		}
 
 		// If connection is not keep-alive, stop.
 		if resp.Close || req.Close {

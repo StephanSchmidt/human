@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -96,29 +97,53 @@ func (s *HookEventStore) Snapshot() map[string]hookevents.SessionSnapshot {
 	return sessions
 }
 
+// hookFieldMaxLen bounds every captured hook event field. Without a
+// bound a misbehaving client could swamp the in-memory store with
+// multi-megabyte strings.
+const hookFieldMaxLen = 1024
+
+// clampField truncates s to at most hookFieldMaxLen bytes.
+func clampField(s string) string {
+	if len(s) > hookFieldMaxLen {
+		return s[:hookFieldMaxLen]
+	}
+	return s
+}
+
 // ParseHookEventArgs converts daemon request args into a hook event.
 // Expected args: [event, session_id, cwd, notification_type, tool_name, error_type].
+//
+// Every field is length-capped and Cwd must be absolute — both as
+// defence against abusive clients that could otherwise poison the
+// in-memory hook store or write relative paths that collide with
+// registered project directories.
 func ParseHookEventArgs(args []string) hookevents.Event {
 	evt := hookevents.Event{
 		Timestamp: time.Now().UTC(),
 	}
 	if len(args) > 0 {
-		evt.EventName = args[0]
+		evt.EventName = clampField(args[0])
 	}
 	if len(args) > 1 {
-		evt.SessionID = args[1]
+		evt.SessionID = clampField(args[1])
 	}
 	if len(args) > 2 {
-		evt.Cwd = args[2]
+		cwd := clampField(args[2])
+		// Reject non-absolute Cwd so clients cannot inject paths that
+		// match registered projects by naming a relative path.
+		if cwd != "" && !filepath.IsAbs(cwd) {
+			cwd = ""
+		}
+		evt.Cwd = cwd
 	}
 	if len(args) > 3 {
-		evt.NotificationType = args[3]
+		evt.NotificationType = clampField(args[3])
 	}
 	if len(args) > 4 {
-		evt.ToolName = args[4]
+		evt.ToolName = clampField(args[4])
 	}
 	if len(args) > 5 {
-		evt.ErrorType = args[5]
+		evt.ErrorType = clampField(args[5])
 	}
 	return evt
 }

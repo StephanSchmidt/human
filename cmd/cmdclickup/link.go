@@ -221,11 +221,20 @@ func upsertSection(desc, entry string) string {
 		sectionEnd++
 	}
 
-	// Check for duplicate by matching the entry prefix (everything before the URL).
+	// Check for duplicate by matching the entry prefix (everything
+	// before the URL). Anchor the match so e.g. "owner/repo#42" cannot
+	// match "owner/repo#427". Commit entries end with "](" before the
+	// URL; PR entries end with " — " before the title.
 	entryPrefix := entryMatchPrefix(entry)
+	anchor := entryPrefix
+	if strings.HasPrefix(entryPrefix, "Commit: [`") {
+		anchor = entryPrefix + "("
+	} else {
+		anchor = entryPrefix + " — "
+	}
 	replaced := false
 	for i := sectionStart; i < sectionEnd; i++ {
-		if strings.Contains(lines[i], entryPrefix) {
+		if strings.Contains(lines[i], anchor) {
 			lines[i] = "- " + entry
 			replaced = true
 			break

@@ -209,9 +209,11 @@ func (c *Client) ListStatuses(ctx context.Context, key string) ([]tracker.Status
 		return nil, errors.WithDetails("work item has no type", "key", key)
 	}
 
-	// Fetch states for that work item type.
+	// Fetch states for that work item type. Every segment is escaped
+	// so org / project names containing characters like spaces or
+	// slashes can't inject additional URL path elements.
 	statesPath := fmt.Sprintf("/%s/%s/_apis/wit/workitemtypes/%s/states",
-		c.org, project, url.PathEscape(wiType))
+		url.PathEscape(c.org), url.PathEscape(project), url.PathEscape(wiType))
 	statesResp, err := c.doRequest(ctx, http.MethodGet, statesPath, "api-version=7.1", nil, "")
 	if err != nil {
 		return nil, err

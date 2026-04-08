@@ -131,7 +131,26 @@ func DiagnoseTrackers(dir string, unmarshal func(dir, section string, target any
 	var result []TrackerStatus
 	for section, kind := range sectionToKind {
 		var entries []diagnoseEntry
-		_ = unmarshal(dir, section, &entries)
+		// A parse error previously collapsed to zero results, so a
+		// broken humanconfig presented as "no trackers configured"
+		// rather than surfacing the underlying YAML issue. Emit a
+		// synthetic Working=false status so the user can see and fix
+		// the problem.
+		if err := unmarshal(dir, section, &entries); err != nil {
+			spec, ok := CredSpecs[kind]
+			label := kind
+			if ok {
+				label = spec.Label
+			}
+			result = append(result, TrackerStatus{
+				Name:    section,
+				Kind:    kind,
+				Label:   label,
+				Working: false,
+				Missing: []string{"config parse error: " + err.Error()},
+			})
+			continue
+		}
 
 		spec, ok := CredSpecs[kind]
 		if !ok {

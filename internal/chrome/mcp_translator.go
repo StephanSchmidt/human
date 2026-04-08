@@ -95,14 +95,25 @@ func (t *McpTranslator) Serve(ctx context.Context, conn net.Conn) error {
 		errCh <- t.outbound(scanner, conn)
 	}()
 
-	<-errCh
+	firstErr := <-errCh
 	cancel()
 	// Close conn so the other goroutine unblocks if stuck on I/O.
 	_ = conn.Close()
-	// Drain the second goroutine's error so it doesn't leak.
-	<-errCh
+	secondErr := <-errCh
 
-	_ = cmd.Wait()
+	// Surface the first non-nil goroutine error at Warn. Silent errors
+	// here previously hid protocol-level problems (malformed frames,
+	// closed subprocess stdout) so a broken bridge looked healthy.
+	if firstErr != nil {
+		t.Logger.Warn().Err(firstErr).Msg("MCP bridge goroutine error")
+	}
+	if secondErr != nil {
+		t.Logger.Warn().Err(secondErr).Msg("MCP bridge goroutine error")
+	}
+
+	if waitErr := cmd.Wait(); waitErr != nil {
+		t.Logger.Warn().Err(waitErr).Msg("MCP subprocess exited non-zero")
+	}
 
 	return nil
 }

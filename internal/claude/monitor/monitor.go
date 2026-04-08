@@ -256,12 +256,21 @@ func fillMissingFromHooks(instances []claude.Instance, byPath map[string]logpars
 	for _, sess := range byPath {
 		matched[sess.SessionID] = true
 	}
-	// Index unmatched hooks by cwd for instance matching.
+	// Index unmatched hooks by cwd for instance matching. When
+	// multiple snapshots share the same cwd, keep the one with the
+	// most recent LastEventAt so ordering is deterministic across
+	// runs (map iteration is random).
 	byCwd := make(map[string]hookevents.SessionSnapshot)
 	for _, snap := range hooks {
-		if !matched[snap.SessionID] && snap.Cwd != "" {
-			byCwd[snap.Cwd] = snap
+		if matched[snap.SessionID] || snap.Cwd == "" {
+			continue
 		}
+		if existing, ok := byCwd[snap.Cwd]; ok {
+			if !snap.LastEventAt.After(existing.LastEventAt) {
+				continue
+			}
+		}
+		byCwd[snap.Cwd] = snap
 	}
 	// Match instances without a session to hook snapshots by cwd.
 	for _, inst := range instances {

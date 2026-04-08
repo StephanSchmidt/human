@@ -522,18 +522,29 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 			name = shortID
 		}
 
-		mem, _ := d.Client.ContainerStats(ctx, ctr.ID)
+		mem, memErr := d.Client.ContainerStats(ctx, ctr.ID)
+		if memErr != nil {
+			log.Debug().Err(memErr).Str("container", shortID).Msg("container stats unavailable")
+		}
 
 		// Check if the container has the HTTPS proxy configured.
-		proxyExit, _, _ := d.Client.Exec(ctx, ctr.ID, []string{"printenv", "HUMAN_PROXY_ADDR"})
+		proxyExit, _, proxyErr := d.Client.Exec(ctx, ctr.ID, []string{"printenv", "HUMAN_PROXY_ADDR"})
+		if proxyErr != nil {
+			log.Debug().Err(proxyErr).Str("container", shortID).Msg("container proxy probe failed")
+		}
 		proxyConfigured := proxyExit == 0
 
 		// Resolve Claude's working directory inside the container.
 		var containerCwd string
-		cwdExit, cwdReader, _ := d.Client.Exec(ctx, ctr.ID, []string{"sh", "-c", "readlink /proc/$(pgrep -x claude)/cwd"})
+		cwdExit, cwdReader, cwdErr := d.Client.Exec(ctx, ctr.ID, []string{"sh", "-c", "readlink /proc/$(pgrep -x claude)/cwd"})
+		if cwdErr != nil {
+			log.Debug().Err(cwdErr).Str("container", shortID).Msg("container cwd probe failed")
+		}
 		if cwdExit == 0 && cwdReader != nil {
 			if cwdBytes, readErr := io.ReadAll(cwdReader); readErr == nil {
 				containerCwd = strings.TrimSpace(string(cwdBytes))
+			} else {
+				log.Debug().Err(readErr).Str("container", shortID).Msg("reading container cwd output failed")
 			}
 		}
 

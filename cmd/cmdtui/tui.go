@@ -177,8 +177,12 @@ type model struct {
 	createActive  bool      // true when the create form is shown
 	createForm    *huh.Form // the huh form (implements tea.Model)
 	createTracker int       // selected tracker index (value bound to form)
-	createTitle   string    // bound to form
-	createDesc    string    // bound to form
+	// createOptions captures the tracker options list at form-creation
+	// time so the resolved selection is stable against refreshes of
+	// m.issues while the form is open.
+	createOptions []trackerOption
+	createTitle   string // bound to form
+	createDesc    string // bound to form
 }
 
 func newModel(mon *monitor.Monitor) model {
@@ -649,7 +653,9 @@ func (m model) handleCreateStart() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Default to first PM tracker.
+	// Default to first PM tracker. Cache the options list so the submit
+	// path resolves the selection against the same slice even if
+	// m.issues is refreshed while the form is open.
 	m.createTracker = 0
 	for i, opt := range options {
 		if opt.Role == "pm" {
@@ -657,6 +663,7 @@ func (m model) handleCreateStart() (tea.Model, tea.Cmd) {
 			break
 		}
 	}
+	m.createOptions = options
 	m.createTitle = ""
 	m.createDesc = ""
 
@@ -718,20 +725,12 @@ func (m model) updateCreateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.createActive = false
 		m.createForm = nil
 
-		// Resolve the selected tracker/project.
-		seen := make(map[trackerOption]bool)
-		var options []trackerOption
-		for _, g := range m.issues {
-			role := g.TrackerRole
-			if role == "" {
-				role = inferRole(g.TrackerKind)
-			}
-			opt := trackerOption{Kind: g.TrackerKind, Role: role, Project: g.Project}
-			if !seen[opt] {
-				seen[opt] = true
-				options = append(options, opt)
-			}
-		}
+		// Resolve the selected tracker/project against the snapshot
+		// captured at form-creation time. Rebuilding the list here
+		// from m.issues would desync the index from the labels the
+		// user actually saw.
+		options := m.createOptions
+		m.createOptions = nil
 		if m.createTracker >= 0 && m.createTracker < len(options) {
 			sel := options[m.createTracker]
 			return m, createTicketCmd(sel.Kind, sel.Project, m.createTitle, m.createDesc)
@@ -1427,7 +1426,7 @@ func (m model) filterInstances(instances []monitor.InstanceView) []monitor.Insta
 	}
 	var out []monitor.InstanceView
 	for _, iv := range instances {
-		if strings.HasPrefix(iv.Usage.Instance.Cwd, active.Dir) {
+		if pathMatches(iv.Usage.Instance.Cwd, active.Dir) {
 			out = append(out, iv)
 		}
 	}
@@ -1471,7 +1470,7 @@ func (m model) filterPanes(panes []claude.TmuxPane) []claude.TmuxPane {
 	}
 	var out []claude.TmuxPane
 	for _, p := range panes {
-		if strings.HasPrefix(p.Cwd, active.Dir) {
+		if pathMatches(p.Cwd, active.Dir) {
 			out = append(out, p)
 		}
 	}
@@ -1489,10 +1488,22 @@ func unmatchedPanes(panes []claude.TmuxPane, projects []daemon.ProjectInfo) []cl
 	return out
 }
 
-// matchesAnyProject returns true if cwd starts with any project's Dir.
+// pathMatches returns true when cwd is exactly dir or a proper
+// descendant path under dir. Using a bare HasPrefix wrongly treats
+// "/home/alice-project" as a descendant of "/home/alice" because the
+// prefix happens to match at a non-boundary byte.
+func pathMatches(cwd, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	return cwd == dir || strings.HasPrefix(cwd, dir+string(os.PathSeparator))
+}
+
+// matchesAnyProject returns true if cwd is dir or a descendant path of
+// any project's Dir.
 func matchesAnyProject(cwd string, projects []daemon.ProjectInfo) bool {
 	for _, p := range projects {
-		if strings.HasPrefix(cwd, p.Dir) {
+		if pathMatches(cwd, p.Dir) {
 			return true
 		}
 	}

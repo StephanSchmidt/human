@@ -17,6 +17,12 @@ type Opener interface {
 type DefaultOpener struct{}
 
 func (DefaultOpener) Open(rawURL string) error {
+	// Validate at the opener boundary so every caller (including the
+	// TUI's direct openBrowserCmd) gets the scheme whitelist, not just
+	// those routing through RunOpen.
+	if err := ValidateURL(rawURL); err != nil {
+		return err
+	}
 	return startBrowser(rawURL)
 }
 

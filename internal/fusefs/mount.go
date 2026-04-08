@@ -107,19 +107,43 @@ func detectTier(server *fuse.Server) string {
 	return "splice"
 }
 
-// IsSensitiveFile classifies a filename by its sensitivity.
+// IsSensitiveFile classifies a filename by its sensitivity. The check
+// is intentionally broad: matching a parent directory also marks the
+// file as opaque so nothing under a credential directory leaks through
+// the non-sensitive fast path.
 func IsSensitiveFile(name string) FileKind {
 	base := filepath.Base(name)
 	lower := strings.ToLower(base)
+
+	// Check the full path for parent directories that always contain
+	// secrets. Matching at the directory level means every descendant
+	// (e.g. aws/config, kube/token, gnupg/private-keys-v1.d/*) is
+	// treated as opaque even when the basename looks innocent.
+	cleaned := filepath.ToSlash(name)
+	lowerPath := strings.ToLower(cleaned)
+	sensitiveDirs := []string{
+		"/.aws/", "/.kube/", "/.docker/", "/.gnupg/", "/.ssh/",
+	}
+	for _, d := range sensitiveDirs {
+		if strings.Contains(lowerPath, d) {
+			return FileKindOpaque
+		}
+	}
 
 	// .env, .env.*
 	if base == ".env" || strings.HasPrefix(base, ".env.") {
 		return FileKindEnv
 	}
 
-	// .npmrc, .pypirc — KEY=VALUE style
-	if lower == ".npmrc" || lower == ".pypirc" {
+	// KEY=VALUE style credential files.
+	switch lower {
+	case ".npmrc", ".pypirc", ".netrc", ".authinfo", ".gitconfig", ".git-credentials":
 		return FileKindEnv
+	}
+
+	// SSH private keys by convention.
+	if base == "id_rsa" || base == "id_ed25519" || base == "id_ecdsa" || base == "id_dsa" {
+		return FileKindOpaque
 	}
 
 	// JSON files with secrets

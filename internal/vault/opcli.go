@@ -3,11 +3,18 @@ package vault
 import (
 	"context"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/StephanSchmidt/human/errors"
 )
+
+// opRefPattern whitelists the characters permitted in a resolved
+// op:// reference. The set intentionally excludes shell metacharacters
+// and flag introducers so no value that slips past the prefix check
+// can reach the CLI as a rogue argument.
+var opRefPattern = regexp.MustCompile(`^op://[A-Za-z0-9 _./\-]+$`)
 
 // OpCLI resolves 1pw:// secret references by shelling out to the 1Password CLI.
 // This is the fallback for WSL2 where the Go SDK cannot reach the Windows
@@ -35,10 +42,13 @@ func (o *OpCLI) CanResolve(ref string) bool {
 func (o *OpCLI) Resolve(ref string) (string, error) {
 	sdkRef := sdkRefPrefix + strings.TrimPrefix(ref, secretRefPrefix)
 
-	// Validate that the resolved reference starts with the expected op:// prefix
-	// to prevent arbitrary argument injection.
-	if !strings.HasPrefix(sdkRef, "op://") {
-		return "", errors.WithDetails("invalid secret reference: must start with op://")
+	// Validate that the resolved reference matches the whitelisted
+	// grammar. The prefix check alone is not enough: a value like
+	// "op://--version" passes HasPrefix but could be interpreted as a
+	// CLI flag by op.
+	if !opRefPattern.MatchString(sdkRef) {
+		return "", errors.WithDetails("invalid secret reference: must match op://<vault>/<item>/<field>",
+			"ref", ref)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
