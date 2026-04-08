@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -303,7 +304,7 @@ func TestRunDeleteIssue_Success(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RunDeleteIssue(context.Background(), p, &buf, "KAN-1", true)
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader(""), &buf, "KAN-1", true)
 	require.NoError(t, err)
 	assert.True(t, deleted)
 	assert.Contains(t, buf.String(), "Deleted KAN-1")
@@ -317,9 +318,89 @@ func TestRunDeleteIssue_DeleteError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := RunDeleteIssue(context.Background(), p, &buf, "KAN-1", true)
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader(""), &buf, "KAN-1", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "delete failed")
+}
+
+func TestRunDeleteIssue_EmptyInputCancels(t *testing.T) {
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader("\n"), &buf, "KAN-1", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete cancelled")
+	assert.False(t, deleted, "DeleteIssue must not be called on bare Enter")
+}
+
+func TestRunDeleteIssue_NInputCancels(t *testing.T) {
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader("N\n"), &buf, "KAN-1", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "delete cancelled")
+	assert.False(t, deleted)
+}
+
+func TestRunDeleteIssue_YInputDeletes(t *testing.T) {
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, key string) error {
+			assert.Equal(t, "KAN-1", key)
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader("y\n"), &buf, "KAN-1", false)
+	require.NoError(t, err)
+	assert.True(t, deleted)
+	assert.Contains(t, buf.String(), "Deleted KAN-1")
+}
+
+func TestRunDeleteIssue_WhitespaceOnlyCancels(t *testing.T) {
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	var buf bytes.Buffer
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader("   \n"), &buf, "KAN-1", false)
+	require.Error(t, err)
+	assert.False(t, deleted, "DeleteIssue must not be called on whitespace-only input")
+}
+
+func TestRunDeleteIssue_YesFlagSkipsPrompt(t *testing.T) {
+	deleted := false
+	p := &mockProvider{
+		deleteIssueFn: func(_ context.Context, _ string) error {
+			deleted = true
+			return nil
+		},
+	}
+
+	// Empty stdin, but yes=true should bypass the prompt entirely.
+	var buf bytes.Buffer
+	err := RunDeleteIssue(context.Background(), p, strings.NewReader(""), &buf, "KAN-1", true)
+	require.NoError(t, err)
+	assert.True(t, deleted)
 }
 
 // --- RunStartIssue tests ---

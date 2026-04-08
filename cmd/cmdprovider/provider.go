@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -154,7 +155,7 @@ func buildIssueDeleteCmd(kind string, deps cmdutil.Deps) *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			return RunDeleteIssue(cmd.Context(), p, cmd.OutOrStdout(), args[0], yes)
+			return RunDeleteIssue(cmd.Context(), p, os.Stdin, cmd.OutOrStdout(), args[0], yes)
 		},
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "Skip interactive confirmation")
@@ -318,12 +319,17 @@ func RunCreateIssue(ctx context.Context, p tracker.Provider, out io.Writer, proj
 }
 
 // RunDeleteIssue deletes an issue.
-// When yes is false, the user is prompted for confirmation before proceeding.
-func RunDeleteIssue(ctx context.Context, p tracker.Provider, out io.Writer, key string, yes bool) error {
+// When yes is false, the user is prompted for confirmation on in. Empty input
+// (bare Enter) is treated as "No" to match the [y/N] default.
+func RunDeleteIssue(ctx context.Context, p tracker.Provider, in io.Reader, out io.Writer, key string, yes bool) error {
 	if !yes {
 		fmt.Fprintf(os.Stderr, "Delete %s? [y/N] ", key)
-		scanner := bufio.NewScanner(os.Stdin)
-		if !scanner.Scan() || (scanner.Text() != "" && scanner.Text()[0] != 'y' && scanner.Text()[0] != 'Y') {
+		scanner := bufio.NewScanner(in)
+		if !scanner.Scan() {
+			return errors.WithDetails("delete cancelled by user")
+		}
+		answer := strings.TrimSpace(scanner.Text())
+		if answer == "" || (answer[0] != 'y' && answer[0] != 'Y') {
 			return errors.WithDetails("delete cancelled by user")
 		}
 	}
