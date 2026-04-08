@@ -317,6 +317,38 @@ func TestClaudeMigrateStep_FullMigration(t *testing.T) {
 }
 
 // mockMigratePrompter is a test double for ClaudeMigratePrompter.
+// TestRewriteDirInPlace_PreservesBinaries verifies that rewriteDirInPlace
+// only touches text files; binary files in the same directory are returned
+// untouched, byte-for-byte. This guards against the regression where
+// migrating onto the source path would truncate every binary file in
+// session-env directories.
+func TestRewriteDirInPlace_PreservesBinaries(t *testing.T) {
+	dir := t.TempDir()
+
+	// Text file with content the rewriter should change.
+	textPath := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(textPath, []byte(`{"path":"/old/proj"}`), 0o600))
+
+	// "Binary" file with embedded null bytes — isTextFile should reject it.
+	binPath := filepath.Join(dir, "blob.bin")
+	binContent := []byte{0x00, 0x01, 0x02, 'o', 'l', 'd', 0x00, 0xff}
+	require.NoError(t, os.WriteFile(binPath, binContent, 0o600))
+
+	repls := []replacement{{Old: "/old/proj", New: "/new/proj"}}
+
+	require.NoError(t, rewriteDirInPlace(dir, repls))
+
+	// Text file rewritten.
+	gotText, err := os.ReadFile(textPath)
+	require.NoError(t, err)
+	assert.Equal(t, `{"path":"/new/proj"}`, string(gotText))
+
+	// Binary file untouched, byte-for-byte.
+	gotBin, err := os.ReadFile(binPath)
+	require.NoError(t, err)
+	assert.Equal(t, binContent, gotBin)
+}
+
 type mockMigratePrompter struct {
 	confirmMigrate bool
 	containerPath  string

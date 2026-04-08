@@ -99,20 +99,43 @@ func (s *claudeMigrateStep) Run(w io.Writer, _ claude.FileWriter) ([]string, err
 	return nil, nil
 }
 
-// migrateSessionDirs copies file-history, session-env, and rewrites todos for each session.
+// migrateSessionDirs rewrites text files under each session-env directory in
+// place and rewrites todo files for each session. Binary files are left
+// untouched so they are never truncated by an in-place "copy" onto themselves.
 func migrateSessionDirs(claudeDir string, sessions []string, repls []replacement) {
 	for _, sid := range sessions {
 		// session-env/{session-id}/
 		src := filepath.Join(claudeDir, "session-env", sid)
 		if _, statErr := os.Stat(src); statErr == nil {
-			if _, copyErr := copyDirWithRewrite(src, src, repls); copyErr != nil {
-				errors.LogError(copyErr).Str("session", sid).Msg("failed to copy session-env")
+			if rewriteErr := rewriteDirInPlace(src, repls); rewriteErr != nil {
+				errors.LogError(rewriteErr).Str("session", sid).Msg("failed to rewrite session-env")
 			}
 		}
 
 		// todos/{session-id}-*.json
 		rewriteSessionTodos(claudeDir, sid, repls)
 	}
+}
+
+// rewriteDirInPlace walks dir and rewrites every text file found, applying
+// the given replacements. Binary files are skipped entirely so they are
+// never truncated by an in-place copy onto themselves.
+func rewriteDirInPlace(dir string, repls []replacement) error {
+	if len(repls) == 0 {
+		return nil
+	}
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !isTextFile(path) {
+			return nil
+		}
+		return rewriteFile(path, path, repls)
+	})
 }
 
 // rewriteSessionTodos rewrites todo files matching a session ID.
@@ -268,8 +291,10 @@ func rewriteFile(src, dst string, repls []replacement) error {
 	return os.WriteFile(dst, []byte(rewritten), 0o600)
 }
 
-// copyFileBinary copies a file without modification.
-func copyFileBinary(src, dst string) error {
+// copyFileBinary copies a file without modification. The destination file is
+// closed explicitly so a flush failure (quota, I/O error) surfaces as an
+// error rather than being silently dropped by a deferred Close.
+func copyFileBinary(src, dst string) (retErr error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return err
 	}
@@ -284,10 +309,16 @@ func copyFileBinary(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = out.Close() }()
+	defer func() {
+		if cerr := out.Close(); cerr != nil && retErr == nil {
+			retErr = errors.WrapWithDetails(cerr, "closing destination", "path", dst)
+		}
+	}()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return nil
 }
 
 // copyDirWithRewrite recursively copies a directory, rewriting text files.
@@ -325,7 +356,10 @@ func appendHistory(claudeDir, oldKey, _, _ string, repls []replacement) error {
 	// Read existing history to find entries for the old project.
 	srcFile, err := os.Open(historyPath) // #nosec G304 — path built from ~/.claude/history.jsonl
 	if err != nil {
-		return nil // No history file, nothing to do.
+		if os.IsNotExist(err) {
+			return nil // No history file, nothing to do.
+		}
+		return errors.WrapWithDetails(err, "opening history.jsonl", "path", historyPath)
 	}
 	defer func() { _ = srcFile.Close() }()
 
@@ -355,18 +389,21 @@ func appendHistory(claudeDir, oldKey, _, _ string, repls []replacement) error {
 		return nil
 	}
 
-	// Append new entries.
+	// Append new entries. Explicitly capture the close error so a flush
+	// failure surfaces instead of being lost in a deferred close.
 	f, err := os.OpenFile(historyPath, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 — path built from ~/.claude/history.jsonl
 	if err != nil {
 		return errors.WrapWithDetails(err, "opening history.jsonl for append")
 	}
-	defer func() { _ = f.Close() }()
-
+	var writeErr error
 	for _, entry := range newEntries {
-		if _, err := fmt.Fprintln(f, entry); err != nil { // #nosec G705 — entry from local history.jsonl, not user input
-			return errors.WrapWithDetails(err, "writing history entry")
+		if _, werr := fmt.Fprintln(f, entry); werr != nil { // #nosec G705 — entry from local history.jsonl, not user input
+			writeErr = errors.WrapWithDetails(werr, "writing history entry")
+			break
 		}
 	}
-
-	return nil
+	if cerr := f.Close(); cerr != nil && writeErr == nil {
+		writeErr = errors.WrapWithDetails(cerr, "closing history.jsonl")
+	}
+	return writeErr
 }
