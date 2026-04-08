@@ -260,6 +260,27 @@ func TestDestructiveProvider_EditDetail_MultipleFields(t *testing.T) {
 	assert.Contains(t, entries[0].Detail, "description")
 }
 
+// A no-op EditIssue (both fields nil) must log an empty Detail rather
+// than a dangling "changed: " prefix. The audit log is the only record
+// of what was edited; a stray prefix would misleadingly suggest a
+// mutation happened and muddy compliance review.
+func TestDestructiveProvider_EditDetail_EmptyOptions(t *testing.T) {
+	inner := &mockProvider{
+		editIssueFn: func(_ context.Context, key string, _ tracker.EditOptions) (*tracker.Issue, error) {
+			return &tracker.Issue{Key: key}, nil
+		},
+	}
+	dp, logPath := newDestructive(t, inner, nil)
+
+	_, err := dp.EditIssue(context.Background(), "KAN-1", tracker.EditOptions{})
+	require.NoError(t, err)
+
+	entries := readDestructiveEntries(t, logPath)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "", entries[0].Detail,
+		"empty EditOptions must produce an empty Detail, not a stray %q prefix", "changed: ")
+}
+
 func TestNewDestructiveProvider_InvalidPath(t *testing.T) {
 	inner := &mockProvider{}
 	_, err := tracker.NewDestructiveProvider(inner, "test", "jira", "/nonexistent/dir/destructive.log", nil)
