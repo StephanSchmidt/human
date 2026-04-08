@@ -727,12 +727,14 @@ func TestServer_ConfirmOpEndpoint(t *testing.T) {
 	addr, _, store := startTestServerWithConfirm(t, token)
 
 	pc := &PendingConfirmation{
-		ID:       "test-resolve",
-		Decision: make(chan bool, 1),
+		ID:        "test-resolve",
+		ClientPID: 1111,
+		Decision:  make(chan bool, 1),
 	}
 	store.Add(pc)
 
-	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"confirm-op", "test-resolve", "yes"}})
+	// Resolver sends a distinct PID from the requester.
+	resp := sendRequest(t, addr, Request{Token: token, ClientPID: 2222, Args: []string{"confirm-op", "test-resolve", "yes"}})
 	assert.Equal(t, "ok\n", resp.Stdout)
 
 	decision := <-pc.Decision
@@ -743,7 +745,29 @@ func TestServer_ConfirmOpEndpoint_NotFound(t *testing.T) {
 	token := "test-token"
 	addr, _, _ := startTestServerWithConfirm(t, token)
 
-	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"confirm-op", "nonexistent", "yes"}})
+	resp := sendRequest(t, addr, Request{Token: token, ClientPID: 2222, Args: []string{"confirm-op", "nonexistent", "yes"}})
 	assert.Equal(t, 1, resp.ExitCode)
 	assert.Contains(t, resp.Stderr, "nonexistent")
+}
+
+// TestServer_ConfirmOpEndpoint_RejectsMissingPID verifies that a confirm-op
+// request without a ClientPID is rejected — the daemon requires a positive
+// approver PID from the resolving client.
+func TestServer_ConfirmOpEndpoint_RejectsMissingPID(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	pc := &PendingConfirmation{
+		ID:        "no-pid",
+		ClientPID: 1111,
+		Decision:  make(chan bool, 1),
+	}
+	store.Add(pc)
+
+	// ClientPID omitted → defaults to 0 → request must be rejected.
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"confirm-op", "no-pid", "yes"}})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.NotEmpty(t, resp.Stderr)
+	// The confirmation must still be pending — nothing was resolved.
+	assert.Equal(t, 1, store.Len())
 }
