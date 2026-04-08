@@ -41,9 +41,13 @@ func (c *Client) DoGraphQL(ctx context.Context, graphqlPath, query string, varia
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes+1))
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "reading response body")
+	}
+	if int64(len(body)) > MaxResponseBodyBytes {
+		return nil, errors.WithDetails(
+			fmt.Sprintf("graphql response body exceeds size limit of %d bytes", MaxResponseBodyBytes))
 	}
 
 	var gqlResp GraphQLResponse

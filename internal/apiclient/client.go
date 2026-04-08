@@ -39,6 +39,17 @@ func ValidateURL(rawURL string) error {
 // ErrorFormatter formats an HTTP error response into an error value.
 type ErrorFormatter func(providerName, method, path string, statusCode int, body []byte) error
 
+// PathSanitizer transforms a request path before it is included in error
+// details. Use it when the path may contain secrets that would otherwise
+// appear verbatim in log output on transport or decode failures.
+type PathSanitizer func(path string) string
+
+// MaxResponseBodyBytes bounds the number of bytes DecodeJSON and
+// DoGraphQL will read from a response body before returning an error.
+// It's large enough for realistic JSON payloads but prevents an
+// adversarial or misbehaving upstream from exhausting memory.
+const MaxResponseBodyBytes = 50 * 1024 * 1024 // 50 MiB
+
 // Client is a shared HTTP API client that handles URL construction,
 // authentication, headers, and error handling.
 // Client is not safe for concurrent modification. All configuration (including
@@ -51,6 +62,7 @@ type Client struct {
 	contentType    string // if set, always use this Content-Type; if empty, set "application/json" only when body != nil
 	providerName   string
 	errorFormatter ErrorFormatter
+	pathSanitizer  PathSanitizer
 	http           HTTPDoer
 	timeout        time.Duration
 }
@@ -108,6 +120,14 @@ func WithErrorFormatter(ef ErrorFormatter) Option {
 	return func(c *Client) { c.errorFormatter = ef }
 }
 
+// WithPathSanitizer installs a function that transforms the request path
+// before it is included in error details. Providers that embed sensitive
+// values into the URL path should supply a sanitizer so failure paths
+// don't surface the raw value in log output.
+func WithPathSanitizer(ps PathSanitizer) Option {
+	return func(c *Client) { c.pathSanitizer = ps }
+}
+
 // WithTimeout sets the HTTP client timeout. Only effective when no custom
 // HTTPDoer is provided via WithHTTPDoer.
 func WithTimeout(d time.Duration) Option {
@@ -150,10 +170,19 @@ func (c *Client) doExec(ctx context.Context, method, path, rawQuery string, body
 		return nil, err
 	}
 
+	// safePath is the path value included in any error details. Error
+	// formatters still receive the raw path so they can compose request-
+	// specific messages; sanitizer-using callers must also sanitize within
+	// their own formatter if they install one.
+	safePath := path
+	if c.pathSanitizer != nil {
+		safePath = c.pathSanitizer(path)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "creating request",
-			"method", method, "path", path)
+			"method", method, "path", safePath)
 	}
 
 	c.auth(req)
@@ -176,11 +205,11 @@ func (c *Client) doExec(ctx context.Context, method, path, rawQuery string, body
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, fmt.Sprintf("requesting %s", c.displayName()),
-			"method", method, "path", path)
+			"method", method, "path", safePath)
 	}
 	if resp == nil {
 		return nil, errors.WithDetails(fmt.Sprintf("requesting %s: nil response", c.displayName()),
-			"method", method, "path", path)
+			"method", method, "path", safePath)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -189,8 +218,8 @@ func (c *Client) doExec(ctx context.Context, method, path, rawQuery string, body
 			return nil, c.errorFormatter(c.providerName, method, path, resp.StatusCode, respBody)
 		}
 		return nil, errors.WithDetails(
-			fmt.Sprintf("%s %s %s returned %d: %s", c.displayName(), method, path, resp.StatusCode, string(respBody)),
-			"statusCode", resp.StatusCode, "method", method, "path", path)
+			fmt.Sprintf("%s %s %s returned %d: %s", c.displayName(), method, safePath, resp.StatusCode, string(respBody)),
+			"statusCode", resp.StatusCode, "method", method, "path", safePath)
 	}
 	return resp, nil
 }
@@ -203,12 +232,19 @@ func (c *Client) displayName() string {
 }
 
 // DecodeJSON reads and decodes a JSON response body into dest, then closes the
-// body. The context args are passed to errors.WrapWithDetails on decode failure.
+// body. Response bodies are capped at MaxResponseBodyBytes so an oversized or
+// adversarial upstream cannot exhaust memory. The context args are passed to
+// errors.WrapWithDetails on decode failure.
 func DecodeJSON(resp *http.Response, dest interface{}, contextArgs ...interface{}) error {
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes+1))
 	if err != nil {
 		return errors.WrapWithDetails(err, "reading response body", contextArgs...)
+	}
+	if int64(len(body)) > MaxResponseBodyBytes {
+		return errors.WithDetails(
+			fmt.Sprintf("response body exceeds size limit of %d bytes", MaxResponseBodyBytes),
+			contextArgs...)
 	}
 	if err := json.Unmarshal(body, dest); err != nil {
 		snippet := string(body)

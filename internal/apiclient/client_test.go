@@ -3,6 +3,7 @@ package apiclient
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/StephanSchmidt/human/errors"
 )
 
 type errDoer struct{ err error }
@@ -376,4 +379,76 @@ func TestDecodeJSON_closesBody(t *testing.T) {
 	buf := make([]byte, 1)
 	_, readErr := resp.Body.Read(buf)
 	assert.Error(t, readErr, "body should be closed after DecodeJSON")
+}
+
+// TestDoExec_PathSanitizerHidesSecretsOnTransportError ensures that when a
+// path sanitizer is installed, sensitive values in the path do not leak
+// into error messages or details on transport failure.
+func TestDoExec_PathSanitizerHidesSecretsOnTransportError(t *testing.T) {
+	c := New("https://example.com",
+		WithProviderName("test"),
+		WithHTTPDoer(&errDoer{err: fmt.Errorf("connection refused")}),
+		WithPathSanitizer(func(p string) string {
+			return strings.ReplaceAll(p, "SECRET_VALUE", "***")
+		}),
+	)
+
+	_, err := c.Do(context.Background(), "GET", "/api/SECRET_VALUE/resource", "", nil)
+	require.Error(t, err)
+
+	details := errors.AllDetails(err)
+	pathVal, _ := details["path"].(string)
+	assert.NotContains(t, pathVal, "SECRET_VALUE", "raw secret must not appear in error path detail")
+	assert.Contains(t, pathVal, "***", "sanitized path must appear in error details")
+}
+
+// TestDoExec_PathSanitizerHidesSecretsOnErrorStatus ensures sanitisation
+// applies to the default non-2xx error path too.
+func TestDoExec_PathSanitizerHidesSecretsOnErrorStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL,
+		WithProviderName("test"),
+		WithPathSanitizer(func(p string) string {
+			return strings.ReplaceAll(p, "SECRET_VALUE", "***")
+		}),
+	)
+
+	_, err := c.Do(context.Background(), "GET", "/api/SECRET_VALUE/resource", "", nil)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "SECRET_VALUE")
+}
+
+// TestDecodeJSON_RejectsOversizedBody verifies that DecodeJSON refuses
+// to read a response body larger than MaxResponseBodyBytes.
+func TestDecodeJSON_RejectsOversizedBody(t *testing.T) {
+	// Build a response body that is exactly MaxResponseBodyBytes+1 bytes of
+	// JSON-ish padding. It doesn't need to be valid JSON — the size check
+	// must fire before json.Unmarshal runs.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Stream MaxResponseBodyBytes+1 bytes.
+		chunk := strings.Repeat("a", 64*1024)
+		written := 0
+		for written <= MaxResponseBodyBytes {
+			if _, err := io.WriteString(w, chunk); err != nil {
+				return
+			}
+			written += len(chunk)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	c := New(srv.URL, WithProviderName("test"))
+	resp, err := c.Do(context.Background(), "GET", "/big", "", nil)
+	require.NoError(t, err)
+
+	var dest map[string]any
+	err = DecodeJSON(resp, &dest)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds size limit")
 }

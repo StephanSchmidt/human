@@ -30,6 +30,9 @@ func newWithBaseURL(baseURL, token string) *Client {
 			apiclient.WithAuth(apiclient.NoAuth()),
 			apiclient.WithURLBuilder(apiclient.ParsePathURL()),
 			apiclient.WithProviderName("telegram"),
+			apiclient.WithPathSanitizer(func(p string) string {
+				return sanitizeTokenInPath(p, token)
+			}),
 			apiclient.WithErrorFormatter(func(_, method, path string, statusCode int, body []byte) error {
 				sanitizedPath := sanitizeTokenInPath(path, token)
 				return errors.WithDetails(
