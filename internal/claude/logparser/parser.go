@@ -71,6 +71,23 @@ func (p *FileParser) parseBytes(data []byte) int {
 		p.processLine(line)
 	}
 
+	// Claude PostToolUse lines containing screenshots or AX trees can
+	// exceed 1 MiB. Without forward progress the same line is retried
+	// every poll and the session is permanently stuck — skip past the
+	// next newline so subsequent parses see fresh data.
+	if err := scanner.Err(); err == bufio.ErrTooLong {
+		skipStart := consumed
+		if skipStart > len(data) {
+			skipStart = len(data)
+		}
+		if nextNL := bytes.IndexByte(data[skipStart:], '\n'); nextNL >= 0 {
+			consumed = skipStart + nextNL + 1
+		} else {
+			consumed = len(data)
+		}
+		return consumed
+	}
+
 	// If data doesn't end with newline, there may be a partial line.
 	// bufio.Scanner consumes it, but we should only count up to the last newline.
 	if len(data) > 0 && data[len(data)-1] != '\n' {

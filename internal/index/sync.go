@@ -122,6 +122,13 @@ func syncProject(ctx context.Context, store Store, inst *tracker.Instance, proje
 			result.Errors++
 			continue
 		}
+		// Future PolicyProvider wrappers may return (nil, nil) to
+		// indicate "not visible" — defend the deref below so a nil
+		// issue never crashes the whole sync.
+		if full == nil {
+			_, _ = fmt.Fprintf(logger, "  Skipping %s: provider returned nil issue\n", issue.Key)
+			continue
+		}
 
 		p := project
 		if p == "" {

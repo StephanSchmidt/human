@@ -45,8 +45,12 @@ func NewAuditProvider(inner Provider, name, kind, logPath string) (*AuditProvide
 	}, nil
 }
 
-// Close closes the underlying log file.
+// Close closes the underlying log file if present. Nil defends
+// against panics from struct-literal test builds and double-close.
 func (a *AuditProvider) Close() error {
+	if a.logFile == nil {
+		return nil
+	}
 	return a.logFile.Close()
 }
 
@@ -72,6 +76,9 @@ func (a *AuditProvider) log(operation, key string, d time.Duration, err error) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.logFile == nil {
+		return
+	}
 	if _, writeErr := a.logFile.Write(data); writeErr != nil {
 		log.Warn().Err(writeErr).Msg("audit log: append failed")
 	}

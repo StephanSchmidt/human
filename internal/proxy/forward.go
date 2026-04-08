@@ -34,10 +34,13 @@ func Forward(ctx context.Context, client, upstream net.Conn, peeked []byte, logg
 		errCh <- err
 	}()
 
-	// Wait for first direction to finish, then tear down connections
-	// so the second goroutine unblocks.
+	// Track how many goroutine results we've already seen so we drain
+	// exactly what's left. A fixed "drain once" loop silently lost the
+	// second direction's error whenever ctx.Done fired before errCh.
+	consumed := 0
 	select {
 	case err := <-errCh:
+		consumed++
 		if err != nil {
 			logger.Debug().Err(err).Msg("forward copy finished with error")
 		}
@@ -48,10 +51,7 @@ func Forward(ctx context.Context, client, upstream net.Conn, peeked []byte, logg
 	_ = client.Close()
 	_ = upstream.Close()
 
-	// Drain both goroutines' errors. When ctx fires first, neither goroutine
-	// may have sent yet, so we need to drain two values total (one may already
-	// have been consumed above).
-	for range 2 - 1 {
+	for i := consumed; i < 2; i++ {
 		if err := <-errCh; err != nil {
 			logger.Debug().Err(err).Msg("forward copy (other direction) finished with error")
 		}

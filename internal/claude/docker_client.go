@@ -59,14 +59,15 @@ func (e *engineDockerClient) Exec(ctx context.Context, containerID string, cmd [
 	if err != nil {
 		return 0, nil, err
 	}
+	// Defer Close so every return path releases the connection — a
+	// future docker SDK revision that returns an error from Close
+	// here cannot then silently drop it under a dual-close pattern.
+	defer attach.Close()
 
-	// Demultiplex stdout/stderr from the Docker stream.
 	var stdout bytes.Buffer
 	if _, err := stdcopy.StdCopy(&stdout, io.Discard, attach.Reader); err != nil {
-		attach.Close()
 		return 0, nil, err
 	}
-	attach.Close()
 
 	inspect, err := e.cli.ContainerExecInspect(ctx, resp.ID)
 	if err != nil {

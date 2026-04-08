@@ -61,7 +61,10 @@ func ConnectedPath() string {
 	return filepath.Join(home, ".human", "connected.json")
 }
 
-// WriteConnected atomically writes the connected PIDs to path.
+// WriteConnected atomically writes the connected PIDs to path. On
+// rename failure the temporary file is removed so a crashed daemon
+// does not leave orphan .tmp files that survive across restarts when
+// the process is killed with SIGKILL.
 func WriteConnected(path string, pids []int) error {
 	data, err := json.Marshal(pids)
 	if err != nil {
@@ -71,7 +74,11 @@ func WriteConnected(path string, pids []int) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // ReadConnected reads connected PIDs from path. Returns nil on any error.

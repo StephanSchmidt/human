@@ -57,8 +57,13 @@ func NewDestructiveProvider(inner Provider, name, kind, logPath string, notifier
 	}, nil
 }
 
-// Close closes the underlying log file.
+// Close closes the underlying log file if present. Struct-literal
+// construction in tests and composite wrappers can leave logFile nil,
+// so the nil check defends against panics in those paths.
 func (d *DestructiveProvider) Close() error {
+	if d.logFile == nil {
+		return nil
+	}
 	return d.logFile.Close()
 }
 
@@ -76,8 +81,10 @@ func (d *DestructiveProvider) logEntry(ctx context.Context, entry DestructiveEnt
 	// single slow upstream and risks recursive deadlock with self-notifying
 	// composite notifiers.
 	d.mu.Lock()
-	if _, writeErr := d.logFile.Write(data); writeErr != nil {
-		log.Warn().Err(writeErr).Msg("destructive log: append failed")
+	if d.logFile != nil {
+		if _, writeErr := d.logFile.Write(data); writeErr != nil {
+			log.Warn().Err(writeErr).Msg("destructive log: append failed")
+		}
 	}
 	notifier := d.notifier
 	d.mu.Unlock()

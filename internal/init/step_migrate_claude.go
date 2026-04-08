@@ -88,13 +88,21 @@ func (s *claudeMigrateStep) Run(w io.Writer, _ claude.FileWriter) ([]string, err
 	// Copy session-related directories (file-history, session-env, todos).
 	migrateSessionDirs(claudeDir, sessions, replacements)
 
-	// Append to history.jsonl.
-	if err := appendHistory(claudeDir, oldKey, newKey, containerPath, replacements); err != nil {
-		errors.LogError(err).Msg("failed to update history.jsonl")
+	// Append to history.jsonl. Surface the failure to the user before
+	// printing the success message so the two lines don't contradict
+	// each other when the history file could not be updated.
+	historyErr := appendHistory(claudeDir, oldKey, newKey, containerPath, replacements)
+	if historyErr != nil {
+		errors.LogError(historyErr).Msg("failed to update history.jsonl")
+		_, _ = fmt.Fprintf(w, "\nWarning: could not update Claude history: %v\n", historyErr)
 	}
 
 	_, _ = fmt.Fprintf(w, "\nMigrated %d files across %d sessions.\n", fileCount, len(sessions))
-	_, _ = fmt.Fprintf(w, "Claude --continue will work at %s\n", containerPath)
+	if historyErr == nil {
+		_, _ = fmt.Fprintf(w, "Claude --continue will work at %s\n", containerPath)
+	} else {
+		_, _ = fmt.Fprintf(w, "Claude --continue may not reach %s until the history file is repaired\n", containerPath)
+	}
 
 	return nil, nil
 }

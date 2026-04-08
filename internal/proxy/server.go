@@ -129,6 +129,12 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	dialer := s.dialer()
 	upstream, err := dialer(ctx, "tcp", net.JoinHostPort(serverName, "443"))
 	if err != nil {
+		// A misbehaving injected dialer may return both a non-nil
+		// connection and an error. Close the connection so it does
+		// not leak past the failure path.
+		if upstream != nil {
+			_ = upstream.Close()
+		}
 		s.Logger.Warn().Err(err).Str("host", serverName).Msg("upstream dial failed")
 		return
 	}
