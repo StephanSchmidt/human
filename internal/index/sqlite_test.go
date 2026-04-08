@@ -2,8 +2,10 @@ package index
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -344,4 +346,70 @@ func TestAllKeys_bySource(t *testing.T) {
 	if len(keys) != 1 {
 		t.Errorf("expected 1 key for eng, got %d", len(keys))
 	}
+}
+
+// Locks in the sanitiser's FTS5 quoting rules so a future refactor cannot
+// accidentally let an operator (OR, AND, NOT, wildcards, colons, parens)
+// leak through unquoted and widen a user query into an injection.
+func TestSanitizeFTSQuery(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"only whitespace", "   ", ""},
+		{"single word", "hello", `"hello"`},
+		{"two words", "hello world", `"hello" "world"`},
+		{"embedded quote", `he"llo`, `"he""llo"`},
+		{"pre-quoted word not double wrapped", `"foo"`, `"foo"`},
+		{"fts5 OR operator", "foo OR bar", `"foo" "OR" "bar"`},
+		{"fts5 AND operator", "foo AND bar", `"foo" "AND" "bar"`},
+		{"fts5 NOT operator", "foo NOT bar", `"foo" "NOT" "bar"`},
+		{"fts5 wildcard", "foo*", `"foo*"`},
+		{"fts5 paren", "(foo)", `"(foo)"`},
+		{"fts5 colon", "col:value", `"col:value"`},
+		{"fts5 caret", "foo^2", `"foo^2"`},
+		{"unicode preserved", "héllo wörld", `"héllo" "wörld"`},
+		{"newlines treated as whitespace", "foo\nbar", `"foo" "bar"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeFTSQuery(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// FuzzSanitizeFTSQuery verifies sanitizeFTSQuery never panics and every
+// non-empty output consists of whitespace-separated tokens that each begin
+// and end with a double-quote. That invariant is what keeps FTS5 from
+// parsing any of the input as an operator.
+func FuzzSanitizeFTSQuery(f *testing.F) {
+	seeds := []string{
+		"",
+		"hello",
+		"foo bar",
+		`with "quote"`,
+		"OR AND NOT",
+		"(paren)",
+		"col:val",
+		"\x00nul\x00",
+		strings.Repeat("a", 1024),
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		out := sanitizeFTSQuery(input)
+		if out == "" {
+			return
+		}
+		for _, tok := range strings.Split(out, " ") {
+			if !strings.HasPrefix(tok, `"`) || !strings.HasSuffix(tok, `"`) {
+				t.Fatalf("token %q is not wrapped in quotes (input=%q)", tok, input)
+			}
+		}
+	})
 }

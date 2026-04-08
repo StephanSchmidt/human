@@ -273,20 +273,41 @@ func TestValidateURL(t *testing.T) {
 		url     string
 		wantErr string
 	}{
+		// Happy paths.
 		{"valid https", "https://example.com", ""},
 		{"valid http", "http://example.com", ""},
+		{"https with path", "https://example.com/api/v1", ""},
+		{"https with port", "https://example.com:8443", ""},
+
+		// Scheme rejections — the primary SSRF guard.
 		{"ftp scheme", "ftp://example.com", "scheme must be http or https"},
+		{"file scheme", "file:///etc/passwd", "scheme must be http or https"},
+		{"gopher scheme", "gopher://example.com", "scheme must be http or https"},
+		{"javascript scheme", "javascript:alert(1)", "scheme must be http or https"},
+		{"data scheme", "data:text/plain;base64,aGVsbG8=", "scheme must be http or https"},
+
+		// Structure rejections.
 		{"no host", "https://", "must have a host"},
 		{"empty string", "", "scheme must be http or https"},
+		{"malformed", "://no-scheme", "invalid URL"},
+
+		// Current behavior, documented as such. ValidateURL does NOT
+		// block loopback, private ranges, or embedded credentials today.
+		// Extending it belongs in a dedicated security ticket since the
+		// commit log is public.
+		{"loopback v4 allowed today", "http://127.0.0.1", ""},
+		{"loopback v6 allowed today", "http://[::1]", ""},
+		{"private range allowed today", "http://10.0.0.1", ""},
+		{"embedded creds allowed today", "https://user:pass@example.com", ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateURL(tt.url)
 			if tt.wantErr == "" {
-				require.NoError(t, err)
+				require.NoError(t, err, "url=%q", tt.url)
 			} else {
-				require.Error(t, err)
+				require.Error(t, err, "url=%q", tt.url)
 				assert.Contains(t, err.Error(), tt.wantErr)
 			}
 		})

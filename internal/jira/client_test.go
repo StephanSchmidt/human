@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/StephanSchmidt/human/internal/tracker"
@@ -166,6 +167,32 @@ func TestListIssues_happy(t *testing.T) {
 	assert.Equal(t, "Second issue", issues[1].Title)
 	assert.Equal(t, "In Progress", issues[1].Status)
 	assert.Equal(t, srv.URL+"/browse/KAN-2", issues[1].URL)
+}
+
+// A project name carrying a double-quote must be escaped so the JQL stays
+// scoped to a single project clause. Without the escape, an attacker
+// could inject `KAN" OR project="OTHER` to widen the query across
+// projects they should not see.
+func TestListIssues_escapesJQLQuotes(t *testing.T) {
+	var capturedJQL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedJQL = r.URL.Query().Get("jql")
+		_, _ = fmt.Fprint(w, `{"issues":[]}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "u", "k")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    `KAN" OR project="OTHER`,
+		MaxResults: 10,
+	})
+	require.NoError(t, err)
+
+	// The attacker substring must land inside the quoted project clause
+	// with both inner quotes escaped via backslash.
+	assert.Contains(t, capturedJQL, `project="KAN\" OR project=\"OTHER"`)
+	assert.True(t, strings.HasPrefix(capturedJQL, `project=`),
+		"JQL must still start with the project clause, got %q", capturedJQL)
 }
 
 func TestListIssues_all(t *testing.T) {
