@@ -1,9 +1,12 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -131,4 +134,55 @@ func TestLoadOrCreateCA_refusesWhenOnlyKeyExists(t *testing.T) {
 	_, _, _, err := LoadOrCreateCA(dir)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "both exist or both be missing")
+}
+
+// TestLeafCache_capacityBound asserts that flooding the cache with more
+// distinct hostnames than the configured capacity does not grow it
+// without bound — older entries are evicted.
+func TestLeafCache_capacityBound(t *testing.T) {
+	dir := t.TempDir()
+	cert, key, _, err := LoadOrCreateCA(dir)
+	require.NoError(t, err)
+	cache := &LeafCache{CACert: cert, CAKey: key}
+
+	// Generate cap+50 unique entries.
+	total := leafCacheCapacity + 50
+	for i := 0; i < total; i++ {
+		_, err := cache.Get(fmt.Sprintf("host-%d.example.com", i))
+		require.NoError(t, err)
+	}
+
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	assert.LessOrEqual(t, cache.lru.Len(), leafCacheCapacity)
+	assert.LessOrEqual(t, len(cache.entries), leafCacheCapacity)
+}
+
+// TestLeafCache_concurrentCollapsesGenerations asserts that when many
+// goroutines request the same hostname concurrently, the underlying
+// generator is invoked exactly once.
+func TestLeafCache_concurrentCollapsesGenerations(t *testing.T) {
+	dir := t.TempDir()
+	cert, key, _, err := LoadOrCreateCA(dir)
+	require.NoError(t, err)
+	cache := &LeafCache{CACert: cert, CAKey: key}
+
+	var wg sync.WaitGroup
+	const goroutines = 50
+	results := make([]*tls.Certificate, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			c, err := cache.Get("burst.example.com")
+			require.NoError(t, err)
+			results[idx] = c
+		}(i)
+	}
+	wg.Wait()
+
+	// All goroutines must observe the same cached certificate.
+	for i := 1; i < goroutines; i++ {
+		assert.Same(t, results[0], results[i], "all callers should receive the same cert")
+	}
 }

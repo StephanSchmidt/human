@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"container/list"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -157,31 +158,96 @@ func parseCA(certPEM, keyPEM []byte) (*x509.Certificate, *ecdsa.PrivateKey, *tls
 	return cert, key, tlsCert, nil
 }
 
+// leafCacheCapacity caps the number of cached leaf certificates so a flood
+// of unique SNIs cannot grow the cache without bound.
+const leafCacheCapacity = 1024
+
+// leafCacheEntry tracks a cached cert and its position in the LRU list.
+type leafCacheEntry struct {
+	hostname string
+	cert     *tls.Certificate
+	elem     *list.Element
+}
+
+// leafGenResult is the result of a single in-flight cert generation, used
+// to fold concurrent callers requesting the same hostname onto one
+// generation call (manual singleflight).
+type leafGenResult struct {
+	done chan struct{}
+	cert *tls.Certificate
+	err  error
+}
+
 // LeafCache generates and caches per-domain TLS certificates signed by a CA.
+// Cache size is bounded; concurrent requests for the same hostname collapse
+// onto a single generation call.
 type LeafCache struct {
 	CACert *x509.Certificate
 	CAKey  *ecdsa.PrivateKey
-	cache  sync.Map // hostname → *tls.Certificate
+
+	mu      sync.Mutex
+	entries map[string]*leafCacheEntry
+	lru     *list.List // front = most recently used
+	pending map[string]*leafGenResult
 }
 
 // Get returns a cached leaf certificate for hostname, or generates a new one.
 func (lc *LeafCache) Get(hostname string) (*tls.Certificate, error) {
-	if cached, ok := lc.cache.Load(hostname); ok {
-		leaf := cached.(*tls.Certificate) //nolint:errcheck // type is guaranteed by store
-		if leaf.Leaf != nil && time.Now().Before(leaf.Leaf.NotAfter) {
-			return leaf, nil
+	lc.mu.Lock()
+	if lc.entries == nil {
+		lc.entries = make(map[string]*leafCacheEntry)
+		lc.lru = list.New()
+		lc.pending = make(map[string]*leafGenResult)
+	}
+	if entry, ok := lc.entries[hostname]; ok {
+		if entry.cert.Leaf != nil && time.Now().Before(entry.cert.Leaf.NotAfter) {
+			lc.lru.MoveToFront(entry.elem)
+			cert := entry.cert
+			lc.mu.Unlock()
+			return cert, nil
 		}
-		// Expired, regenerate.
-		lc.cache.Delete(hostname)
+		// Expired — remove and fall through to regenerate.
+		lc.lru.Remove(entry.elem)
+		delete(lc.entries, hostname)
 	}
 
-	leaf, err := generateLeafCert(lc.CACert, lc.CAKey, hostname)
-	if err != nil {
-		return nil, err
+	// If another goroutine is already generating a cert for this hostname,
+	// wait for it instead of doing duplicate work.
+	if pending, ok := lc.pending[hostname]; ok {
+		lc.mu.Unlock()
+		<-pending.done
+		return pending.cert, pending.err
 	}
 
-	lc.cache.Store(hostname, leaf)
-	return leaf, nil
+	gen := &leafGenResult{done: make(chan struct{})}
+	lc.pending[hostname] = gen
+	lc.mu.Unlock()
+
+	cert, err := generateLeafCert(lc.CACert, lc.CAKey, hostname)
+
+	lc.mu.Lock()
+	delete(lc.pending, hostname)
+	if err == nil {
+		// Insert into the cache, evicting the least recently used entry
+		// if we exceeded the capacity.
+		entry := &leafCacheEntry{hostname: hostname, cert: cert}
+		entry.elem = lc.lru.PushFront(hostname)
+		lc.entries[hostname] = entry
+		for lc.lru.Len() > leafCacheCapacity {
+			oldest := lc.lru.Back()
+			if oldest == nil {
+				break
+			}
+			lc.lru.Remove(oldest)
+			delete(lc.entries, oldest.Value.(string)) //nolint:errcheck // type guaranteed by store
+		}
+	}
+	gen.cert = cert
+	gen.err = err
+	close(gen.done)
+	lc.mu.Unlock()
+
+	return cert, err
 }
 
 // generateLeafCert creates a short-lived TLS certificate for hostname, signed by the CA.
