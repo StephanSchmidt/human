@@ -154,11 +154,18 @@ func probeInstances(ctx context.Context, key string, instances []Instance) (*Fin
 }
 
 // DetectKind returns the tracker kind that can be unambiguously inferred from
-// the key format. Currently only "github" is detectable (owner/repo#N or
-// owner/repo). Returns "" when the kind cannot be determined.
+// the key format. Returns "" when the key is ambiguous or unrecognised.
+//
+// The ordering must agree with DetectCandidateKinds: "Project/42" is a
+// valid Azure DevOps key AND a valid github/gitlab repo shape, so
+// azuredevops has to be checked first, otherwise callers relying on
+// DetectKind route Azure keys to GitHub.
 func DetectKind(key string) string {
 	if key == "" {
 		return ""
+	}
+	if azureDevOpsRe.MatchString(key) {
+		return "azuredevops"
 	}
 	if githubIssueRe.MatchString(key) || githubRepoRe.MatchString(key) {
 		return "github"

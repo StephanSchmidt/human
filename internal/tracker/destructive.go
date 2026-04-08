@@ -165,7 +165,13 @@ func (d *DestructiveProvider) AddComment(ctx context.Context, issueKey string, b
 }
 
 func (d *DestructiveProvider) AssignIssue(ctx context.Context, key string, userID string) error {
-	return d.inner.AssignIssue(ctx, key, userID)
+	// Pair with TransitionIssue logging: RunStartIssue transitions and
+	// assigns in one operation and the audit log should capture both
+	// halves so operators can reconstruct who took ownership.
+	err := d.inner.AssignIssue(ctx, key, userID)
+	entry := d.buildEntry("AssignIssue", key, "user="+userID, err)
+	d.logEntry(ctx, entry)
+	return err
 }
 
 func (d *DestructiveProvider) GetCurrentUser(ctx context.Context) (string, error) {

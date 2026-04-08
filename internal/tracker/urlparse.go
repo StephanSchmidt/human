@@ -135,7 +135,7 @@ func parseGitLabURL(host string, u *url.URL, segments []string) (*ParsedURL, boo
 			break
 		}
 	}
-	if issuesIdx < 0 || issuesIdx < 1 {
+	if issuesIdx < 1 {
 		return nil, false
 	}
 

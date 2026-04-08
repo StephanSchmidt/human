@@ -172,15 +172,27 @@ func renderList(node map[string]any, ordered bool) string {
 	if !ok {
 		return ""
 	}
+	// Honour the ADF `attrs.order` start attribute so a list that
+	// starts at 3 renders as "3." and not "1.", and only advance the
+	// counter on actual list items so skipped children don't create
+	// visual gaps in the numbering.
+	start := 1
+	if attrs, ok := node["attrs"].(map[string]any); ok {
+		if v, ok := attrs["order"].(float64); ok && v > 0 {
+			start = int(v)
+		}
+	}
 	var b strings.Builder
-	for i, child := range content {
+	n := start
+	for _, child := range content {
 		childMap, ok := child.(map[string]any)
 		if !ok {
 			continue
 		}
 		inner := strings.TrimRight(renderChildren(childMap), "\n")
 		if ordered {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, inner)
+			fmt.Fprintf(&b, "%d. %s\n", n, inner)
+			n++
 		} else {
 			fmt.Fprintf(&b, "- %s\n", inner)
 		}

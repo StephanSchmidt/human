@@ -100,17 +100,21 @@ func (h huhPrompter) PromptInstance(svc initpkg.ServiceType) (map[string]string,
 			Value(&url))
 	}
 
+	// Collect extra-field bindings so the values can be written after
+	// the form completes instead of via defer-in-loop, which would
+	// otherwise race any future pre-return validation step that
+	// inspects `values` before the deferred writes run.
+	type extraBinding struct {
+		field string
+		ptr   *string
+	}
+	var extras []extraBinding
 	for _, extra := range svc.ExtraFields {
 		val := new(string)
 		fields = append(fields, huh.NewInput().
 			Title(fmt.Sprintf("%s (required)", extra)).
 			Value(val))
-		// Capture closure over extra and val.
-		defer func(field string, v *string) {
-			if *v != "" {
-				values[field] = *v
-			}
-		}(extra, val)
+		extras = append(extras, extraBinding{field: extra, ptr: val})
 	}
 
 	fields = append(fields, huh.NewInput().
@@ -135,6 +139,12 @@ func (h huhPrompter) PromptInstance(svc initpkg.ServiceType) (map[string]string,
 
 	if description != "" {
 		values["description"] = description
+	}
+
+	for _, b := range extras {
+		if *b.ptr != "" {
+			values[b.field] = *b.ptr
+		}
 	}
 
 	return values, nil

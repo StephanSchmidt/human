@@ -129,22 +129,13 @@ func parseProcessList(data []byte) []ProcessInfo {
 			continue
 		}
 		comm := fields[2]
-		// args is everything after pid, ppid, comm in the original line.
+		// args is everything after pid, ppid, comm. Joining the
+		// already-split fields[3:] avoids the index math that could
+		// either double-count comm or (on an all-space tail) index
+		// off the front of the string.
 		args := ""
 		if len(fields) > 3 {
-			// Find the start of the args portion by skipping the first 3 fields.
-			idx := 0
-			for skip := 0; skip < 3; skip++ {
-				idx += strings.IndexFunc(line[idx:], func(r rune) bool { return r != ' ' })
-				next := strings.IndexByte(line[idx:], ' ')
-				if next < 0 {
-					break
-				}
-				idx += next
-			}
-			if idx < len(line) {
-				args = strings.TrimSpace(line[idx:])
-			}
+			args = strings.Join(fields[3:], " ")
 		}
 		procs = append(procs, ProcessInfo{PID: pid, PPID: ppid, Comm: comm, Args: args})
 	}

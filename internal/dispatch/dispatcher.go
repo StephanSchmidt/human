@@ -239,7 +239,10 @@ func (d *Dispatcher) pruneSeen() {
 func buildPrompt(messageText string) string {
 	// Strip control characters that could interfere with tmux/terminal.
 	cleaned := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) && r != ' ' && r != '\t' {
+		// unicode.IsControl is false for ' ' already, so the ' '
+		// guard in the original version was dead. Keep only the
+		// clauses that actually exclude printable whitespace we want.
+		if unicode.IsControl(r) && r != '\t' {
 			return -1
 		}
 		return r

@@ -1376,6 +1376,14 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
+	// Guard against panics for maxLen<3: the "..." suffix alone is
+	// already that long, so just emit the suffix truncated to fit.
+	if maxLen < 3 {
+		if maxLen <= 0 {
+			return ""
+		}
+		return "..."[:maxLen]
+	}
 	return s[:maxLen-3] + "..."
 }
 
@@ -1416,8 +1424,11 @@ func (m model) filterInstances(instances []monitor.InstanceView) []monitor.Insta
 	if len(tabs) == 0 {
 		return instances
 	}
-	if m.activeTab >= len(tabs) {
-		return instances
+	// An out-of-range activeTab previously returned the full list, so
+	// a stale index silently widened the filter. Return empty so the
+	// caller observes a consistent "no tab is active" result.
+	if m.activeTab < 0 || m.activeTab >= len(tabs) {
+		return nil
 	}
 	active := tabs[m.activeTab]
 	if active.Dir == "" {
@@ -1461,8 +1472,10 @@ func (m model) filterPanes(panes []claude.TmuxPane) []claude.TmuxPane {
 	if len(tabs) == 0 {
 		return panes
 	}
-	if m.activeTab >= len(tabs) {
-		return panes
+	// Symmetric to filterInstances: reject stale activeTab values
+	// rather than widening the filter to include everything.
+	if m.activeTab < 0 || m.activeTab >= len(tabs) {
+		return nil
 	}
 	active := tabs[m.activeTab]
 	if active.Dir == "" {

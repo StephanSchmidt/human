@@ -32,18 +32,20 @@ func TaskIDFromBranch(branch string) string {
 		return m[1]
 	}
 
-	// Try custom task ID (PREFIX-123).
-	if m := customIDBranchRe.FindStringSubmatch(branch); m != nil {
-		// Extract the prefix part before the hyphen to check exclusions.
+	// Try custom task ID (PREFIX-123). FindAllStringSubmatch lets us
+	// skip over leading excluded prefixes (e.g. "FEATURE-1/PROJ-42")
+	// and still return the real ID that follows.
+	for _, m := range customIDBranchRe.FindAllStringSubmatch(branch, -1) {
 		id := m[1]
+		prefix := id
 		for i := range id {
 			if id[i] == '-' {
-				prefix := id[:i]
-				if excludedPrefixes[prefix] {
-					return ""
-				}
+				prefix = id[:i]
 				break
 			}
+		}
+		if excludedPrefixes[prefix] {
+			continue
 		}
 		return id
 	}
