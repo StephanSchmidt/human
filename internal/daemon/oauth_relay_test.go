@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -236,6 +237,52 @@ func TestOAuthRelayEndToEnd(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("client did not complete two-line protocol")
 	}
+}
+
+// TestAwaitCallback_LogsParamKeysNotValues asserts that debug logging of the
+// OAuth callback only records parameter names, never their values, so that
+// tokens or authorization codes in query strings do not leak into log files.
+func TestAwaitCallback_LogsParamKeysNotValues(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := zerolog.New(&logBuf).Level(zerolog.DebugLevel)
+
+	srv := &Server{Logger: logger}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	info := &oauth.RedirectInfo{Port: port, Path: "/callback"}
+
+	done := make(chan string, 1)
+	go func() {
+		got, ok := srv.awaitCallback(ln, info)
+		if ok {
+			done <- got
+		} else {
+			done <- ""
+		}
+	}()
+
+	// Wait briefly for the inner HTTP server to be ready, then fire a callback.
+	time.Sleep(50 * time.Millisecond)
+	secret := "supersecret_code_value_12345"
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?code=%s&state=abc", port, secret))
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+
+	select {
+	case got := <-done:
+		require.NotEmpty(t, got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("awaitCallback did not return")
+	}
+
+	logs := logBuf.String()
+	assert.NotContains(t, logs, secret, "the secret value must not appear in log output")
+	assert.Contains(t, logs, "code", "parameter name should be logged")
+	assert.Contains(t, logs, "state", "parameter name should be logged")
 }
 
 func TestOAuthRelay_NonOAuthBrowserUnchanged(t *testing.T) {

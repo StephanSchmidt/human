@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/StephanSchmidt/human/internal/browser"
@@ -91,7 +92,7 @@ func (s *Server) handleOAuthRelay(conn net.Conn, _ *bufio.Reader, info *oauth.Re
 		return
 	}
 
-	s.Logger.Debug().Str("callback", cbURL).Msg("OAuth callback URL sent to client")
+	s.Logger.Debug().Str("path", info.Path).Msg("OAuth callback URL sent to client")
 }
 
 // awaitCallback accepts the OAuth callback on the listener and returns
@@ -102,7 +103,12 @@ func (s *Server) awaitCallback(ln net.Listener, info *oauth.RedirectInfo) (strin
 	mux := http.NewServeMux()
 	mux.HandleFunc(info.Path, func(w http.ResponseWriter, r *http.Request) {
 		u := fmt.Sprintf("http://localhost:%d%s?%s", info.Port, r.URL.Path, r.URL.RawQuery)
-		s.Logger.Debug().Str("url", u).Msg("OAuth callback received")
+		paramKeys := make([]string, 0, len(r.URL.Query()))
+		for k := range r.URL.Query() {
+			paramKeys = append(paramKeys, k)
+		}
+		sort.Strings(paramKeys)
+		s.Logger.Debug().Str("path", r.URL.Path).Strs("param_keys", paramKeys).Msg("OAuth callback received")
 		callbackURL <- u
 
 		w.Header().Set("Content-Type", "text/html")
