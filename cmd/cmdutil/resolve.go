@@ -12,6 +12,7 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/dispatch"
+	"github.com/StephanSchmidt/human/internal/env"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/telegram"
 	"github.com/StephanSchmidt/human/internal/tracker"
@@ -19,18 +20,30 @@ import (
 
 // Deps holds injectable dependencies for command builders that need
 // tracker instance loading and resolution.
+//
+// LoadInstancesCtx is the preferred entry point: it carries the cobra
+// command context so daemon-served handlers can resolve project paths
+// from per-request env maps without mutating os.Environ. LoadInstances
+// is kept for backwards compatibility with legacy tests and direct CLI
+// callers; resolve.go prefers LoadInstancesCtx when set.
+//
+// loadDestructiveNotifierCtx is the context-aware variant of
+// DestructiveNotifier — daemon paths set it so per-request notifier
+// configuration is read from the request's env, not the daemon process.
 type Deps struct {
 	LoadInstances       func(dir string) ([]tracker.Instance, error)
+	LoadInstancesCtx    func(ctx context.Context, dir string) ([]tracker.Instance, error)
 	InstanceFromFlags   func(cmd *cobra.Command) *tracker.Instance
 	AuditLogPath        func() string
 	DestructiveLogPath  func() string
-	DestructiveNotifier func() tracker.DestructiveNotifier // returns nil if no notification configured
+	DestructiveNotifier func(ctx context.Context) tracker.DestructiveNotifier // returns nil if no notification configured; ctx carries per-request env
 }
 
 // DefaultDeps returns a Deps using the real implementations.
 func DefaultDeps() Deps {
 	return Deps{
 		LoadInstances:       LoadAllInstances,
+		LoadInstancesCtx:    LoadAllInstancesCtx,
 		InstanceFromFlags:   InstanceFromFlags,
 		AuditLogPath:        AuditLogPath,
 		DestructiveLogPath:  DestructiveLogPath,
@@ -49,7 +62,8 @@ type AutoResult struct {
 // ResolveProvider loads instances, applies CLI flag overrides, and resolves
 // the provider for the given kind using the tracker name from persistent flags.
 func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provider, func(), error) {
-	instances, err := deps.LoadInstances(config.DirProject)
+	ctx := cmdContext(cmd)
+	instances, err := loadInstancesCtx(ctx, deps)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -67,11 +81,11 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 
 	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
 	p := instance.Provider
-	if safeFlag || instance.Safe || os.Getenv("HUMAN_SAFE_MODE") == "1" {
+	if safeFlag || instance.Safe || env.Lookup(ctx, "HUMAN_SAFE_MODE") == "1" {
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 
-	p = applyPolicyWrapper(p, instance.Name, os.Stderr)
+	p = applyPolicyWrapper(ctx, p, instance.Name, os.Stderr)
 
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
@@ -83,7 +97,7 @@ func ResolveProvider(cmd *cobra.Command, kind string, deps Deps) (tracker.Provid
 		auditCleanup = func() { _ = ap.Close() }
 	}
 
-	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, os.Stderr)
+	p, dpCleanup := applyDestructiveWrapper(ctx, p, instance.Name, instance.Kind, deps, os.Stderr)
 	return p, func() { dpCleanup(); auditCleanup() }, nil
 }
 
@@ -102,14 +116,17 @@ func ResolveAutoProvider(ctx context.Context, cmd *cobra.Command, input string, 
 }
 
 // resolveFromURL handles URL-based resolution.
-func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps Deps) (*AutoResult, error) {
+func resolveFromURL(ctx context.Context, cmd *cobra.Command, rawURL string, deps Deps) (*AutoResult, error) {
 	parsed, ok := tracker.ParseURL(rawURL)
 	if !ok {
 		return nil, errors.WithDetails("unrecognized tracker URL format", "url", rawURL)
 	}
 
 	// 1. Check existing config for a matching instance.
-	instances, err := deps.LoadInstances(config.DirProject)
+	if ctx == nil {
+		ctx = cmdContext(cmd)
+	}
+	instances, err := loadInstancesCtx(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +159,10 @@ func resolveFromURL(_ context.Context, cmd *cobra.Command, rawURL string, deps D
 
 // resolveFromKey is the original key-based resolution logic.
 func resolveFromKey(ctx context.Context, cmd *cobra.Command, keyHint string, allowFindFallback bool, deps Deps) (*AutoResult, error) {
-	instances, err := deps.LoadInstances(config.DirProject)
+	if ctx == nil {
+		ctx = cmdContext(cmd)
+	}
+	instances, err := loadInstancesCtx(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -175,9 +195,10 @@ func resolveFromKey(ctx context.Context, cmd *cobra.Command, keyHint string, all
 
 // wrapInstance applies safe/audit wrappers and returns an AutoResult.
 func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, deps Deps) (*AutoResult, error) {
+	ctx := cmdContext(cmd)
 	safeFlag, _ := cmd.Root().PersistentFlags().GetBool("safe")
 	p := instance.Provider
-	if safeFlag || instance.Safe || os.Getenv("HUMAN_SAFE_MODE") == "1" {
+	if safeFlag || instance.Safe || env.Lookup(ctx, "HUMAN_SAFE_MODE") == "1" {
 		p = tracker.NewSafeProvider(p, instance.Name)
 	}
 
@@ -186,7 +207,7 @@ func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, de
 		errW = cmd.ErrOrStderr()
 	}
 
-	p = applyPolicyWrapper(p, instance.Name, errW)
+	p = applyPolicyWrapper(ctx, p, instance.Name, errW)
 
 	auditPath := deps.AuditLogPath()
 	ap, auditErr := tracker.NewAuditProvider(p, instance.Name, instance.Kind, auditPath)
@@ -198,7 +219,7 @@ func wrapInstance(cmd *cobra.Command, instance *tracker.Instance, key string, de
 		auditCleanup = func() { _ = ap.Close() }
 	}
 
-	p, dpCleanup := applyDestructiveWrapper(p, instance.Name, instance.Kind, deps, errW)
+	p, dpCleanup := applyDestructiveWrapper(ctx, p, instance.Name, instance.Kind, deps, errW)
 	return &AutoResult{Provider: p, Kind: instance.Kind, Key: key, Cleanup: func() { dpCleanup(); auditCleanup() }}, nil
 }
 
@@ -226,9 +247,10 @@ func urlsCompatible(a, b string) bool {
 
 // applyPolicyWrapper loads policy config and wraps the provider with a
 // PolicyProvider if policies are defined. Errors are reported as warnings
-// to errW; the original provider is returned unchanged on error.
-func applyPolicyWrapper(p tracker.Provider, instanceName string, errW io.Writer) tracker.Provider {
-	cfg, err := tracker.LoadPolicyConfig(config.ResolveDir(config.DirProject))
+// to errW; the original provider is returned unchanged on error. The ctx
+// is consulted for the per-request project directory.
+func applyPolicyWrapper(ctx context.Context, p tracker.Provider, instanceName string, errW io.Writer) tracker.Provider {
+	cfg, err := tracker.LoadPolicyConfig(config.ResolveDirCtx(ctx, config.DirProject))
 	if err != nil {
 		_, _ = fmt.Fprintln(errW, "warning: policy config error:", err)
 		return p
@@ -242,10 +264,35 @@ func applyPolicyWrapper(p tracker.Provider, instanceName string, errW io.Writer)
 	})
 }
 
+// cmdContext returns the cobra command's context, falling back to
+// context.Background() when cmd is nil or has no context (legacy tests).
+func cmdContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
+	}
+	if ctx := cmd.Context(); ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+// loadInstancesCtx invokes deps.LoadInstances under the given context so
+// that env-driven path resolution (config.DirProject) sees the
+// per-request env map. Existing Deps users keep working unchanged: when
+// the daemon installs a context-aware loader the env flows through;
+// otherwise the legacy LoadAllInstances falls through to os.Getenv.
+func loadInstancesCtx(ctx context.Context, deps Deps) ([]tracker.Instance, error) {
+	if deps.LoadInstancesCtx != nil {
+		return deps.LoadInstancesCtx(ctx, config.DirProject)
+	}
+	return deps.LoadInstances(config.DirProject)
+}
+
 // applyDestructiveWrapper wraps the provider with a DestructiveProvider for
 // logging and notifying on destructive operations. If wiring fails, a warning
-// is printed and the original provider is returned.
-func applyDestructiveWrapper(p tracker.Provider, name, kind string, deps Deps, errW io.Writer) (tracker.Provider, func()) {
+// is printed and the original provider is returned. The ctx is passed to the
+// notifier loader so per-request env values reach the underlying config.
+func applyDestructiveWrapper(ctx context.Context, p tracker.Provider, name, kind string, deps Deps, errW io.Writer) (tracker.Provider, func()) {
 	if deps.DestructiveLogPath == nil {
 		return p, func() {}
 	}
@@ -253,7 +300,7 @@ func applyDestructiveWrapper(p tracker.Provider, name, kind string, deps Deps, e
 
 	var notifier tracker.DestructiveNotifier
 	if deps.DestructiveNotifier != nil {
-		notifier = deps.DestructiveNotifier()
+		notifier = deps.DestructiveNotifier(ctx)
 	}
 
 	dp, dpErr := tracker.NewDestructiveProvider(p, name, kind, logPath, notifier)
@@ -265,15 +312,18 @@ func applyDestructiveWrapper(p tracker.Provider, name, kind string, deps Deps, e
 }
 
 // loadDestructiveNotifier builds a DestructiveNotifier from configured
-// Telegram and Slack instances. Returns nil if neither is configured.
-func loadDestructiveNotifier() tracker.DestructiveNotifier {
+// Telegram and Slack instances using the per-request project directory
+// resolved from ctx. Returns nil if neither is configured.
+func loadDestructiveNotifier(ctx context.Context) tracker.DestructiveNotifier {
 	var notifiers []dispatch.Notifier
 	var chatID int64
 
+	dir := config.ResolveDirCtx(ctx, config.DirProject)
+
 	// Load Telegram
-	telegramInstances, _ := telegram.LoadInstances(config.ResolveDir(config.DirProject))
+	telegramInstances, _ := telegram.LoadInstances(dir)
 	if len(telegramInstances) > 0 {
-		configs, _ := telegram.LoadConfigs(config.ResolveDir(config.DirProject))
+		configs, _ := telegram.LoadConfigs(dir)
 		for _, cfg := range configs {
 			if cfg.NotifyChatID != 0 {
 				chatID = cfg.NotifyChatID
@@ -290,7 +340,7 @@ func loadDestructiveNotifier() tracker.DestructiveNotifier {
 	}
 
 	// Load Slack
-	slackInstances, _ := slack.LoadInstances(config.ResolveDir(config.DirProject))
+	slackInstances, _ := slack.LoadInstances(dir)
 	if len(slackInstances) > 0 {
 		notifiers = append(notifiers, &dispatch.SlackNotifier{Client: slackInstances[0].Client})
 	}

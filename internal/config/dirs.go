@@ -1,6 +1,10 @@
 package config
 
-import "os"
+import (
+	"context"
+
+	"github.com/StephanSchmidt/human/internal/env"
+)
 
 const (
 	// DirCwd means "the caller's working directory". Use for direct CLI
@@ -9,16 +13,25 @@ const (
 
 	// DirProject means "the project directory for this request". Inside the
 	// daemon this resolves to the registered project directory via the
-	// HUMAN_PROJECT_DIR env var. Outside the daemon it falls back to ".".
+	// per-request env map carried on the cobra command context. Outside
+	// the daemon it falls back to ".".
 	DirProject = "@project"
 )
 
-// ResolveDir maps dir sentinel values to real paths.
-// DirProject is resolved via HUMAN_PROJECT_DIR env var (set by the daemon
-// per-request under envMu). All other values pass through unchanged.
+// ResolveDir maps dir sentinel values to real paths using the process
+// environment. Prefer ResolveDirCtx in code that runs inside the daemon
+// — see env.Lookup for the rationale.
 func ResolveDir(dir string) string {
+	return ResolveDirCtx(context.Background(), dir)
+}
+
+// ResolveDirCtx maps dir sentinel values to real paths, consulting the
+// per-request env map on ctx before falling back to the process env.
+// Daemon-served handlers MUST use this variant; cross-request env
+// contamination is otherwise possible.
+func ResolveDirCtx(ctx context.Context, dir string) string {
 	if dir == DirProject {
-		if d := os.Getenv("HUMAN_PROJECT_DIR"); d != "" {
+		if d := env.Lookup(ctx, "HUMAN_PROJECT_DIR"); d != "" {
 			return d
 		}
 		return "."

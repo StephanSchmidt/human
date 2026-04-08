@@ -19,6 +19,7 @@ import (
 
 	"github.com/StephanSchmidt/human/internal/browser"
 	"github.com/StephanSchmidt/human/internal/config"
+	"github.com/StephanSchmidt/human/internal/env"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -45,8 +46,7 @@ type Server struct {
 	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
 	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
 
-	envMu sync.Mutex     // protects os.Setenv/os.Unsetenv during concurrent requests
-	wg    sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
+	wg sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }
 
 // ListenAndServe starts the TCP listener and blocks until ctx is cancelled.
@@ -161,37 +161,33 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 // executeCommand applies env vars (including safe mode) and runs the CLI command.
+//
+// Per-request env values are carried on the cobra command's context via
+// env.WithEnv. This avoids any os.Setenv mutation, so concurrent requests
+// no longer fight for a process-wide environment lock and a request can
+// never observe another request's env values.
 func (s *Server) executeCommand(conn net.Conn, req Request, projectDir string) {
-	// Safe mode is enforced via env var so clients cannot override it
-	// via flag injection (e.g. --safe=false).
+	// Safe mode is enforced via context-bound env so clients cannot
+	// override it via flag injection (e.g. --safe=false).
 	if s.SafeMode {
 		if req.Env == nil {
 			req.Env = make(map[string]string)
 		}
 		req.Env["HUMAN_SAFE_MODE"] = "1"
 	}
-	// Mutex ensures concurrent requests don't corrupt each other's env.
-	s.envMu.Lock()
-	origEnv := applyEnv(req.Env)
-	prevProjectDir, hadProjectDir := os.LookupEnv("HUMAN_PROJECT_DIR")
 	if projectDir != "." {
-		_ = os.Setenv("HUMAN_PROJECT_DIR", projectDir)
-	}
-	defer func() {
-		if hadProjectDir {
-			_ = os.Setenv("HUMAN_PROJECT_DIR", prevProjectDir)
-		} else {
-			_ = os.Unsetenv("HUMAN_PROJECT_DIR")
+		if req.Env == nil {
+			req.Env = make(map[string]string)
 		}
-		restoreEnv(origEnv)
-		s.envMu.Unlock()
-	}()
+		req.Env["HUMAN_PROJECT_DIR"] = projectDir
+	}
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd := s.CmdFactory()
 	cmd.SetArgs(req.Args)
 	cmd.SetOut(&stdoutBuf)
 	cmd.SetErr(&stderrBuf)
+	cmd.SetContext(env.WithEnv(context.Background(), req.Env))
 
 	exitCode := 0
 	if err := cmd.Execute(); err != nil {
@@ -380,48 +376,6 @@ func (s *Server) resolveProjectDir(cwd string) (string, error) {
 	return entry.Dir, nil
 }
 
-// envEntry records an env var's previous state so it can be restored.
-type envEntry struct {
-	key   string
-	value string
-	set   bool // whether the var was set before
-}
-
-// allowedEnvVars is the set of environment variables that clients may inject.
-var allowedEnvVars = map[string]bool{
-	"NO_COLOR":        true,
-	"TERM":            true,
-	"COLUMNS":         true,
-	"HUMAN_SAFE_MODE": true,
-}
-
-// applyEnv sets allowed env vars and returns their previous values.
-// Keys not in the allowlist are silently ignored to prevent injection
-// of dangerous variables like LD_PRELOAD or PATH.
-func applyEnv(env map[string]string) []envEntry {
-	orig := make([]envEntry, 0, len(env))
-	for k, v := range env {
-		if !allowedEnvVars[k] {
-			continue
-		}
-		prev, wasSet := os.LookupEnv(k)
-		orig = append(orig, envEntry{key: k, value: prev, set: wasSet})
-		_ = os.Setenv(k, v)
-	}
-	return orig
-}
-
-// restoreEnv restores env vars to their state before applyEnv.
-func restoreEnv(orig []envEntry) {
-	for _, e := range orig {
-		if e.set {
-			_ = os.Setenv(e.key, e.value)
-		} else {
-			_ = os.Unsetenv(e.key)
-		}
-	}
-}
-
 // --- destructive operation confirmation ---
 
 // destructiveOp describes a detected destructive command.
@@ -535,28 +489,20 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 
 	s.Logger.Info().Str("id", id).Msg("destructive operation approved, executing")
 
-	// Execute the original command.
-	s.envMu.Lock()
+	// Execute the original command. Per-request env values flow via the
+	// cobra command context — see executeCommand for the rationale.
 	if s.SafeMode {
 		if req.Env == nil {
 			req.Env = make(map[string]string)
 		}
 		req.Env["HUMAN_SAFE_MODE"] = "1"
 	}
-	origEnv := applyEnv(req.Env)
-	prevProjectDir, hadProjectDir := os.LookupEnv("HUMAN_PROJECT_DIR")
 	if projectDir != "." {
-		_ = os.Setenv("HUMAN_PROJECT_DIR", projectDir)
-	}
-	defer func() {
-		if hadProjectDir {
-			_ = os.Setenv("HUMAN_PROJECT_DIR", prevProjectDir)
-		} else {
-			_ = os.Unsetenv("HUMAN_PROJECT_DIR")
+		if req.Env == nil {
+			req.Env = make(map[string]string)
 		}
-		restoreEnv(origEnv)
-		s.envMu.Unlock()
-	}()
+		req.Env["HUMAN_PROJECT_DIR"] = projectDir
+	}
 
 	// Inject --yes so the Cobra command doesn't try to prompt again.
 	execArgs := append(req.Args, "--yes")
@@ -566,6 +512,7 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 	cmd.SetArgs(execArgs)
 	cmd.SetOut(&stdoutBuf)
 	cmd.SetErr(&stderrBuf)
+	cmd.SetContext(env.WithEnv(context.Background(), req.Env))
 
 	exitCode := 0
 	if err := cmd.Execute(); err != nil {

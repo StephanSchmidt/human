@@ -16,6 +16,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/StephanSchmidt/human/internal/env"
 )
 
 func echoCmd() *cobra.Command {
@@ -196,7 +198,9 @@ func safeCmdFactory() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			safe, _ := cmd.Root().PersistentFlags().GetBool("safe")
 			if !safe {
-				safe = os.Getenv("HUMAN_SAFE_MODE") == "1"
+				// HUMAN_SAFE_MODE flows via the per-request env on cmd.Context();
+				// the daemon never mutates os.Environ.
+				safe = env.Lookup(cmd.Context(), "HUMAN_SAFE_MODE") == "1"
 			}
 			if safe {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "safe-mode-active")
@@ -297,10 +301,14 @@ func envCmdFactory() *cobra.Command {
 	root.AddCommand(&cobra.Command{
 		Use: "env",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if v, ok := os.LookupEnv("NO_COLOR"); ok {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "NO_COLOR=%s\n", v)
-			} else {
+			// Read from the per-request env carried on the cobra context.
+			// The daemon no longer mutates os.Environ; values must be
+			// looked up via env.Lookup so they remain isolated per request.
+			v := env.Lookup(cmd.Context(), "NO_COLOR")
+			if v == "" {
 				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "NO_COLOR=<unset>")
+			} else {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "NO_COLOR=%s\n", v)
 			}
 			return nil
 		},
@@ -348,8 +356,87 @@ func TestServer_EnvApplied(t *testing.T) {
 	assert.Equal(t, 0, resp.ExitCode)
 	assert.Contains(t, resp.Stdout, "NO_COLOR=from-client")
 
-	// Verify the original value is restored after the request.
+	// Verify the daemon never mutated the process environment.
 	assert.Equal(t, "original", os.Getenv("NO_COLOR"))
+}
+
+// TestServer_ConcurrentEnvIsolation proves that two concurrent requests
+// with different env values do not contaminate each other. Before the
+// per-request env refactor, this would have been racy because both
+// requests mutated the same process environment under a single mutex.
+func TestServer_ConcurrentEnvIsolation(t *testing.T) {
+	t.Setenv("NO_COLOR", "outer")
+
+	token := "test-token-conc"
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Slow command: introduces a small delay between context lookup and
+	// reply so a buggy implementation would observe interleaved values.
+	slowFactory := func() *cobra.Command {
+		root := &cobra.Command{Use: "test", SilenceUsage: true}
+		root.AddCommand(&cobra.Command{
+			Use: "env",
+			RunE: func(cmd *cobra.Command, _ []string) error {
+				v := env.Lookup(cmd.Context(), "NO_COLOR")
+				time.Sleep(20 * time.Millisecond)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "NO_COLOR=%s\n", v)
+				return nil
+			},
+		})
+		return root
+	}
+
+	srv := &Server{
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		CmdFactory: slowFactory,
+		Logger:     zerolog.Nop(),
+	}
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	// Wait for the listener.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = c.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	const goroutines = 16
+	results := make([]string, goroutines)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			value := fmt.Sprintf("client-%d", idx)
+			resp := sendRequest(t, addr, Request{
+				Token: token,
+				Args:  []string{"env"},
+				Env:   map[string]string{"NO_COLOR": value},
+			})
+			results[idx] = strings.TrimSpace(resp.Stdout)
+		}(i)
+	}
+	wg.Wait()
+
+	for i := 0; i < goroutines; i++ {
+		expected := fmt.Sprintf("NO_COLOR=client-%d", i)
+		assert.Equal(t, expected, results[i],
+			"goroutine %d observed wrong env value (cross-request contamination)", i)
+	}
+
+	// And the daemon must not have leaked any value into the process env.
+	assert.Equal(t, "outer", os.Getenv("NO_COLOR"))
 }
 
 func TestServer_TracksClientPID(t *testing.T) {

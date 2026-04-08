@@ -1,6 +1,7 @@
 package cmdutil
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -37,12 +38,25 @@ var allLoadersWithResolver = []instanceLoaderWithResolver{
 }
 
 // LoadAllInstances collects tracker instances from all provider configs.
-// The dir parameter accepts config.DirProject (resolved via HUMAN_PROJECT_DIR
-// in daemon context) or config.DirCwd (".") for direct CLI usage.
+// The dir parameter accepts config.DirProject (resolved via the per-request
+// env map in daemon context) or config.DirCwd (".") for direct CLI usage.
 // If a vault section is present in .humanconfig, secret references (e.g. 1pw://)
 // are resolved automatically.
+//
+// This is the legacy entry point and uses the process environment to
+// resolve config.DirProject. Daemon-served code paths must use
+// LoadAllInstancesCtx with a cobra command context that carries the
+// per-request env map.
 func LoadAllInstances(dir string) ([]tracker.Instance, error) {
-	dir = config.ResolveDir(dir)
+	return LoadAllInstancesCtx(context.Background(), dir)
+}
+
+// LoadAllInstancesCtx is the context-aware variant of LoadAllInstances.
+// The ctx is consulted for env values (HUMAN_PROJECT_DIR) before falling
+// back to the process environment, so daemon-served handlers see only
+// their own request's env map.
+func LoadAllInstancesCtx(ctx context.Context, dir string) ([]tracker.Instance, error) {
+	dir = config.ResolveDirCtx(ctx, dir)
 
 	// Auto-detect vault config for the direct CLI path.
 	vcfg, vcfgErr := vault.ReadConfig(dir)
@@ -72,6 +86,9 @@ func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 // LoadAllInstancesWithResolver collects tracker instances using a custom env
 // lookup function and vault secret resolver. This enables both per-project
 // token scoping and 1pw:// secret references in .humanconfig.
+//
+// Daemon callers should pass a concrete dir (not config.DirProject) since
+// they already know the project directory from the per-request routing.
 func LoadAllInstancesWithResolver(dir string, lookup config.EnvLookup, resolver *vault.Resolver) ([]tracker.Instance, error) {
 	dir = config.ResolveDir(dir)
 	var resolveFunc config.SecretResolveFunc

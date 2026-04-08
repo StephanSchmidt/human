@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,8 +64,13 @@ func newRootCmd() *cobra.Command {
 
 	// autoDeps uses the package-level autoInstanceLoader so tests can
 	// inject mock instances without touching the real config path.
+	// Both LoadInstances and LoadInstancesCtx must be overridden so the
+	// context-aware resolve path also picks up the mock loader.
 	autoDeps := deps
 	autoDeps.LoadInstances = func(_ string) ([]tracker.Instance, error) {
+		return autoInstanceLoader()
+	}
+	autoDeps.LoadInstancesCtx = func(_ context.Context, _ string) ([]tracker.Instance, error) {
 		return autoInstanceLoader()
 	}
 
