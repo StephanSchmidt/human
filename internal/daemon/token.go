@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/afero"
+
+	"github.com/StephanSchmidt/human/errors"
 )
 
 const tokenBytes = 32
@@ -50,6 +52,12 @@ func loadOrCreateTokenAt(path string) (string, error) {
 		if len(token) == tokenBytes*2 {
 			return token, nil
 		}
+		// File is the wrong shape — fall through to regenerate.
+	} else if !os.IsNotExist(err) {
+		// A read error other than "not found" (permission denied, NFS
+		// stall, …) must propagate so we never replace a token the user
+		// can't currently read.
+		return "", errors.WrapWithDetails(err, "reading daemon token", "path", path)
 	}
 
 	token, err := GenerateToken()

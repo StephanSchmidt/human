@@ -343,7 +343,10 @@ func TestOSFileWriter_ReadFile_NotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestInstall_ReadFileError_TreatedAsNew(t *testing.T) {
+func TestInstall_ReadFileError_Propagates(t *testing.T) {
+	// A non-ENOENT read error must surface, not be silently treated as
+	// "missing file" — otherwise we would overwrite a settings file the
+	// user can't currently read.
 	fw := newMockFileWriter()
 	fw.readFn = func(_ string) ([]byte, error) {
 		return nil, fmt.Errorf("permission denied")
@@ -351,9 +354,6 @@ func TestInstall_ReadFileError_TreatedAsNew(t *testing.T) {
 
 	var buf bytes.Buffer
 	err := Install(&buf, fw, false)
-
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Created")
-	assert.NotContains(t, buf.String(), "Overwriting")
-	assert.NotContains(t, buf.String(), "unchanged")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading settings.json")
 }

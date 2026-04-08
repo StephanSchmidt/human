@@ -249,6 +249,10 @@ func (s *SQLiteStore) Stats(ctx context.Context) (*Stats, error) {
 		}
 		st.ByKind[kind] = count
 	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, errors.WrapWithDetails(err, "iterating kind stats rows")
+	}
 	_ = rows.Close()
 
 	// By source.
@@ -264,6 +268,10 @@ func (s *SQLiteStore) Stats(ctx context.Context) (*Stats, error) {
 			return nil, errors.WrapWithDetails(err, "scan source stats")
 		}
 		st.BySource[source] = count
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, errors.WrapWithDetails(err, "iterating source stats rows")
 	}
 	_ = rows.Close()
 

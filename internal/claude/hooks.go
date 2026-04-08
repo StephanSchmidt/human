@@ -57,9 +57,10 @@ func mergeHooksIntoSettings(w io.Writer, fw FileWriter, path string) error {
 			return errors.WrapWithDetails(jsonErr, "parsing settings.json", "path", path)
 		}
 	} else if !os.IsNotExist(err) {
-		// ReadFile returned an error that isn't "not found" — could be permission denied.
-		// Treat as missing settings and create fresh.
-		settings = make(map[string]interface{})
+		// Anything other than "not found" — permission denied, NFS stall,
+		// I/O error — must propagate so we never overwrite a settings file
+		// the user can't currently read with a fresh empty one.
+		return errors.WrapWithDetails(err, "reading settings.json", "path", path)
 	}
 
 	hooks, _ := settings["hooks"].(map[string]interface{})

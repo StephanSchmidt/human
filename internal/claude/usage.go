@@ -240,7 +240,12 @@ func CollectInstanceUsage(instances []Instance, now time.Time) []InstanceUsage {
 }
 
 // MergeUsage adds all model usage from src into dst.
+// Both arguments may be nil; the call is a no-op when src is nil and the
+// destination is left untouched.
 func MergeUsage(dst, src *UsageSummary) {
+	if dst == nil || src == nil {
+		return
+	}
 	for model, srcMU := range src.Models {
 		if srcMU == nil {
 			continue
@@ -312,6 +317,9 @@ func FormatMultiUsage(w io.Writer, instances []InstanceUsage, now time.Time) err
 		}
 		if _, err := fmt.Fprintf(w, "%s\n", header); err != nil {
 			return err
+		}
+		if iu.Summary == nil {
+			continue
 		}
 		var instanceTotal int
 		for _, mu := range iu.Summary.Models {

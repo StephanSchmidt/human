@@ -548,10 +548,14 @@ func (c *Client) resolveMemberName(ctx context.Context, memberID string) (string
 	path := fmt.Sprintf("/api/v3/members/%s", url.PathEscape(memberID))
 	resp, err := c.doRequest(ctx, http.MethodGet, path, "", nil, "")
 	if err != nil {
-		return "", nil // non-fatal: return empty name on failure
+		// Cache the empty name so a transient failure doesn't trigger a
+		// re-fetch on every subsequent call for this member id.
+		c.cacheMember(memberID, "")
+		return "", nil
 	}
 	var member scMember
 	if err := apiclient.DecodeJSON(resp, &member); err != nil {
+		c.cacheMember(memberID, "")
 		return "", nil
 	}
 
@@ -570,6 +574,18 @@ func (c *Client) resolveMemberName(ctx context.Context, memberID string) (string
 	c.membersMu.Unlock()
 
 	return name, nil
+}
+
+// cacheMember stores a (possibly empty) display name for memberID.
+// Used by resolveMemberName to negative-cache transient lookup failures
+// so they don't trigger a refetch on every call.
+func (c *Client) cacheMember(memberID, name string) {
+	c.membersMu.Lock()
+	defer c.membersMu.Unlock()
+	if _, ok := c.members[memberID]; ok {
+		return
+	}
+	c.members[memberID] = name
 }
 
 // resolveGroupID maps a group name to its UUID, fetching and caching
