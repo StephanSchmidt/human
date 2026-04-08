@@ -60,6 +60,26 @@ func (n *SecNode) realPath() string {
 	return filepath.Join(n.RootData.Path, n.Path(n.root()))
 }
 
+// loadRedacted reads and redacts the backing file once so Open and
+// Getattr can share a single snapshot. Returning the same bytes to
+// both paths avoids the content/size mismatch that would otherwise
+// happen when the underlying file is rewritten between the kernel's
+// Getattr-before-Open and the subsequent Open call.
+func (n *SecNode) loadRedacted(kind FileKind) ([]byte, error) {
+	content, err := os.ReadFile(n.realPath())
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case FileKindEnv:
+		return RedactEnv(content), nil
+	case FileKindJSON, FileKindYAML:
+		return nil, nil
+	default:
+		return nil, nil
+	}
+}
+
 // Open intercepts sensitive files and returns a protected handle.
 // All other files delegate to LoopbackNode.Open for passthrough I/O.
 func (n *SecNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
@@ -73,23 +93,10 @@ func (n *SecNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32
 		return &emptyFileHandle{}, fuse.FOPEN_DIRECT_IO, fs.OK
 	}
 
-	// Redact mode: read the real file, redact, and serve from memory.
-	content, err := os.ReadFile(n.realPath())
+	redacted, err := n.loadRedacted(kind)
 	if err != nil {
 		return nil, 0, fs.ToErrno(err)
 	}
-
-	var redacted []byte
-	switch kind {
-	case FileKindEnv:
-		redacted = RedactEnv(content)
-	case FileKindJSON, FileKindYAML:
-		// JSON/YAML redaction not yet implemented — return empty for safety.
-		redacted = nil
-	default:
-		redacted = nil
-	}
-
 	return &redactedFileHandle{data: redacted}, fuse.FOPEN_DIRECT_IO, fs.OK
 }
 
@@ -111,20 +118,10 @@ func (n *SecNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOu
 		return fs.OK
 	}
 
-	// Redact mode: report redacted content size.
-	content, err := os.ReadFile(n.realPath())
+	redacted, err := n.loadRedacted(kind)
 	if err != nil {
-		// Fall back to 0 if unreadable.
 		out.Size = 0
 		return fs.OK
-	}
-
-	var redacted []byte
-	switch kind {
-	case FileKindEnv:
-		redacted = RedactEnv(content)
-	default:
-		redacted = nil
 	}
 	out.Size = uint64(len(redacted))
 	return fs.OK

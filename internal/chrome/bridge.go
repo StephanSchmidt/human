@@ -128,6 +128,9 @@ func (b *Bridge) handleConn(ctx context.Context, conn net.Conn) {
 	}
 
 	// Bidirectional copy between unix socket and TCP connection.
+	// Select on ctx.Done so an orderly shutdown tears down blocked
+	// io.Copy calls instead of waiting indefinitely for a peer to
+	// send EOF.
 	errCh := make(chan error, 2) //nolint:mnd // two directions
 
 	go func() {
@@ -143,6 +146,15 @@ func (b *Bridge) handleConn(ctx context.Context, conn net.Conn) {
 		errCh <- cpErr
 	}()
 
-	<-errCh
-	<-errCh
+	consumed := 0
+	select {
+	case <-errCh:
+		consumed++
+	case <-ctx.Done():
+		_ = conn.Close()
+		_ = tcpConn.Close()
+	}
+	for i := consumed; i < 2; i++ {
+		<-errCh
+	}
 }

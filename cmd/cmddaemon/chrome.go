@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -56,8 +57,11 @@ Requires HUMAN_CHROME_ADDR and HUMAN_DAEMON_TOKEN environment variables.`,
 }
 
 // runChromeBridgeForeground runs the bridge in the current process (blocking).
+// SIGTERM is trapped in addition to SIGINT so container/systemd/k8s
+// shutdowns run the bridge's deferred socket cleanup instead of
+// bypassing it under a hard kill.
 func runChromeBridgeForeground(addr, token, version string, _ io.Writer) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
