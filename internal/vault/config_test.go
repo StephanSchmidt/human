@@ -18,7 +18,8 @@ func TestReadConfig_1password(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "vault:\n  provider: 1password\n")
 
-	cfg := ReadConfig(dir)
+	cfg, err := ReadConfig(dir)
+	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "1password", cfg.Provider)
 }
@@ -27,7 +28,8 @@ func TestReadConfig_noVaultSection(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "githubs:\n  - name: personal\n    token: tok\n")
 
-	cfg := ReadConfig(dir)
+	cfg, err := ReadConfig(dir)
+	require.NoError(t, err)
 	assert.Nil(t, cfg)
 }
 
@@ -35,14 +37,26 @@ func TestReadConfig_emptyProvider(t *testing.T) {
 	dir := t.TempDir()
 	writeConfig(t, dir, "vault:\n  provider: \"\"\n")
 
-	cfg := ReadConfig(dir)
+	cfg, err := ReadConfig(dir)
+	require.NoError(t, err)
 	assert.Nil(t, cfg)
 }
 
 func TestReadConfig_missingFile(t *testing.T) {
 	dir := t.TempDir()
 
-	cfg := ReadConfig(dir)
+	cfg, err := ReadConfig(dir)
+	require.NoError(t, err)
+	assert.Nil(t, cfg)
+}
+
+func TestReadConfig_parseErrorPropagates(t *testing.T) {
+	dir := t.TempDir()
+	// Deliberately malformed YAML — the scanner will fail.
+	writeConfig(t, dir, "vault:\n  provider: [not a string\n")
+
+	cfg, err := ReadConfig(dir)
+	require.Error(t, err)
 	assert.Nil(t, cfg)
 }
 

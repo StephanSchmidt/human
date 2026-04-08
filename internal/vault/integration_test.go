@@ -124,7 +124,8 @@ func TestReadConfig_andNewResolver(t *testing.T) {
 		0o644,
 	))
 
-	cfg := ReadConfig(dir)
+	cfg, err := ReadConfig(dir)
+	require.NoError(t, err)
 	require.NotNil(t, cfg)
 	assert.Equal(t, "1password", cfg.Provider)
 

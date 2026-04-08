@@ -736,7 +736,11 @@ func buildProjectRegistry(dirs []string) (*daemon.ProjectRegistry, []daemon.Proj
 // configured (graceful no-op — plain tokens continue to work).
 func buildVaultResolver(reg *daemon.ProjectRegistry, logger zerolog.Logger) *vault.Resolver {
 	for _, entry := range reg.Entries() {
-		cfg := vault.ReadConfig(entry.Dir)
+		cfg, err := vault.ReadConfig(entry.Dir)
+		if err != nil {
+			logger.Warn().Err(err).Str("project", entry.Name).Msg("vault config parse failed; resolution disabled for this project")
+			continue
+		}
 		if cfg == nil {
 			continue
 		}
