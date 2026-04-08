@@ -161,3 +161,118 @@ func TestPeekClientHello_longServerName(t *testing.T) {
 	assert.Equal(t, "very-long-subdomain.example.github.com", name)
 	assert.Equal(t, hello, peeked)
 }
+
+// Absolute byte offsets into the wire record produced by buildClientHello.
+// Derived from the layout at the top of this file:
+//
+//	5  TLS record header
+//	+ 4  handshake header
+//	+ 2  client version
+//	+ 32 random
+//	+ 1  sessionID len (=0)
+//	+ 4  ciphers (len 2 + one 2-byte cipher)
+//	+ 2  compression (len 1 + one 1-byte method)
+//	= 50 bytes, so extensions length starts at wire offset 50.
+const (
+	sniExtensionsLenOffset = 50 // first byte of the 2-byte extensions length
+	sniFirstExtDataLen     = 54 // first byte of the first extension's data length
+	sniExtDataStart        = 56 // first byte of the first extension's data
+)
+
+// An extensions-length field that claims to exceed the record is the
+// classic buffer-overrun vector for TLS record parsers. The guard at
+// sni.go:89 rejects it; this test pins that behavior.
+func TestPeekClientHello_extensionsLengthExceedsRecord(t *testing.T) {
+	hello := buildClientHello("example.com")
+	// Overwrite the extensions length with the maximum 16-bit value.
+	hello[sniExtensionsLenOffset] = 0xFF
+	hello[sniExtensionsLenOffset+1] = 0xFF
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	go func() { _, _ = client.Write(hello) }()
+
+	_, _, err := PeekClientHello(server)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "extensions length exceeds record")
+}
+
+// An individual extension's data length larger than the remaining
+// extensions block would let a crafted ClientHello read past the
+// allocated buffer. The guard at sni.go:98 rejects it.
+func TestPeekClientHello_extensionDataLengthExceedsBlock(t *testing.T) {
+	hello := buildClientHello("x")
+	// Overwrite the first extension's data length.
+	hello[sniFirstExtDataLen] = 0xFF
+	hello[sniFirstExtDataLen+1] = 0xFF
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	go func() { _, _ = client.Write(hello) }()
+
+	_, _, err := PeekClientHello(server)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "extension data exceeds record")
+}
+
+// An SNI extension with listLen == 0 is a protocol violation — the
+// guard at sni.go:122 rejects it so parseSNIExtension cannot then
+// iterate an empty list and return a garbage empty hostname.
+func TestPeekClientHello_emptySNIList(t *testing.T) {
+	hello := buildClientHello("x")
+	// Overwrite the SNI listLen (first 2 bytes of extension data).
+	hello[sniExtDataStart] = 0
+	hello[sniExtDataStart+1] = 0
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	go func() { _, _ = client.Write(hello) }()
+
+	_, _, err := PeekClientHello(server)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SNI list length mismatch")
+}
+
+// The SNI RFC reserves name types other than 0x00 (host_name) for
+// future use. Current clients only send host_name, but the parser
+// must tolerate a non-DNS name type by treating it as "no SNI" rather
+// than returning garbled bytes as the hostname.
+func TestPeekClientHello_nonDNSNameType(t *testing.T) {
+	hello := buildClientHello("x")
+	// nameType sits two bytes into the extension data (after listLen).
+	hello[sniExtDataStart+2] = 0x01
+
+	client, server := net.Pipe()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
+	go func() { _, _ = client.Write(hello) }()
+
+	_, name, err := PeekClientHello(server)
+	require.NoError(t, err)
+	assert.Empty(t, name, "non-DNS name type must be skipped and return an empty SNI")
+}
+
+// Fuzz the parser with a seed corpus drawn from buildClientHello plus
+// a handful of known-bad inputs. The parser must never panic — error
+// returns and empty hostnames are both acceptable outcomes.
+func FuzzPeekClientHello(f *testing.F) {
+	f.Add(buildClientHello("github.com"))
+	f.Add(buildClientHello("x"))
+	f.Add(buildClientHello(""))
+	f.Add([]byte{0x16, 0x03, 0x01, 0x00, 0x00})
+	f.Add([]byte("GET / HTTP/1.1\r\n"))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		client, server := net.Pipe()
+		defer func() { _ = client.Close() }()
+		defer func() { _ = server.Close() }()
+		go func() {
+			_, _ = client.Write(data)
+			_ = client.Close()
+		}()
+		_, _, _ = PeekClientHello(server)
+	})
+}

@@ -1,4 +1,4 @@
-.PHONY: all build install test test-integration coverage lint sec secrets check clean upgrade-deps release hooks unhooks
+.PHONY: all build install test test-integration coverage fuzz lint sec secrets check clean upgrade-deps release hooks unhooks
 
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 
@@ -15,6 +15,10 @@ test:
 coverage:
 	go tool gotestsum -- -coverprofile=coverage.out $$(go list ./... | grep -v /cmd/)
 	go tool cover -func=coverage.out
+
+fuzz:
+	go test -run=^$$ -fuzz=FuzzSanitizeFTSQuery -fuzztime=30s ./internal/index/...
+	go test -run=^$$ -fuzz=FuzzPeekClientHello -fuzztime=30s ./internal/proxy/...
 
 lint:
 	go vet ./...
