@@ -392,10 +392,37 @@ var localSubcommands = map[string]bool{
 	"hook":         true,
 }
 
+// globalValueFlags lists global persistent flags that take a value. When these
+// appear in space-separated form (e.g. "--tracker work"), the value token must
+// be skipped so it isn't mistaken for the subcommand name. Keep this list in
+// sync with PersistentFlags() in newRootCmd.
+var globalValueFlags = map[string]bool{
+	"--tracker":        true,
+	"--jira-key":       true,
+	"--jira-url":       true,
+	"--jira-user":      true,
+	"--github-token":   true,
+	"--github-url":     true,
+	"--gitlab-token":   true,
+	"--gitlab-url":     true,
+	"--linear-token":   true,
+	"--linear-url":     true,
+	"--azure-token":    true,
+	"--azure-url":      true,
+	"--azure-org":      true,
+	"--shortcut-token": true,
+	"--shortcut-url":   true,
+	"--clickup-token":  true,
+	"--clickup-url":    true,
+}
+
 // isLocalSubcommand returns true if args represent a command that must
-// execute locally rather than being forwarded to the daemon.
+// execute locally rather than being forwarded to the daemon. It understands
+// space-separated value-taking flags (e.g. "--tracker work daemon") so the
+// value token is not mistaken for the subcommand.
 func isLocalSubcommand(args []string) bool {
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		if a == "--" {
 			return false
 		}
@@ -404,7 +431,12 @@ func isLocalSubcommand(args []string) bool {
 			return true
 		}
 		if len(a) > 0 && a[0] == '-' {
-			continue // skip other flags
+			// Skip the value of a known value-taking flag in its space-separated
+			// form. The "--flag=value" form is a single token and needs no skip.
+			if globalValueFlags[a] && i+1 < len(args) {
+				i++
+			}
+			continue
 		}
 		return localSubcommands[a]
 	}

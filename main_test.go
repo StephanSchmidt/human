@@ -571,7 +571,7 @@ func TestRunDeleteIssue(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, true)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, strings.NewReader(""), &buf, key, true)
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted KAN-1\n", buf.String())
 }
@@ -585,7 +585,7 @@ func TestRunDeleteIssue_error(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := cmdprovider.RunDeleteIssue(context.Background(), p, &buf, key, true)
+	err := cmdprovider.RunDeleteIssue(context.Background(), p, strings.NewReader(""), &buf, key, true)
 	assert.EqualError(t, err, "delete failed")
 }
 
@@ -959,6 +959,16 @@ func TestIsLocalSubcommand(t *testing.T) {
 		{[]string{"--verbose", "init"}, true},
 		{[]string{"hook"}, true},
 		{[]string{"--verbose", "hook"}, true},
+		// Space-separated value-taking flags must be skipped over (C-LOGIC-025).
+		{[]string{"--tracker", "work", "daemon", "stop"}, true},
+		{[]string{"--tracker=work", "daemon", "stop"}, true},
+		{[]string{"--github-token", "ghp_xx", "install"}, true},
+		{[]string{"--clickup-token", "X", "index"}, true},
+		{[]string{"--tracker", "work", "tui"}, true},
+		{[]string{"--tracker", "work", "init"}, true},
+		// Tracker-forwarded commands should stay forwarded even with space flags.
+		{[]string{"--tracker", "work", "jira", "issue", "get", "KAN-1"}, false},
+		{[]string{"--tracker", "work", "linear", "issues", "list"}, false},
 	}
 	for _, tt := range tests {
 		got := isLocalSubcommand(tt.args)
