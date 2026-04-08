@@ -376,3 +376,59 @@ func TestFindTracker_probeTimesOut(t *testing.T) {
 	// In practice it finishes in ~10s; give generous upper bound.
 	assert.Less(t, elapsed, 15*time.Second, "should not hang forever")
 }
+
+// Nil and zero-length instance slices must surface a clear error
+// instead of panicking or looping. This guards the "no trackers
+// configured" code path that users hit on a fresh checkout.
+func TestFindTracker_emptyInstances(t *testing.T) {
+	_, err := FindTracker(context.Background(), "KAN-1", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured tracker matches key format")
+
+	_, err = FindTracker(context.Background(), "KAN-1", []Instance{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no configured tracker matches key format")
+}
+
+// A pre-cancelled context must not cause FindTracker to hang —
+// individual probe calls inherit the cancellation and return promptly,
+// so the loop completes quickly. This documents current behavior
+// (probeInstances does not short-circuit on ctx.Err, but providers
+// that honour ctx still return fast).
+func TestFindTracker_cancelledContext(t *testing.T) {
+	instances := []Instance{
+		{Name: "work", Kind: "jira", Provider: slowProvider{}},
+		{Name: "team", Kind: "linear", Provider: slowProvider{}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before calling
+
+	start := time.Now()
+	_, err := FindTracker(ctx, "KAN-42", instances)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second, "cancelled context should return promptly")
+}
+
+// ExtractProject edge cases that the existing TestExtractProject table
+// does not exercise — bare separators, double-separator suffixes, and
+// multi-# keys where the last # wins.
+func TestExtractProject_edges(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want string
+	}{
+		{"single slash with zero", "A/0", "A"},
+		{"bare slash", "/", ""},
+		{"double slash suffix", "x//", ""},
+		{"multi hash", "owner/repo#1#2", "owner/repo#1"},
+		{"empty", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ExtractProject(tt.key))
+		})
+	}
+}
