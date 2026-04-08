@@ -59,14 +59,16 @@ func (s *HookEventStore) Subscribe() chan struct{} {
 	return ch
 }
 
-// Unsubscribe removes a previously registered channel and closes it.
+// Unsubscribe removes a previously registered channel from the subscriber
+// list. The channel is not closed — subscribers must stop reading from it
+// after calling Unsubscribe and let it be garbage collected. This avoids
+// coordinating with any concurrent Append on a removed channel.
 func (s *HookEventStore) Unsubscribe(ch chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, sub := range s.subscribers {
 		if sub == ch {
 			s.subscribers = append(s.subscribers[:i], s.subscribers[i+1:]...)
-			close(ch)
 			return
 		}
 	}

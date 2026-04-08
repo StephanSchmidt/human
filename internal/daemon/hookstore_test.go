@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -138,10 +139,46 @@ func TestHookEventStore_Unsubscribe(t *testing.T) {
 
 	store.Append(hookevents.Event{EventName: "Stop", SessionID: "s1", Timestamp: time.Now()})
 
+	// After Unsubscribe, Append must not deliver to the removed channel.
 	select {
-	case _, ok := <-ch:
-		assert.False(t, ok, "channel should be closed after unsubscribe")
+	case <-ch:
+		t.Fatal("unsubscribed channel should not receive further notifications")
 	default:
-		// Channel closed and empty — also fine.
+	}
+}
+
+// TestHookEventStore_UnsubscribeRaceAppend exercises concurrent Append and
+// Unsubscribe on the same subscriber channel under -race to confirm no panic
+// and no deadlock occurs. Run with: go test -race ./internal/daemon/...
+func TestHookEventStore_UnsubscribeRaceAppend(t *testing.T) {
+	const iterations = 500
+	var wg sync.WaitGroup
+	for i := 0; i < iterations; i++ {
+		store := NewHookEventStore()
+		ch := store.Subscribe()
+		// Drain any notifications so the send path in Append always takes the
+		// default branch and we exercise the lookup+remove path under race.
+		done := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-ch:
+				case <-done:
+					return
+				}
+			}
+		}()
+
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			store.Append(hookevents.Event{EventName: "Stop", SessionID: "s1", Timestamp: time.Now()})
+		}()
+		go func() {
+			defer wg.Done()
+			store.Unsubscribe(ch)
+		}()
+		wg.Wait()
+		close(done)
 	}
 }
