@@ -317,7 +317,14 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		return nil
 	}
 
-	token, _ := daemon.LoadOrCreateToken()
+	token, tokenErr := daemon.LoadOrCreateToken()
+	if tokenErr != nil {
+		return errors.WrapWithDetails(tokenErr, "loading daemon token")
+	}
+	tokenPrefix := token
+	if len(token) >= 8 {
+		tokenPrefix = token[:8]
+	}
 	chromeFullAddr := replaceHost(chromeAddr, hostIP)
 	proxyFullAddr := replaceHost(proxyAddr, hostIP)
 
@@ -327,7 +334,7 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	_, _ = fmt.Fprintln(out)
 	_, _ = fmt.Fprintln(out, "Run in the container:")
 	_, _ = fmt.Fprintf(out, "  export HUMAN_DAEMON_ADDR=%s HUMAN_DAEMON_TOKEN=%s... HUMAN_CHROME_ADDR=%s HUMAN_PROXY_ADDR=%s\n",
-		daemonAddr, token[:8], chromeFullAddr, proxyFullAddr)
+		daemonAddr, tokenPrefix, chromeFullAddr, proxyFullAddr)
 	_, _ = fmt.Fprintln(out, "  # Full token: human daemon token")
 	return nil
 }
