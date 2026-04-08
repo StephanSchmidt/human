@@ -107,6 +107,14 @@ func syncProject(ctx context.Context, store Store, inst *tracker.Instance, proje
 	}
 	_, _ = fmt.Fprintf(logger, "Indexing %s (%s): %s (%d issues)...\n", inst.Name, inst.Kind, label, len(issues))
 
+	// Mark every listed key as seen BEFORE per-issue fetch/upsert. A
+	// transient fetch or upsert error must not cause the later prune
+	// step to delete the entry from the index — the entry still exists
+	// upstream and will be re-indexed on the next successful sync.
+	for _, issue := range issues {
+		seen[issue.Key] = true
+	}
+
 	for _, issue := range issues {
 		full, fErr := inst.Provider.GetIssue(ctx, issue.Key)
 		if fErr != nil {
@@ -119,6 +127,12 @@ func syncProject(ctx context.Context, store Store, inst *tracker.Instance, proje
 		if p == "" {
 			p = full.Project
 		}
+		// Prefer the per-issue web URL populated by the provider; fall
+		// back to the instance base URL when a provider does not set it.
+		entryURL := full.URL
+		if entryURL == "" {
+			entryURL = inst.URL
+		}
 		entry := Entry{
 			Key:      issue.Key,
 			Source:   inst.Name,
@@ -127,14 +141,13 @@ func syncProject(ctx context.Context, store Store, inst *tracker.Instance, proje
 			Title:    full.Title,
 			Status:   full.Status,
 			Assignee: full.Assignee,
-			URL:      inst.URL,
+			URL:      entryURL,
 		}
 		if uErr := store.UpsertEntry(ctx, entry, full.Description); uErr != nil {
 			_, _ = fmt.Fprintf(logger, "  Error indexing %s: %v\n", issue.Key, uErr)
 			result.Errors++
 			continue
 		}
-		seen[issue.Key] = true
 		result.Indexed++
 	}
 }

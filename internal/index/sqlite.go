@@ -182,6 +182,14 @@ func (s *SQLiteStore) DeleteEntry(ctx context.Context, key, source string) error
 
 // Search performs a full-text search and returns matching entries ranked by BM25.
 func (s *SQLiteStore) Search(ctx context.Context, query string, limit int) ([]Entry, error) {
+	return s.SearchWithKind(ctx, query, "", limit)
+}
+
+// SearchWithKind performs a full-text search filtered by entries.kind.
+// When kind is empty the query behaves exactly like Search. The kind
+// filter is applied inside the SQL engine so the limit cannot exclude
+// all matching kind rows when the top-ranked hits are of another kind.
+func (s *SQLiteStore) SearchWithKind(ctx context.Context, query, kind string, limit int) ([]Entry, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -190,16 +198,29 @@ func (s *SQLiteStore) Search(ctx context.Context, query string, limit int) ([]En
 	// treated as literals rather than operators.
 	ftsQuery := sanitizeFTSQuery(query)
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT e.key, e.source, e.kind, e.project, e.title, e.status, e.assignee, e.url, e.indexed_at
-		FROM entries_fts f
-		JOIN entries e ON e.id = f.rowid
-		WHERE entries_fts MATCH ?
-		ORDER BY bm25(entries_fts)
-		LIMIT ?
-	`, ftsQuery, limit)
+	var rows *sql.Rows
+	var err error
+	if kind == "" {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT e.key, e.source, e.kind, e.project, e.title, e.status, e.assignee, e.url, e.indexed_at
+			FROM entries_fts f
+			JOIN entries e ON e.id = f.rowid
+			WHERE entries_fts MATCH ?
+			ORDER BY bm25(entries_fts)
+			LIMIT ?
+		`, ftsQuery, limit)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT e.key, e.source, e.kind, e.project, e.title, e.status, e.assignee, e.url, e.indexed_at
+			FROM entries_fts f
+			JOIN entries e ON e.id = f.rowid
+			WHERE entries_fts MATCH ? AND e.kind = ?
+			ORDER BY bm25(entries_fts)
+			LIMIT ?
+		`, ftsQuery, kind, limit)
+	}
 	if err != nil {
-		return nil, errors.WrapWithDetails(err, "search index", "query", query)
+		return nil, errors.WrapWithDetails(err, "search index", "query", query, "kind", kind)
 	}
 	defer func() { _ = rows.Close() }()
 

@@ -163,19 +163,18 @@ func RunSearch(ctx context.Context, out io.Writer, query string, limit int, sour
 	}
 	defer func() { _ = store.Close() }()
 
-	entries, err := store.Search(ctx, query, limit)
+	// Push the source/kind filter into the store so the LIMIT is
+	// applied AFTER the kind restriction. Filtering client-side after a
+	// LIMIT can hide matching results when the top-ranked hits belong
+	// to a different kind.
+	var entries []index.Entry
+	if source != "" {
+		entries, err = store.SearchWithKind(ctx, query, source, limit)
+	} else {
+		entries, err = store.Search(ctx, query, limit)
+	}
 	if err != nil {
 		return err
-	}
-
-	if source != "" {
-		var filtered []index.Entry
-		for _, e := range entries {
-			if e.Kind == source {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
 	}
 
 	if len(entries) == 0 {

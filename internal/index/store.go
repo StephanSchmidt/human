@@ -30,7 +30,13 @@ type Stats struct {
 type Store interface {
 	UpsertEntry(ctx context.Context, entry Entry, description string) error
 	DeleteEntry(ctx context.Context, key, source string) error
+	// Search returns up to limit matching entries across all kinds.
 	Search(ctx context.Context, query string, limit int) ([]Entry, error)
+	// SearchWithKind returns up to limit matching entries restricted
+	// to a single kind ("notion", "jira", ...). Filtering happens in
+	// the SQL engine so clients cannot observe empty results when the
+	// top-ranked hits belong to another kind.
+	SearchWithKind(ctx context.Context, query, kind string, limit int) ([]Entry, error)
 	Stats(ctx context.Context) (*Stats, error)
 	AllKeys(ctx context.Context, source string) ([]string, error)
 	LastIndexedAt(ctx context.Context, source string) (time.Time, error)

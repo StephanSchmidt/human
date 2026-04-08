@@ -165,6 +165,41 @@ func TestSearch_ranking(t *testing.T) {
 	}
 }
 
+// TestSearchWithKind_filterAppliesBeforeLimit verifies the M11.3 fix:
+// when a kind filter is combined with a limit, the filter is applied
+// in SQL so the limit counts only matching-kind rows. Client-side
+// post-filtering would silently hide all Notion hits when the top-N
+// FTS matches happen to be GitHub issues.
+func TestSearchWithKind_filterAppliesBeforeLimit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed 5 GitHub rows that will dominate the BM25 ranking.
+	for i := 0; i < 5; i++ {
+		key := "gh-" + string(rune('1'+i))
+		require.NoError(t, s.UpsertEntry(ctx, Entry{
+			Key: key, Source: "gh", Kind: "github", Title: "retry flow",
+		}, "retry retry retry"))
+	}
+	// Plus one Notion row that also matches.
+	require.NoError(t, s.UpsertEntry(ctx, Entry{
+		Key: "note-1", Source: "notion", Kind: "notion", Title: "retry handbook",
+	}, "description"))
+
+	// With limit=3 the old client-side filter would return zero Notion
+	// hits because the top-3 BM25 matches would all be GitHub.
+	results, err := s.SearchWithKind(ctx, "retry", "notion", 3)
+	if err != nil {
+		t.Fatalf("SearchWithKind: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 Notion result, got %d", len(results))
+	}
+	if results[0].Key != "note-1" {
+		t.Errorf("expected note-1, got %s", results[0].Key)
+	}
+}
+
 func TestDeleteEntry_removes(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

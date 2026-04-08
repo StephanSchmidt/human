@@ -60,6 +60,15 @@ func syncNotionInstance(ctx context.Context, store Store, inst *NotionInstance, 
 
 	seen := make(map[string]bool)
 
+	// Mark every discovered ID as seen BEFORE per-object fetch/upsert so
+	// a transient fetch error cannot cause the prune step below to
+	// delete the entry from the index.
+	for _, sr := range results {
+		if sr.Type == "page" || sr.Type == "database" {
+			seen[sr.ID] = true
+		}
+	}
+
 	for _, sr := range results {
 		switch sr.Type {
 		case "page":
@@ -83,7 +92,6 @@ func syncNotionInstance(ctx context.Context, store Store, inst *NotionInstance, 
 				result.Errors++
 				continue
 			}
-			seen[sr.ID] = true
 			result.Pages++
 
 		case "database":
@@ -108,7 +116,6 @@ func syncNotionInstance(ctx context.Context, store Store, inst *NotionInstance, 
 				result.Errors++
 				continue
 			}
-			seen[sr.ID] = true
 			result.Databases++
 		}
 	}

@@ -385,3 +385,96 @@ func TestSync_incrementalSkipsPruning(t *testing.T) {
 		t.Errorf("expected 2 keys (no pruning), got %v", keys)
 	}
 }
+
+// TestSync_transientFetchErrorDoesNotPrune verifies the M11.1 invariant:
+// when a per-issue fetch fails transiently during a full sync, the key
+// must NOT be deleted from the index on the subsequent prune pass. The
+// upstream issue still exists and will be re-indexed on the next run.
+func TestSync_transientFetchErrorDoesNotPrune(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	// Pre-populate the store with an entry that should survive a
+	// failing fetch on the next sync.
+	require.NoError(t, s.UpsertEntry(ctx, Entry{
+		Key: "KAN-1", Source: "work", Kind: "jira", Project: "KAN",
+		Title: "Old title", URL: "https://jira.example.com",
+	}, "old description"))
+
+	provider := &mockProvider{
+		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+			// List still reports the issue as existing upstream.
+			return []tracker.Issue{{Key: "KAN-1", Title: "Still here"}}, nil
+		},
+		getFn: func(_ context.Context, _ string) (*tracker.Issue, error) {
+			// But the per-issue fetch fails — e.g. rate limit, flap.
+			return nil, context.DeadlineExceeded
+		},
+	}
+
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", URL: "https://jira.example.com", Projects: []string{"KAN"}, Provider: provider},
+	}
+
+	result, err := Sync(ctx, s, instances, true, &buf)
+	require.NoError(t, err)
+	// We expect 1 error (the failed fetch) and 0 prunes — the listed
+	// key must have been added to `seen` before the fetch attempt.
+	if result.Errors != 1 {
+		t.Errorf("expected 1 error, got %d", result.Errors)
+	}
+	if result.Pruned != 0 {
+		t.Errorf("expected 0 pruned (transient fetch error must not drop entries), got %d", result.Pruned)
+	}
+
+	keys, _ := s.AllKeys(ctx, "work")
+	if len(keys) != 1 {
+		t.Errorf("expected 1 key to survive, got %v", keys)
+	}
+}
+
+// TestSync_preferFullIssueURL verifies the M11.2 fix: entry.URL is
+// populated from the per-issue web URL when the provider sets it,
+// instead of always being the instance base URL.
+func TestSync_preferFullIssueURL(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	provider := &mockProvider{
+		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+			return []tracker.Issue{
+				{Key: "KAN-1", Title: "With URL"},
+				{Key: "KAN-2", Title: "No URL"},
+			}, nil
+		},
+		getFn: func(_ context.Context, key string) (*tracker.Issue, error) {
+			iss := &tracker.Issue{Key: key, Title: "Title " + key, Status: "Open"}
+			if key == "KAN-1" {
+				iss.URL = "https://jira.example.com/browse/KAN-1"
+			}
+			return iss, nil
+		},
+	}
+
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", URL: "https://jira.example.com", Projects: []string{"KAN"}, Provider: provider},
+	}
+
+	_, err := Sync(ctx, s, instances, true, &buf)
+	require.NoError(t, err)
+
+	got, err := s.Search(ctx, "Title", 10)
+	require.NoError(t, err)
+	urls := map[string]string{}
+	for _, e := range got {
+		urls[e.Key] = e.URL
+	}
+	if urls["KAN-1"] != "https://jira.example.com/browse/KAN-1" {
+		t.Errorf("KAN-1 URL should be per-issue, got %q", urls["KAN-1"])
+	}
+	if urls["KAN-2"] != "https://jira.example.com" {
+		t.Errorf("KAN-2 URL should fall back to instance URL, got %q", urls["KAN-2"])
+	}
+}
