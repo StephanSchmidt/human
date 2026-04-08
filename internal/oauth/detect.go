@@ -8,8 +8,9 @@ import (
 
 // RedirectInfo contains the parsed localhost redirect target from an OAuth URL.
 type RedirectInfo struct {
-	Port int    // e.g. 38599
-	Path string // e.g. "/callback"
+	Port  int    // e.g. 38599
+	Path  string // e.g. "/callback"
+	State string // expected state parameter; empty when the request had none
 }
 
 // DetectRedirect parses rawURL looking for a redirect_uri query parameter
@@ -50,8 +51,9 @@ func DetectRedirect(rawURL string) *RedirectInfo {
 	}
 
 	return &RedirectInfo{
-		Port: port,
-		Path: path,
+		Port:  port,
+		Path:  path,
+		State: u.Query().Get("state"),
 	}
 }
 

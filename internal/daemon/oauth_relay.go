@@ -102,6 +102,23 @@ func (s *Server) awaitCallback(ln net.Listener, info *oauth.RedirectInfo) (strin
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(info.Path, func(w http.ResponseWriter, r *http.Request) {
+		// Only GET callbacks are allowed.
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Exact path match — no prefix-match acceptance.
+		if r.URL.Path != info.Path {
+			http.NotFound(w, r)
+			return
+		}
+		// If the original authorisation URL carried a state parameter,
+		// require the callback to echo the same value.
+		if info.State != "" && r.URL.Query().Get("state") != info.State {
+			http.Error(w, "state mismatch", http.StatusBadRequest)
+			return
+		}
+
 		u := fmt.Sprintf("http://localhost:%d%s?%s", info.Port, r.URL.Path, r.URL.RawQuery)
 		paramKeys := make([]string, 0, len(r.URL.Query()))
 		for k := range r.URL.Query() {
@@ -109,7 +126,14 @@ func (s *Server) awaitCallback(ln net.Listener, info *oauth.RedirectInfo) (strin
 		}
 		sort.Strings(paramKeys)
 		s.Logger.Debug().Str("path", r.URL.Path).Strs("param_keys", paramKeys).Msg("OAuth callback received")
-		callbackURL <- u
+
+		// Non-blocking send so a duplicate browser callback (or a favicon
+		// retry that survives the dispatcher's path filter) can never
+		// block this handler goroutine forever.
+		select {
+		case callbackURL <- u:
+		default:
+		}
 
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
