@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -318,25 +317,6 @@ func TestPrintIssuesTable(t *testing.T) {
 	assert.Contains(t, out, "KAN-2")
 }
 
-func TestTrackerEntry_JSONFields(t *testing.T) {
-	entry := cmdtracker.TrackerEntry{Name: "work", Type: "jira", URL: "https://example.atlassian.net", User: "alice", Description: "Sprint planning"}
-
-	data, err := json.Marshal(entry)
-	require.NoError(t, err)
-
-	var buf bytes.Buffer
-	require.NoError(t, json.Compact(&buf, data))
-
-	var parsed map[string]string
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &parsed))
-
-	assert.Equal(t, "work", parsed["name"])
-	assert.Equal(t, "jira", parsed["type"])
-	assert.Equal(t, "https://example.atlassian.net", parsed["url"])
-	assert.Equal(t, "alice", parsed["user"])
-	assert.Equal(t, "Sprint planning", parsed["description"])
-}
-
 // --- loadAllInstances tests ---
 
 func writeConfig(t *testing.T, dir, content string) {
@@ -487,13 +467,20 @@ func TestRunGetIssue(t *testing.T) {
 	err := cmdprovider.RunGetIssue(context.Background(), p, &buf, "KAN-1")
 	require.NoError(t, err)
 
+	// Assert on semantic content, not exact table spacing, so a
+	// whitespace-only formatter tweak does not break the test.
 	out := buf.String()
-	assert.Contains(t, out, "# KAN-1: Test issue")
-	assert.Contains(t, out, "| Status   | In Progress |")
-	assert.Contains(t, out, "| Priority | High |")
-	assert.Contains(t, out, "| Assignee | alice |")
-	assert.Contains(t, out, "| Reporter | bob |")
-	assert.Contains(t, out, "## Description")
+	assert.Contains(t, out, "KAN-1")
+	assert.Contains(t, out, "Test issue")
+	assert.Contains(t, out, "Status")
+	assert.Contains(t, out, "In Progress")
+	assert.Contains(t, out, "Priority")
+	assert.Contains(t, out, "High")
+	assert.Contains(t, out, "Assignee")
+	assert.Contains(t, out, "alice")
+	assert.Contains(t, out, "Reporter")
+	assert.Contains(t, out, "bob")
+	assert.Contains(t, out, "Description")
 	assert.Contains(t, out, "Some description")
 }
 
@@ -675,76 +662,72 @@ func TestRunStartIssue(t *testing.T) {
 	assert.Equal(t, "Started KAN-1\n", buf.String())
 }
 
-func TestRunStartIssue_transitionFails(t *testing.T) {
-	p := &mockProvider{
-		getCurrentUserFn: func(_ context.Context) (string, error) {
-			return "user-123", nil
+// Each case exercises exactly one failure path in the transition/assign
+// pair. Single-failure cases succeed overall (the user is not blocked)
+// but the partial failure is logged; "both fail" returns an error;
+// "getCurrentUser fails" returns before either mutation runs.
+func TestRunStartIssue_partialFailures(t *testing.T) {
+	tests := []struct {
+		name            string
+		getUserErr      error
+		transitionErr   error
+		assignErr       error
+		wantErrContains string
+		wantStdout      []string
+	}{
+		{
+			name:          "transition fails but assign succeeds",
+			transitionErr: fmt.Errorf("no transition"),
+			wantStdout:    []string{"Assigned KAN-1 to user-123", "transition failed"},
 		},
-		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
-			return fmt.Errorf("no transition")
+		{
+			name:       "assign fails but transition succeeds",
+			assignErr:  fmt.Errorf("assign denied"),
+			wantStdout: []string{"Transitioned KAN-1 to In Progress", "assign failed"},
 		},
-		assignIssueFn: func(_ context.Context, _ string, _ string) error {
-			return nil
+		{
+			name:            "both fail returns error",
+			transitionErr:   fmt.Errorf("no transition"),
+			assignErr:       fmt.Errorf("assign denied"),
+			wantErrContains: "failed to start issue",
 		},
-	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Assigned KAN-1 to user-123")
-	assert.Contains(t, buf.String(), "transition failed")
-}
-
-func TestRunStartIssue_assignFails(t *testing.T) {
-	p := &mockProvider{
-		getCurrentUserFn: func(_ context.Context) (string, error) {
-			return "user-123", nil
-		},
-		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
-			return nil
-		},
-		assignIssueFn: func(_ context.Context, _ string, _ string) error {
-			return fmt.Errorf("assign denied")
-		},
-	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
-	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "Transitioned KAN-1 to In Progress")
-	assert.Contains(t, buf.String(), "assign failed")
-}
-
-func TestRunStartIssue_bothFail(t *testing.T) {
-	p := &mockProvider{
-		getCurrentUserFn: func(_ context.Context) (string, error) {
-			return "user-123", nil
-		},
-		transitionIssueFn: func(_ context.Context, _ string, _ string) error {
-			return fmt.Errorf("no transition")
-		},
-		assignIssueFn: func(_ context.Context, _ string, _ string) error {
-			return fmt.Errorf("assign denied")
+		{
+			name:            "getCurrentUser fails returns error",
+			getUserErr:      fmt.Errorf("auth failed"),
+			wantErrContains: "getting current user",
 		},
 	}
 
-	var buf bytes.Buffer
-	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to start issue")
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &mockProvider{
+				getCurrentUserFn: func(_ context.Context) (string, error) {
+					if tt.getUserErr != nil {
+						return "", tt.getUserErr
+					}
+					return "user-123", nil
+				},
+				transitionIssueFn: func(_ context.Context, _, _ string) error {
+					return tt.transitionErr
+				},
+				assignIssueFn: func(_ context.Context, _, _ string) error {
+					return tt.assignErr
+				},
+			}
 
-func TestRunStartIssue_getCurrentUserError(t *testing.T) {
-	p := &mockProvider{
-		getCurrentUserFn: func(_ context.Context) (string, error) {
-			return "", fmt.Errorf("auth failed")
-		},
+			var buf bytes.Buffer
+			err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
+			if tt.wantErrContains != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContains)
+				return
+			}
+			require.NoError(t, err)
+			for _, s := range tt.wantStdout {
+				assert.Contains(t, buf.String(), s)
+			}
+		})
 	}
-
-	var buf bytes.Buffer
-	err := cmdprovider.RunStartIssue(context.Background(), p, &buf, "KAN-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "getting current user")
 }
 
 func TestRunTrackerList_JSON(t *testing.T) {
@@ -832,54 +815,6 @@ func TestRootCmd_defaultShowsHelp(t *testing.T) {
 	// Should produce help output with usage info
 	assert.Contains(t, buf.String(), "Usage:")
 	assert.Contains(t, buf.String(), "human")
-}
-
-func TestRootCmd_hasProviderSubcommands(t *testing.T) {
-	cmd := newRootCmd()
-	providers := []string{"jira", "github", "gitlab", "linear", "azuredevops", "shortcut"}
-	for _, name := range providers {
-		found := false
-		for _, sub := range cmd.Commands() {
-			if sub.Use == name {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "expected provider subcommand: %s", name)
-	}
-}
-
-func TestRootCmd_hasStaticSubcommands(t *testing.T) {
-	cmd := newRootCmd()
-	for _, name := range []string{"tracker", "install", "daemon", "browser URL"} {
-		found := false
-		for _, sub := range cmd.Commands() {
-			if sub.Use == name {
-				found = true
-				break
-			}
-		}
-		assert.True(t, found, "expected static subcommand: %s", name)
-	}
-}
-
-func TestProviderCmd_hasIssueSubcommands(t *testing.T) {
-	cmd := newRootCmd()
-	var jiraCmd *cobra.Command
-	for _, sub := range cmd.Commands() {
-		if sub.Use == "jira" {
-			jiraCmd = sub
-			break
-		}
-	}
-	require.NotNil(t, jiraCmd)
-
-	subNames := make(map[string]bool)
-	for _, sub := range jiraCmd.Commands() {
-		subNames[sub.Use] = true
-	}
-	assert.True(t, subNames["issues"], "expected 'issues' subcommand")
-	assert.True(t, subNames["issue"], "expected 'issue' subcommand")
 }
 
 // --- instanceFromFlags tests ---

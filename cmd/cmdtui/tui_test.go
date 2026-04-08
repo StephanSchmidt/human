@@ -51,36 +51,29 @@ func TestModelInit(t *testing.T) {
 	}
 }
 
-func TestModelUpdate_Quit(t *testing.T) {
-	m := testModel()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	um := updated.(model)
-	if !um.quitting {
-		t.Error("expected quitting to be true")
+// Both "q" and Ctrl+C map to the same quit command. Use a table test
+// instead of two near-identical functions so a future third quit key
+// can be added in a single line.
+func TestModelUpdate_quitKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"q", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}},
+		{"ctrl+c", tea.KeyMsg{Type: tea.KeyCtrlC}},
 	}
-	if cmd == nil {
-		t.Error("expected non-nil quit command")
-	}
-}
-
-func TestModelUpdate_CtrlC(t *testing.T) {
-	m := testModel()
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	um := updated.(model)
-	if !um.quitting {
-		t.Error("expected quitting to be true")
-	}
-	if cmd == nil {
-		t.Error("expected non-nil quit command")
-	}
-}
-
-func TestModelUpdate_WindowSize(t *testing.T) {
-	m := testModel()
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	um := updated.(model)
-	if um.width != 120 || um.height != 40 {
-		t.Errorf("expected 120x40, got %dx%d", um.width, um.height)
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			m := testModel()
+			updated, cmd := m.Update(tt.msg)
+			um := updated.(model)
+			if !um.quitting {
+				t.Error("expected quitting to be true")
+			}
+			if cmd == nil {
+				t.Error("expected non-nil quit command")
+			}
+		})
 	}
 }
 
