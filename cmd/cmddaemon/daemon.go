@@ -140,6 +140,23 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	hookStore := daemon.NewHookEventStore()
 	confirmStore := daemon.NewPendingConfirmStore()
 
+	// Periodically purge stale confirmations so a TUI that misses an event
+	// (or never connects) cannot leak entries indefinitely. The maxAge is
+	// twice the per-request confirmation timeout, which gives the TUI a
+	// generous window to resolve a normal prompt.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				confirmStore.Cleanup(2 * 5 * time.Minute)
+			}
+		}
+	}()
+
 	srv := &daemon.Server{
 		Addr:             addr,
 		Token:            token,

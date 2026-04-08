@@ -498,6 +498,9 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 	}
 	if err := enc.Encode(resp1); err != nil {
 		s.Logger.Warn().Err(err).Msg("failed to write confirm line 1")
+		// Remove the entry we just added so it doesn't accumulate in the
+		// store with no client to resolve it.
+		s.PendingConfirms.ResolveTimeout(id)
 		return
 	}
 
