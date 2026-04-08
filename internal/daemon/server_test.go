@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -856,5 +859,126 @@ func TestServer_ConfirmOpEndpoint_RejectsMissingPID(t *testing.T) {
 	assert.Equal(t, 1, resp.ExitCode)
 	assert.NotEmpty(t, resp.Stderr)
 	// The confirmation must still be pending — nothing was resolved.
+	assert.Equal(t, 1, store.Len())
+}
+
+// Token comparison runs through subtle.ConstantTimeCompare, so only an
+// exact byte-for-byte match authenticates. This test locks in that
+// behavior for several near-matches that have historically been
+// attempted — whitespace-padded, case-shifted, empty — so a future
+// refactor cannot loosen the comparison without a failing test.
+func TestServer_TokenRejection(t *testing.T) {
+	token := "correct-token"
+	addr, _ := startTestServer(t, token)
+
+	cases := []struct {
+		name string
+		sent string
+	}{
+		{"empty", ""},
+		{"wrong", "wrong-token"},
+		{"trailing whitespace", "correct-token "},
+		{"leading whitespace", " correct-token"},
+		{"case difference", "CORRECT-TOKEN"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := sendRequest(t, addr, Request{Token: tt.sent, Args: []string{"echo", "x"}})
+			assert.Equal(t, 1, resp.ExitCode)
+			assert.Contains(t, resp.Stderr, "authentication failed")
+		})
+	}
+}
+
+// The accept loop caps concurrent connections (server.go:72) to stop a
+// malicious client from pinning every goroutine and starving real work.
+// The test holds the cap full with slow-read connections and verifies
+// that connections over the cap are closed promptly by the server
+// rather than being queued indefinitely.
+func TestServer_ConnectionLimit(t *testing.T) {
+	token := "tok"
+	addr, _ := startTestServer(t, token)
+
+	// Open 64 conns and hold them open by not sending any request.
+	// The server will block in bufio.Reader.ReadBytes waiting for '\n'
+	// up to its 10s read deadline, so these stay in-flight for the
+	// duration of this test.
+	const cap = 64
+	holders := make([]net.Conn, 0, cap)
+	defer func() {
+		for _, c := range holders {
+			_ = c.Close()
+		}
+	}()
+	for i := 0; i < cap; i++ {
+		c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		require.NoError(t, err)
+		holders = append(holders, c)
+	}
+
+	// Give the server's accept loop a brief moment to process the 64
+	// accepts before we dial the over-cap batch.
+	time.Sleep(100 * time.Millisecond)
+
+	// Now dial beyond the cap. These should be accepted at the TCP
+	// layer but immediately closed by the server's default branch in
+	// the accept loop, so a Read returns EOF quickly. Accepted
+	// in-flight conns would instead stay open until their 10s deadline,
+	// so a 500ms read with io.EOF distinguishes cleanly.
+	const extra = 10
+	var rejected int32
+	var wg sync.WaitGroup
+	wg.Add(extra)
+	for i := 0; i < extra; i++ {
+		go func() {
+			defer wg.Done()
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err != nil {
+				atomic.AddInt32(&rejected, 1)
+				return
+			}
+			defer func() { _ = c.Close() }()
+			_ = c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			buf := make([]byte, 1)
+			_, rerr := c.Read(buf)
+			if errors.Is(rerr, io.EOF) {
+				atomic.AddInt32(&rejected, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.GreaterOrEqual(t, int(atomic.LoadInt32(&rejected)), extra-2,
+		"expected most of the over-cap conns to be rejected quickly (cap=%d, extra=%d)", cap, extra)
+}
+
+// The self-approval guard lives in PendingConfirmStore.Resolve (at
+// pending_confirm.go:66), and is already unit-tested at the store
+// level. This test proves the same guard fires when driven through
+// the confirm-op endpoint — so a future refactor that bypasses
+// Resolve or builds a parallel code path still cannot let a requester
+// approve their own destructive op.
+func TestServer_ConfirmOpEndpoint_SelfApprovalRejected(t *testing.T) {
+	token := "test-token"
+	addr, _, store := startTestServerWithConfirm(t, token)
+
+	const requesterPID = 12345
+	pc := &PendingConfirmation{
+		ID:        "self-approve",
+		ClientPID: requesterPID,
+		Decision:  make(chan bool, 1),
+	}
+	store.Add(pc)
+
+	// Same PID as the requester — must be rejected via the endpoint.
+	resp := sendRequest(t, addr, Request{
+		Token:     token,
+		ClientPID: requesterPID,
+		Args:      []string{"confirm-op", "self-approve", "yes"},
+	})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.Contains(t, resp.Stderr, "distinct clients")
+
+	// The entry must still be pending — no decision was delivered.
 	assert.Equal(t, 1, store.Len())
 }
