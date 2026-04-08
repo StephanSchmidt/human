@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,4 +199,49 @@ func TestPendingConfirmStore_ResolveTimeoutUnknownIDNoop(t *testing.T) {
 	// Must not panic or error for unknown id.
 	store.ResolveTimeout("nonexistent")
 	assert.Equal(t, 0, store.Len())
+}
+
+// Fire many goroutines against Add/Snapshot/Resolve/Len so the race
+// detector can see whether the mutex actually guards every path into
+// s.ops. Intended to be run with `go test -race`.
+func TestPendingConfirmStore_concurrentAccess(t *testing.T) {
+	store := NewPendingConfirmStore()
+	const workers = 10
+	const iterations = 100
+
+	var wg sync.WaitGroup
+	wg.Add(workers * 2)
+
+	// Writers add then resolve their own entries with a distinct
+	// approver PID so the self-approval guard does not reject them.
+	for w := 0; w < workers; w++ {
+		go func(workerID int) {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				id := fmt.Sprintf("w%d-i%d", workerID, i)
+				pc := &PendingConfirmation{
+					ID:        id,
+					ClientPID: 1000 + workerID,
+					CreatedAt: time.Now(),
+					Decision:  make(chan bool, 1),
+				}
+				store.Add(pc)
+				_ = store.Resolve(id, true, 9999)
+			}
+		}(w)
+	}
+
+	// Readers walk the store via Snapshot and Len.
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = store.Snapshot()
+				_ = store.Len()
+			}
+		}()
+	}
+
+	wg.Wait()
+	assert.Equal(t, 0, store.Len(), "all entries should have been resolved")
 }

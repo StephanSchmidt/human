@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -87,4 +88,43 @@ func TestWriteConnected_EmptySlice(t *testing.T) {
 
 	got := ReadConnected(path)
 	assert.Equal(t, []int{}, got)
+}
+
+// Drive concurrent Touch/Prune/PIDs against the race detector. Touch
+// and Prune mutate the internal map and PIDs walks it; without the
+// mutex on every path, this test trips a data-race failure.
+func TestConnectedTracker_concurrentAccess(t *testing.T) {
+	tr := NewConnectedTracker()
+	const workers = 10
+	const iterations = 100
+
+	var wg sync.WaitGroup
+	wg.Add(workers * 3)
+
+	for w := 0; w < workers; w++ {
+		base := w * 1000
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				tr.Touch(base + i)
+			}
+		}()
+	}
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = tr.PIDs()
+			}
+		}()
+	}
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				tr.Prune(1 * time.Hour)
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -179,6 +180,42 @@ func TestHookEventStore_Unsubscribe(t *testing.T) {
 		t.Fatal("unsubscribed channel should not receive further notifications")
 	default:
 	}
+}
+
+// Concurrent Append/Snapshot drivers for the race detector. The
+// existing UnsubscribeRaceAppend test targets the subscriber pathway;
+// this test targets the event-ring pathway and confirms Snapshot can
+// safely read while many producers append across sessions.
+func TestHookEventStore_concurrentAppendAndSnapshot(t *testing.T) {
+	store := NewHookEventStore()
+	const workers = 10
+	const iterations = 100
+
+	var wg sync.WaitGroup
+	wg.Add(workers * 2)
+
+	for w := 0; w < workers; w++ {
+		sessionID := fmt.Sprintf("s-%d", w)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				store.Append(hookevents.Event{
+					EventName: "Stop",
+					SessionID: sessionID,
+					Timestamp: time.Now(),
+				})
+			}
+		}()
+	}
+	for w := 0; w < workers; w++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				_ = store.Snapshot()
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // TestHookEventStore_UnsubscribeRaceAppend exercises concurrent Append and
