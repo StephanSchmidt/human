@@ -71,7 +71,10 @@ func (b *Bridge) ListenAndServe(ctx context.Context) error {
 	withRestrictiveUmask(func() {
 		ln, listenErr = net.Listen("unix", sockPath)
 	})
-	if listenErr != nil {
+	if listenErr != nil || ln == nil {
+		if listenErr == nil {
+			listenErr = errors.WithDetails("net.Listen returned nil listener without error")
+		}
 		return errors.WrapWithDetails(listenErr, "listening on unix socket", "path", sockPath)
 	}
 
@@ -101,6 +104,9 @@ func (b *Bridge) ListenAndServe(ctx context.Context) error {
 				return nil
 			}
 			b.Logger.Warn().Err(err).Msg("bridge accept error")
+			continue
+		}
+		if conn == nil {
 			continue
 		}
 		go b.handleConn(ctx, conn)

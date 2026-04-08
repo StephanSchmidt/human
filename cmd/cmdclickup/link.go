@@ -226,7 +226,7 @@ func upsertSection(desc, entry string) string {
 	// match "owner/repo#427". Commit entries end with "](" before the
 	// URL; PR entries end with " — " before the title.
 	entryPrefix := entryMatchPrefix(entry)
-	anchor := entryPrefix
+	var anchor string
 	if strings.HasPrefix(entryPrefix, "Commit: [`") {
 		anchor = entryPrefix + "("
 	} else {

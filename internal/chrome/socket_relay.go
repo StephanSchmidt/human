@@ -55,7 +55,10 @@ func (r *SocketRelay) ListenAndServe(ctx context.Context) error {
 	withRestrictiveUmask(func() {
 		ln, listenErr = net.Listen("unix", sockPath)
 	})
-	if listenErr != nil {
+	if listenErr != nil || ln == nil {
+		if listenErr == nil {
+			listenErr = errors.WithDetails("net.Listen returned nil listener without error")
+		}
 		return errors.WrapWithDetails(listenErr, "socket relay listen failed",
 			"path", sockPath)
 	}
