@@ -422,6 +422,37 @@ func TestDoExec_PathSanitizerHidesSecretsOnErrorStatus(t *testing.T) {
 	assert.NotContains(t, err.Error(), "SECRET_VALUE")
 }
 
+// TestDoExec_DoesNotFollowRedirects ensures the default HTTP client does
+// not follow 30x responses, so custom headers are never replayed to a
+// redirect target.
+func TestDoExec_DoesNotFollowRedirects(t *testing.T) {
+	var secondHit int32
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondHit = 1
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(second.Close)
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", second.URL+"/anything")
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(first.Close)
+
+	c := New(first.URL,
+		WithProviderName("test"),
+		WithHeader("X-Custom-Token", "leaked"),
+	)
+	_, err := c.Do(context.Background(), "GET", "/api/whatever", "", nil)
+	// The 302 response is surfaced as a non-2xx error by Do. What matters is
+	// that the second server never received a request with our header.
+	require.Error(t, err)
+	details := errors.AllDetails(err)
+	statusCode, _ := details["statusCode"].(int)
+	assert.Equal(t, http.StatusFound, statusCode, "Do must not follow the redirect")
+	assert.Equal(t, int32(0), secondHit, "second server must never receive the request")
+}
+
 // TestDecodeJSON_RejectsOversizedBody verifies that DecodeJSON refuses
 // to read a response body larger than MaxResponseBodyBytes.
 func TestDecodeJSON_RejectsOversizedBody(t *testing.T) {

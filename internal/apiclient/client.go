@@ -83,7 +83,15 @@ func New(baseURL string, opts ...Option) *Client {
 		opt(c)
 	}
 	if c.http == nil {
-		c.http = &http.Client{Timeout: c.timeout}
+		// Do not follow redirects by default. Custom headers (including
+		// auth tokens) would otherwise be replayed to the redirect target,
+		// and tracker APIs do not need redirect following for normal use.
+		c.http = &http.Client{
+			Timeout: c.timeout,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	return c
 }
