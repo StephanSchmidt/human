@@ -65,7 +65,16 @@ func (c *Client) SendMessage(ctx context.Context, text string) error {
 }
 
 // ListMessages returns recent messages from the configured Slack channel.
+// Clamps limit into the documented Slack range so negative / zero /
+// huge values become a sensible default instead of a confusing
+// `invalid_limit` response from the upstream API.
 func (c *Client) ListMessages(ctx context.Context, limit int) ([]MessageSummary, error) {
+	if limit < 1 {
+		limit = 100
+	}
+	if limit > 999 {
+		limit = 999
+	}
 	qv := url.Values{}
 	qv.Set("channel", c.channel)
 	qv.Set("limit", fmt.Sprintf("%d", limit))

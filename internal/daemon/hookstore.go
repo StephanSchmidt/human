@@ -8,7 +8,16 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
 )
 
-const maxHookEvents = 100
+// maxHookEventsPerSession caps per-session buffered events so a burst
+// from one session cannot evict other sessions from the ring. The
+// aggregate size stays bounded through maxHookEvents.
+const maxHookEventsPerSession = 200
+
+// maxHookEvents bounds the total number of events across all
+// sessions. Raised from the previous 100-event global ring because a
+// busy agent produces ~60 events per 30 tool calls and easily
+// overflows that bound before reaching visible pruning behaviour.
+const maxHookEvents = 10000
 
 // HookEventStore is a thread-safe ring buffer of recent hook events.
 // It stores raw events and can derive per-session snapshots on demand.
@@ -26,17 +35,35 @@ func NewHookEventStore() *HookEventStore {
 	}
 }
 
-// Append adds a hook event. If the buffer exceeds maxHookEvents, the oldest
-// event is dropped. All subscribers are notified.
+// Append adds a hook event. Before appending, events for the same
+// session beyond maxHookEventsPerSession are dropped so one chatty
+// client cannot push other sessions out of the shared buffer. The
+// aggregate cap then drops the oldest events across all sessions.
 func (s *HookEventStore) Append(evt hookevents.Event) {
 	s.mu.Lock()
+	// Per-session eviction: count existing events for this session and
+	// drop the oldest when the session cap is exceeded.
+	if evt.SessionID != "" {
+		sessionCount := 0
+		for _, e := range s.events {
+			if e.SessionID == evt.SessionID {
+				sessionCount++
+			}
+		}
+		if sessionCount >= maxHookEventsPerSession {
+			for i, e := range s.events {
+				if e.SessionID == evt.SessionID {
+					s.events = append(s.events[:i], s.events[i+1:]...)
+					break
+				}
+			}
+		}
+	}
 	s.events = append(s.events, evt)
 	if len(s.events) > maxHookEvents {
-		// Shift: drop oldest events beyond the limit.
 		copy(s.events, s.events[len(s.events)-maxHookEvents:])
 		s.events = s.events[:maxHookEvents]
 	}
-	// Copy subscribers slice under lock to iterate safely.
 	subs := make([]chan struct{}, len(s.subscribers))
 	copy(subs, s.subscribers)
 	s.mu.Unlock()

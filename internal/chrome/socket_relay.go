@@ -97,6 +97,13 @@ func (r *SocketRelay) ListenAndServe(ctx context.Context) error {
 			r.drainPending()
 			return nil
 		case r.pending <- conn:
+		default:
+			// Drop new connections when the pending queue is full
+			// rather than blocking the Accept loop, which would
+			// otherwise freeze the whole relay when Chrome
+			// reconnects rapidly (self-DoS).
+			r.Logger.Warn().Msg("socket relay pending queue full, dropping connection")
+			_ = conn.Close()
 		}
 	}
 }

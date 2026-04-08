@@ -57,7 +57,9 @@ func TestHookEventStore_MultipleSessions(t *testing.T) {
 func TestHookEventStore_RingBufferTrim(t *testing.T) {
 	store := NewHookEventStore()
 
-	// Fill beyond maxHookEvents.
+	// Flooding from a single session trips the per-session cap first,
+	// so the total tops out at maxHookEventsPerSession. The global cap
+	// still applies and is exercised by the MultiSession test below.
 	for i := 0; i < maxHookEvents+20; i++ {
 		store.Append(hookevents.Event{
 			EventName: "UserPromptSubmit",
@@ -69,7 +71,39 @@ func TestHookEventStore_RingBufferTrim(t *testing.T) {
 	store.mu.Lock()
 	count := len(store.events)
 	store.mu.Unlock()
-	assert.Equal(t, maxHookEvents, count, "should trim to maxHookEvents")
+	assert.Equal(t, maxHookEventsPerSession, count, "single-session flood must not exceed per-session cap")
+}
+
+func TestHookEventStore_PerSessionCapProtectsOtherSessions(t *testing.T) {
+	store := NewHookEventStore()
+
+	// Legitimate session posts a handful of events.
+	for i := 0; i < 5; i++ {
+		store.Append(hookevents.Event{
+			EventName: "UserPromptSubmit",
+			SessionID: "legit",
+			Timestamp: time.Now(),
+		})
+	}
+	// Abuser floods with far more than the per-session cap.
+	for i := 0; i < maxHookEventsPerSession*3; i++ {
+		store.Append(hookevents.Event{
+			EventName: "UserPromptSubmit",
+			SessionID: "flood",
+			Timestamp: time.Now(),
+		})
+	}
+
+	store.mu.Lock()
+	var legitCount int
+	for _, e := range store.events {
+		if e.SessionID == "legit" {
+			legitCount++
+		}
+	}
+	store.mu.Unlock()
+
+	assert.Equal(t, 5, legitCount, "legit session must survive a flood from another session")
 }
 
 func TestParseHookEventArgs(t *testing.T) {

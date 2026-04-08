@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/apiclient"
 )
 
@@ -143,9 +144,17 @@ func (c *Client) GetFileComments(ctx context.Context, fileKey string) ([]FileCom
 }
 
 // ExportImages exports nodes as images and returns temporary URLs.
+// Validates format client-side so users get a clear error instead of
+// confusing upstream Figma API responses for typos.
 func (c *Client) ExportImages(ctx context.Context, fileKey string, nodeIDs []string, format string) ([]ImageExport, error) {
 	if format == "" {
 		format = "png"
+	}
+	switch format {
+	case "png", "jpg", "svg", "pdf":
+	default:
+		return nil, errors.WithDetails("unsupported image format (use png, jpg, svg, or pdf)",
+			"format", format)
 	}
 	ids := encodeNodeIDs(nodeIDs)
 	query := url.Values{

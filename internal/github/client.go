@@ -372,7 +372,20 @@ func (c *Client) DeleteIssue(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	_ = resp.Body.Close()
+	// Decode the response and verify the state actually transitioned
+	// to closed. A workflow rule on the repository can silently
+	// re-open the issue under the same HTTP 200, so a bare status
+	// check would have the audit log record success for a no-op.
+	var ghIssue struct {
+		State string `json:"state"`
+	}
+	if decodeErr := apiclient.DecodeJSON(resp, &ghIssue); decodeErr != nil {
+		return errors.WrapWithDetails(decodeErr, "decoding close response", "key", key)
+	}
+	if ghIssue.State != "closed" {
+		return errors.WithDetails("issue did not transition to closed",
+			"key", key, "state", ghIssue.State)
+	}
 	return nil
 }
 
