@@ -904,9 +904,24 @@ func (m model) View() string {
 		b.WriteString(ip)
 	}
 
+	// Domains panel — bottom anchored, fills the gap between the issues
+	// panel and the footer. Height is computed from what View() has
+	// already emitted, the known footer height (2 lines: blank + footer),
+	// and the terminal height. When the terminal is too short to show
+	// any rows, the panel renders nothing rather than clipping the
+	// footer or the issues panel above it.
+	footer := renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0)
+	const footerLines = 2 // one blank separator + the footer line itself
+	consumed := strings.Count(b.String(), "\n")
+	available := m.height - consumed - footerLines
+	if dp := renderDomainsPanel(m.snap.NetworkEvents, w, available, m.snap.FetchedAt); dp != "" {
+		b.WriteByte('\n')
+		b.WriteString(dp)
+	}
+
 	// Footer.
 	b.WriteByte('\n')
-	b.WriteString(renderFooter(w, m.logMode, m.dispatchStatus, len(m.tabs()) > 0))
+	b.WriteString(footer)
 	b.WriteByte('\n')
 
 	return b.String()
@@ -1802,5 +1817,102 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w, cursor in
 	}
 
 	return b.String()
+}
+
+// renderDomainsPanel renders the ambient network activity panel at the
+// bottom of the TUI. It shows up to `available` rows, newest on top,
+// with consecutive-host dedup counts and a small source tag.
+//
+// available is the vertical budget in rows. When available <= 1 the
+// panel renders nothing so the footer cannot be clipped on very short
+// terminals. Zero events also collapses to nothing rather than leaving
+// a visible empty frame.
+func renderDomainsPanel(events []daemon.NetworkEvent, w, available int, now time.Time) string {
+	if available <= 1 || len(events) == 0 {
+		return ""
+	}
+
+	// Reserve one row for the panel header.
+	headerRow := "  " + subtleStyle.Render("Network")
+	rowBudget := available - 1
+	if rowBudget < 1 {
+		return ""
+	}
+
+	// Snapshot is oldest-first. Reverse to newest-on-top so the rows
+	// closest to the footer are the oldest ones the user is least
+	// likely to miss.
+	reversed := make([]daemon.NetworkEvent, len(events))
+	for i, e := range events {
+		reversed[len(events)-1-i] = e
+	}
+	if len(reversed) > rowBudget {
+		reversed = reversed[:rowBudget]
+	}
+
+	var b strings.Builder
+	b.WriteString(headerRow)
+	b.WriteByte('\n')
+
+	for i, evt := range reversed {
+		b.WriteString("    ")
+		b.WriteString(renderDomainRow(evt, w, now))
+		if i < len(reversed)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+// renderDomainRow formats a single network event row as
+//
+//	<source-tag>  <host[ xN]>   <relative time>
+//
+// The source tag colour encodes the status so block/fail read pink,
+// intercept reads gold, and forward/oauth read teal.
+func renderDomainRow(evt daemon.NetworkEvent, w int, now time.Time) string {
+	tagStyle := domainSourceStyle(evt.Source, evt.Status)
+	tag := tagStyle.Render(fmt.Sprintf("[%s]", evt.Source))
+
+	host := evt.Host
+	if host == "" {
+		host = "(no sni)"
+	}
+	if evt.Count > 1 {
+		host = fmt.Sprintf("%s x%d", host, evt.Count)
+	}
+	// Truncate the host to prevent overflow on narrow terminals. The
+	// lower bound of 10 keeps at least enough room for a short hostname
+	// plus the count suffix.
+	hostMax := w - 24
+	if hostMax < 10 {
+		hostMax = 10
+	}
+	host = truncate(host, hostMax)
+
+	rel := subtleStyle.Render(formatElapsed(now.Sub(evt.LastSeen)) + " ago")
+	return fmt.Sprintf("%s  %-*s  %s", tag, hostMax, host, rel)
+}
+
+// domainSourceStyle picks a colour based on source + status.
+// Blocks and failures are pink; intercepts are gold; forwards and
+// oauth callbacks are teal. Anything else falls back to subtle.
+func domainSourceStyle(source, status string) lipgloss.Style {
+	switch source {
+	case "fail":
+		return errorStyle
+	case "oauth":
+		return specialStyle
+	case "proxy":
+		switch status {
+		case "block":
+			return errorStyle
+		case "intercept":
+			return warningStyle
+		case "forward":
+			return specialStyle
+		}
+	}
+	return subtleStyle
 }
 
