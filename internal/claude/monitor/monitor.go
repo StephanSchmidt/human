@@ -13,6 +13,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/telegram"
 )
 
@@ -82,6 +83,9 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 
 	// Ambient network activity for the TUI domains panel.
 	snap.NetworkEvents = fetchDaemonNetworkEvents(snap.Daemon.Alive)
+
+	// Historical tool call stats from daemon SQLite store.
+	snap.ToolStats = fetchDaemonToolStats(snap.Daemon.Alive)
 
 	// Match sessions to instances, then mark daemon-connected ones.
 	snap.Instances = matchInstances(usages, sessionByPath)
@@ -241,6 +245,24 @@ func fetchDaemonNetworkEvents(daemonAlive bool) []daemon.NetworkEvent {
 		return nil
 	}
 	return events
+}
+
+// fetchDaemonToolStats reads pre-aggregated tool call statistics from
+// the daemon's SQLite store. Returns nil when the daemon is unavailable
+// so the TUI panel collapses gracefully.
+func fetchDaemonToolStats(daemonAlive bool) *stats.ToolStats {
+	if !daemonAlive {
+		return nil
+	}
+	info, err := daemon.ReadInfo()
+	if err != nil || info.Addr == "" {
+		return nil
+	}
+	ts, err := daemon.GetToolStats(info.Addr, info.Token)
+	if err != nil {
+		return nil
+	}
+	return ts
 }
 
 // overlayHookState updates sessions in byPath from hook snapshots.

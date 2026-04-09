@@ -6,6 +6,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -25,6 +26,10 @@ type Snapshot struct {
 	// from the daemon store, in insertion order (oldest first). The
 	// renderer reverses this for newest-on-top display.
 	NetworkEvents []daemon.NetworkEvent
+
+	// ToolStats holds pre-aggregated historical tool call statistics
+	// fetched from the daemon's SQLite store. Populated on fullTick only.
+	ToolStats *stats.ToolStats
 
 	// internal — carried forward between fetches, not used by renderers.
 	sessionByPath map[string]logparser.SessionState

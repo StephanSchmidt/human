@@ -14,6 +14,7 @@ import (
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude/hookevents"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -244,6 +245,19 @@ func GetPendingConfirms(addr, token string) ([]PendingConfirm, error) {
 		return nil, errors.WrapWithDetails(err, "invalid pending confirms JSON")
 	}
 	return results, nil
+}
+
+// GetToolStats fetches pre-aggregated tool call statistics from the daemon.
+func GetToolStats(addr, token string) (*stats.ToolStats, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"tool-stats"})
+	if err != nil {
+		return nil, err
+	}
+	var ts stats.ToolStats
+	if err := json.Unmarshal(out, &ts); err != nil {
+		return nil, errors.WrapWithDetails(err, "invalid tool stats JSON")
+	}
+	return &ts, nil
 }
 
 // SendConfirmDecision sends a confirmation decision for a pending destructive operation.

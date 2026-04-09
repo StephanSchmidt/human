@@ -25,6 +25,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/dispatch"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -880,28 +881,19 @@ func (m model) View() string {
 		return b.String()
 	}
 
-	// Instances (filtered by active tab).
-	filtered := m.filterInstances(m.snap.Instances)
-	if len(filtered) == 0 {
-		b.WriteString(subtleStyle.Render("  No active instances"))
-		b.WriteByte('\n')
-	} else {
-		for _, iv := range filtered {
-			m.renderInstance(&b, iv, w)
-		}
-		renderTotalLine(&b, m.snap.TotalUsage, w)
-	}
-
-	// Tmux panes.
-	if len(m.snap.Panes) > 0 {
-		b.WriteByte('\n')
-		b.WriteString(renderPanes(m.snap.Panes))
-	}
+	// Instances (filtered by active tab) and tmux panes.
+	m.renderInstancesAndPanes(&b, w)
 
 	// Issues panel.
 	if ip := renderIssuesPanel(m.issues, m.issuesFetched, w, m.issueCursor); ip != "" {
 		b.WriteByte('\n')
 		b.WriteString(ip)
+	}
+
+	// Tool stats panel.
+	if tp := renderToolStatsPanel(m.snap.ToolStats, w); tp != "" {
+		b.WriteByte('\n')
+		b.WriteString(tp)
 	}
 
 	// Domains panel — bottom anchored, fills the gap between the issues
@@ -1008,6 +1000,26 @@ func renderStatusLine(snap *monitor.Snapshot, w int) string {
 }
 
 // --- render: instances with progress bars ---
+
+// renderInstancesAndPanes writes instance rows (or an empty placeholder)
+// and tmux pane rows into the builder.
+func (m model) renderInstancesAndPanes(b *strings.Builder, w int) {
+	filtered := m.filterInstances(m.snap.Instances)
+	if len(filtered) == 0 {
+		b.WriteString(subtleStyle.Render("  No active instances"))
+		b.WriteByte('\n')
+	} else {
+		for _, iv := range filtered {
+			m.renderInstance(b, iv, w)
+		}
+		renderTotalLine(b, m.snap.TotalUsage, w)
+	}
+
+	if len(m.snap.Panes) > 0 {
+		b.WriteByte('\n')
+		b.WriteString(renderPanes(m.snap.Panes))
+	}
+}
 
 func (m model) renderInstance(b *strings.Builder, iv monitor.InstanceView, w int) {
 	b.WriteByte('\n')
@@ -1916,3 +1928,71 @@ func domainSourceStyle(source, status string) lipgloss.Style {
 	return subtleStyle
 }
 
+// renderToolStatsPanel renders the historical tool call statistics panel.
+// It shows tool call distribution from the pre-aggregated ToolStats in
+// the snapshot. Returns empty string when there are no events.
+func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
+	if ts == nil || ts.TotalEvents == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	header := fmt.Sprintf("  %s  %s  %s",
+		subtleStyle.Render("Tools (24h)"),
+		titleStyle.Render(fmt.Sprintf("%d", ts.TotalEvents)),
+		subtleStyle.Render("events"))
+	b.WriteString(header)
+	b.WriteByte('\n')
+
+	// Tool distribution: show up to 8 tools with a simple bar.
+	maxTools := 8
+	if len(ts.ByTool) < maxTools {
+		maxTools = len(ts.ByTool)
+	}
+
+	// Find max count for bar scaling.
+	maxCount := 0
+	for _, tc := range ts.ByTool[:maxTools] {
+		if tc.Count > maxCount {
+			maxCount = tc.Count
+		}
+	}
+
+	barWidth := w - 30
+	if barWidth < 10 {
+		barWidth = 10
+	}
+
+	for _, tc := range ts.ByTool[:maxTools] {
+		barLen := 0
+		if maxCount > 0 {
+			barLen = (tc.Count * barWidth) / maxCount
+			if barLen < 1 && tc.Count > 0 {
+				barLen = 1
+			}
+		}
+		bar := strings.Repeat("=", barLen)
+		_, _ = fmt.Fprintf(&b, "    %-10s %s %d\n",
+			titleStyle.Render(tc.ToolName),
+			specialStyle.Render(bar),
+			tc.Count)
+	}
+
+	// Success/failure summary from event names.
+	var successes, failures int
+	for _, enc := range ts.ByEventName {
+		switch enc.EventName {
+		case "PostToolUse":
+			successes += enc.Count
+		case "PostToolUseFailure":
+			failures += enc.Count
+		}
+	}
+	if successes+failures > 0 {
+		_, _ = fmt.Fprintf(&b, "    %s %d ok, %d failed",
+			subtleStyle.Render("Outcomes:"),
+			successes, failures)
+	}
+
+	return b.String()
+}

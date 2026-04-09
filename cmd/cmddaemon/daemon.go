@@ -26,6 +26,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/telegram"
 	"github.com/StephanSchmidt/human/internal/tracker"
 	"github.com/StephanSchmidt/human/internal/vault"
@@ -93,6 +94,8 @@ type daemonState struct {
 	connTracker   *daemon.ConnectedTracker
 	networkStore  *daemon.NetworkEventStore
 	vaultResolver *vault.Resolver
+	statsStore    *stats.StatsStore
+	statsWriter   *stats.Writer
 }
 
 // initDaemon performs the early initialization steps for the daemon: token,
@@ -141,6 +144,23 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 	networkStore := daemon.NewNetworkEventStore()
 	confirmStore := daemon.NewPendingConfirmStore()
 
+	statsStore, err := stats.NewStatsStore(stats.DefaultDBPath())
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to open stats database, tool persistence disabled")
+		statsStore = nil
+	}
+
+	var statsWriter *stats.Writer
+	if statsStore != nil {
+		// Prune old events on startup.
+		if deleted, pruneErr := statsStore.Prune(ctx); pruneErr != nil {
+			logger.Warn().Err(pruneErr).Msg("stats prune on startup failed")
+		} else if deleted > 0 {
+			logger.Info().Int64("deleted", deleted).Msg("pruned old tool events")
+		}
+		statsWriter = stats.NewWriter(ctx, statsStore, logger)
+	}
+
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -150,6 +170,11 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 				return
 			case <-ticker.C:
 				confirmStore.Cleanup(2 * 5 * time.Minute)
+				if statsStore != nil {
+					if _, pruneErr := statsStore.Prune(ctx); pruneErr != nil {
+						logger.Warn().Err(pruneErr).Msg("periodic stats prune failed")
+					}
+				}
 			}
 		}
 	}()
@@ -167,6 +192,8 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		TrackerDiagnoser: trackerDiagnoserFunc(projectRegistry, vaultResolver),
 		Projects:         projectRegistry,
 		PendingConfirms:  confirmStore,
+		StatsWriter:      statsWriter,
+		StatsStore:       statsStore,
 	}
 
 	return &daemonState{
@@ -177,6 +204,8 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		connTracker:   connTracker,
 		networkStore:  networkStore,
 		vaultResolver: vaultResolver,
+		statsStore:    statsStore,
+		statsWriter:   statsWriter,
 	}, nil
 }
 
@@ -192,6 +221,12 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	defer RemovePidFile()
 	defer daemon.RemoveInfo()
 	defer ds.stop()
+	if ds.statsWriter != nil {
+		defer ds.statsWriter.Close()
+	}
+	if ds.statsStore != nil {
+		defer func() { _ = ds.statsStore.Close() }()
+	}
 
 	out := cmd.OutOrStdout()
 	ctx := ds.ctx

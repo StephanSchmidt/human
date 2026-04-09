@@ -21,6 +21,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/env"
 	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -46,6 +47,8 @@ type Server struct {
 	TrackerDiagnoser func(dir string) []tracker.TrackerStatus // injected; diagnoses tracker status with vault resolution
 	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
 	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
+	StatsWriter     *stats.Writer                         // async SQLite writer for tool event persistence; nil disables
+	StatsStore      *stats.StatsStore                     // for query-time aggregation; nil disables tool-stats route
 
 	wg sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }
@@ -266,6 +269,9 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 	case "confirm-op":
 		s.handleConfirmOp(conn, args[1:], clientPID)
 		return true
+	case "tool-stats":
+		s.handleToolStats(conn)
+		return true
 	}
 
 	// Intercept browser commands with OAuth redirect_uri for relay.
@@ -287,6 +293,9 @@ func (s *Server) handleHookEvent(conn net.Conn, args []string) {
 	if s.HookEvents != nil {
 		evt := ParseHookEventArgs(args)
 		s.HookEvents.Append(evt)
+		if s.StatsWriter != nil {
+			s.StatsWriter.Send(evt)
+		}
 	}
 	resp := Response{Stdout: "ok\n"}
 	enc := json.NewEncoder(conn)
@@ -371,6 +380,32 @@ func (s *Server) handleTrackerIssues(conn net.Conn) {
 		return
 	}
 	resp := Response{Stdout: string(data) + "\n"}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleToolStats returns pre-aggregated tool call statistics as JSON.
+// The query covers the last 24 hours by default.
+func (s *Server) handleToolStats(conn net.Conn) {
+	var out string
+	if s.StatsStore != nil {
+		now := time.Now().UTC()
+		since := now.Add(-24 * time.Hour)
+		ts, err := s.StatsStore.BuildToolStats(context.Background(), since, now)
+		if err != nil {
+			s.writeError(conn, err.Error(), 1)
+			return
+		}
+		data, err := json.Marshal(ts)
+		if err != nil {
+			s.writeError(conn, err.Error(), 1)
+			return
+		}
+		out = string(data) + "\n"
+	} else {
+		out = "{}\n"
+	}
+	resp := Response{Stdout: out}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
 }
