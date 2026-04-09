@@ -19,6 +19,7 @@ require (
 	github.com/yuin/goldmark v1.8.2
 	gitlab.com/tozd/go/errors v0.11.1
 	golang.org/x/sys v0.43.0
+	golang.org/x/term v0.40.0
 	modernc.org/sqlite v1.48.1
 )
 
@@ -542,7 +543,6 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4 // indirect
-	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect

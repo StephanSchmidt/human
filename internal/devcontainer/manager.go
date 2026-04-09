@@ -66,14 +66,13 @@ func (m *Manager) Up(ctx context.Context, opts UpOptions) (*Meta, error) {
 		containerName = ContainerName(projectDir)
 	}
 
-	// 2. Check for existing container.
-	existing, err := m.findExistingContainer(ctx, projectDir)
+	// 2. Check for existing container with this specific name.
+	existing, err := m.findContainerByName(ctx, containerName)
 	if err == nil {
 		meta, handleErr := m.handleExisting(ctx, existing, cfg, hash, containerName, projectDir, out)
 		if handleErr == nil {
 			return meta, nil
 		}
-		// Config changed: old container removed, fall through to fresh build.
 		m.Logger.Info().Msg("rebuilding after config change")
 	}
 
@@ -110,6 +109,8 @@ func (m *Manager) createFresh(ctx context.Context, cfg *DevcontainerConfig, proj
 	if sourceDir == "" {
 		sourceDir = projectDir
 	}
+	// Docker bind mounts require absolute paths.
+	sourceDir, _ = filepath.Abs(sourceDir)
 	createOpts := m.buildCreateOptions(cfg, sourceDir, containerName, imageName, workspaceDir, hash, opts.DaemonInfo)
 	ParseRunArgs(cfg.RunArgs, &createOpts, m.Logger)
 
@@ -156,22 +157,27 @@ func (m *Manager) createFresh(ctx context.Context, cfg *DevcontainerConfig, proj
 	return &meta, nil
 }
 
-// findExistingContainer looks for a human-managed container for this project.
-func (m *Manager) findExistingContainer(ctx context.Context, projectDir string) (ContainerSummary, error) {
+// findContainerByName looks for a managed container with the given name.
+func (m *Manager) findContainerByName(ctx context.Context, name string) (ContainerSummary, error) {
 	containers, err := m.Docker.ContainerList(ctx, ContainerListOptions{
-		All: true,
+		All:        true,
+		NameFilter: name,
 		LabelFilters: map[string]string{
 			LabelManaged: "true",
-			LabelProject: projectDir,
 		},
 	})
 	if err != nil {
 		return ContainerSummary{}, err
 	}
-	if len(containers) == 0 {
-		return ContainerSummary{}, errors.WithDetails("no existing container found")
+	// Docker's name filter is a regex match, so verify exact match.
+	for _, c := range containers {
+		for _, n := range c.Names {
+			if strings.TrimPrefix(n, "/") == name {
+				return c, nil
+			}
+		}
 	}
-	return containers[0], nil
+	return ContainerSummary{}, errors.WithDetails("no container found", "name", name)
 }
 
 // handleExisting handles the case where a container already exists for this project.
@@ -248,7 +254,6 @@ func (m *Manager) handleExisting(ctx context.Context, existing ContainerSummary,
 
 // buildCreateOptions creates ContainerCreateOptions from the devcontainer config.
 func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, containerName, imageName, workspaceDir, hash string, daemonInfo *daemon.DaemonInfo) ContainerCreateOptions {
-	// Merge environment variables.
 	env := make([]string, 0)
 	for k, v := range cfg.ContainerEnv {
 		env = append(env, k+"="+v)
@@ -268,7 +273,6 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, contai
 		)
 	}
 
-	// Build bind mounts.
 	binds := []string{
 		projectDir + ":" + workspaceDir,
 	}
@@ -301,7 +305,7 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, contai
 		}
 	}
 
-	labels := ManagedLabels(projectDir, SanitizeName(filepath.Base(projectDir)), hash)
+	labels := ManagedLabels(projectDir, containerName, hash)
 
 	opts := ContainerCreateOptions{
 		Name:        containerName,
@@ -507,33 +511,3 @@ func runHostCommand(cmd interface{}, projectDir string) error {
 	}
 }
 
-// ResolveContainer finds the container ID for a project directory or name.
-// Checks metadata first, then falls back to Docker label lookup.
-func (m *Manager) ResolveContainer(projectDir string) (Meta, error) {
-	absDir, _ := filepath.Abs(projectDir)
-	if meta, found := FindMetaByProject(absDir); found {
-		return meta, nil
-	}
-	name := SanitizeName(filepath.Base(projectDir))
-	if meta, err := ReadMeta(name); err == nil {
-		return meta, nil
-	}
-
-	// Fallback: find by Docker labels when metadata file is missing.
-	container, err := m.findExistingContainer(context.Background(), absDir)
-	if err != nil {
-		return Meta{}, errors.WithDetails("no devcontainer found", "project", projectDir)
-	}
-	meta := Meta{
-		Name:          name,
-		ContainerID:   container.ID,
-		ContainerName: ContainerName(absDir),
-		ImageName:     container.Image,
-		ProjectDir:    absDir,
-		Status:        Status(container.State),
-		ConfigHash:    container.Labels[LabelConfigHash],
-	}
-	// Persist so future lookups are fast.
-	_ = WriteMeta(meta)
-	return meta, nil
-}

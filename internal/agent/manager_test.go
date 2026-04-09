@@ -30,12 +30,12 @@ func TestIsValidName(t *testing.T) {
 func TestBuildClaudeArgs(t *testing.T) {
 	mgr := &Manager{}
 
-	args := mgr.buildClaudeArgs(StartOpts{})
+	args := mgr.BuildClaudeArgs(StartOpts{})
 	if len(args) != 1 || args[0] != "--permission-mode=auto" {
 		t.Errorf("default args = %v", args)
 	}
 
-	args = mgr.buildClaudeArgs(StartOpts{SkipPerms: true, Model: "opus"})
+	args = mgr.BuildClaudeArgs(StartOpts{SkipPerms: true, Model: "opus"})
 	found := map[string]bool{}
 	for _, a := range args {
 		found[a] = true

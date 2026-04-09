@@ -118,17 +118,3 @@ func DeleteMeta(name string) error {
 	return nil
 }
 
-// FindMetaByProject finds devcontainer metadata matching a project directory.
-func FindMetaByProject(projectDir string) (Meta, bool) {
-	absDir, _ := filepath.Abs(projectDir)
-	metas, err := ListMetas()
-	if err != nil {
-		return Meta{}, false
-	}
-	for _, m := range metas {
-		if m.ProjectDir == absDir {
-			return m, true
-		}
-	}
-	return Meta{}, false
-}

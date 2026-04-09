@@ -8,7 +8,6 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	dockerimage "github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -154,6 +153,9 @@ func (e *engineClient) ContainerList(ctx context.Context, opts ContainerListOpti
 	for k, v := range opts.LabelFilters {
 		f.Add("label", k+"="+v)
 	}
+	if opts.NameFilter != "" {
+		f.Add("name", opts.NameFilter)
+	}
 	list, err := e.cli.ContainerList(ctx, container.ListOptions{
 		All:     opts.All,
 		Filters: f,
@@ -245,12 +247,6 @@ func (e *engineClient) Close() error {
 // Verify interface compliance.
 var _ DockerClient = (*engineClient)(nil)
 
-// Ensure stdcopy is available for callers that need to demux exec output.
-// Re-exported to avoid exposing docker SDK internals in the interface.
+// StdCopy re-exports stdcopy.StdCopy so callers within the devcontainer
+// package can demux exec output without importing the Docker SDK directly.
 var StdCopy = stdcopy.StdCopy
-
-// MountSpec converts a bind mount string ("src:dst:opts") to a docker mount.Mount.
-// This is exposed for container creation helpers that need to parse mount strings.
-func MountSpec(bind string) mount.Mount {
-	return mount.Mount{Type: mount.TypeBind, Source: bind}
-}

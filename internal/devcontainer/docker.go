@@ -121,6 +121,7 @@ type ContainerConfigInfo struct {
 type ContainerListOptions struct {
 	All          bool              // include stopped containers
 	LabelFilters map[string]string // label key=value pairs
+	NameFilter   string            // filter by container name (Docker regex match)
 }
 
 // ContainerSummary holds basic container metadata from listing.

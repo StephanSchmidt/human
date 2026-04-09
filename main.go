@@ -282,7 +282,6 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	agentCmd.GroupID = "utility"
 	rootCmd.AddCommand(agentCmd)
 
-
 	pingCmd := cmdping.BuildPingCmd()
 	pingCmd.GroupID = "utility"
 	rootCmd.AddCommand(pingCmd)

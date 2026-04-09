@@ -156,7 +156,7 @@ func InstallFeatures(ctx context.Context, docker DockerClient, puller FeaturePul
 func copyAndRunFeature(ctx context.Context, docker DockerClient, containerID string, tarData []byte, env []string, logger zerolog.Logger) error {
 	// Create a staging directory inside the container.
 	mkdirCmd := []string{"/bin/sh", "-c", "rm -rf /tmp/devcontainer-feature && mkdir -p /tmp/devcontainer-feature"}
-	if err := execSimple(ctx, docker, containerID, mkdirCmd, nil, logger); err != nil {
+	if err := execInContainer(ctx, docker, containerID, "root", mkdirCmd, nil, logger); err != nil {
 		return errors.WrapWithDetails(err, "creating feature staging directory")
 	}
 
@@ -168,54 +168,14 @@ func copyAndRunFeature(ctx context.Context, docker DockerClient, containerID str
 	// Make install.sh executable and run it from the feature directory.
 	runCmd := []string{"/bin/sh", "-c",
 		"cd /tmp/devcontainer-feature && chmod +x install.sh && ./install.sh"}
-	if err := execSimple(ctx, docker, containerID, runCmd, env, logger); err != nil {
+	if err := execInContainer(ctx, docker, containerID, "root", runCmd, env, logger); err != nil {
 		return errors.WrapWithDetails(err, "running install.sh")
 	}
 
 	// Clean up.
 	cleanCmd := []string{"/bin/sh", "-c", "rm -rf /tmp/devcontainer-feature"}
-	_ = execSimple(ctx, docker, containerID, cleanCmd, nil, logger)
+	_ = execInContainer(ctx, docker, containerID, "root", cleanCmd, nil, logger)
 
-	return nil
-}
-
-// execSimple runs a command in a container as root and returns an error if it fails.
-func execSimple(ctx context.Context, docker DockerClient, containerID string, cmd, env []string, logger zerolog.Logger) error {
-	execID, err := docker.ExecCreate(ctx, containerID, cmd, ExecOptions{
-		User:         "root",
-		Env:          env,
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return err
-	}
-
-	attach, err := docker.ExecAttach(ctx, execID)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = attach.Close() }()
-
-	var stdout, stderr bytes.Buffer
-	_, _ = StdCopy(&stdout, &stderr, attach.Reader)
-
-	if stdout.Len() > 0 {
-		logger.Debug().Str("stdout", truncate(stdout.String(), 500)).Msg("feature exec output")
-	}
-	if stderr.Len() > 0 {
-		logger.Debug().Str("stderr", truncate(stderr.String(), 500)).Msg("feature exec stderr")
-	}
-
-	inspect, err := docker.ExecInspect(ctx, execID)
-	if err != nil {
-		return err
-	}
-	if inspect.ExitCode != 0 {
-		return errors.WithDetails("exec failed",
-			"exit_code", inspect.ExitCode,
-			"stderr", truncate(stderr.String(), 1000))
-	}
 	return nil
 }
 
@@ -268,9 +228,3 @@ func sortedFeatureRefs(features map[string]interface{}) []string {
 	return refs
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
-}

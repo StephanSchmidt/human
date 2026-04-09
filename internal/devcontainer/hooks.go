@@ -29,7 +29,7 @@ func RunHook(ctx context.Context, docker DockerClient, containerID, user string,
 		if v == "" {
 			return nil
 		}
-		return execInContainer(ctx, docker, containerID, user, []string{"/bin/sh", "-c", v}, logger)
+		return execInContainer(ctx, docker, containerID, user, []string{"/bin/sh", "-c", v}, nil, logger)
 
 	case []interface{}:
 		args := make([]string, 0, len(v))
@@ -44,7 +44,7 @@ func RunHook(ctx context.Context, docker DockerClient, containerID, user string,
 		if len(args) == 0 {
 			return nil
 		}
-		return execInContainer(ctx, docker, containerID, user, args, logger)
+		return execInContainer(ctx, docker, containerID, user, args, nil, logger)
 
 	case map[string]interface{}:
 		return runParallelHooks(ctx, docker, containerID, user, v, logger)
@@ -86,11 +86,12 @@ func runParallelHooks(ctx context.Context, docker DockerClient, containerID, use
 }
 
 // execInContainer runs a command inside a container and waits for completion.
-func execInContainer(ctx context.Context, docker DockerClient, containerID, user string, cmd []string, logger zerolog.Logger) error {
+func execInContainer(ctx context.Context, docker DockerClient, containerID, user string, cmd, env []string, logger zerolog.Logger) error {
 	logger.Info().Strs("cmd", cmd).Str("user", user).Msg("exec in container")
 
 	execID, err := docker.ExecCreate(ctx, containerID, cmd, ExecOptions{
 		User:         user,
+		Env:          env,
 		AttachStdout: true,
 		AttachStderr: true,
 	})

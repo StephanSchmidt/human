@@ -122,38 +122,6 @@ func TestDeleteMeta(t *testing.T) {
 	}
 }
 
-func TestFindMetaByProject(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	projDir := filepath.Join(tmp, "myproject")
-	if err := os.MkdirAll(projDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := WriteMeta(Meta{
-		Name:       "myproject",
-		ProjectDir: projDir,
-		Status:     StatusRunning,
-		CreatedAt:  time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	m, found := FindMetaByProject(projDir)
-	if !found {
-		t.Fatal("expected to find meta by project dir")
-	}
-	if m.Name != "myproject" {
-		t.Errorf("Name = %q, want %q", m.Name, "myproject")
-	}
-
-	_, found = FindMetaByProject("/nonexistent")
-	if found {
-		t.Error("should not find meta for nonexistent project")
-	}
-}
-
 func TestDevcontainersDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)

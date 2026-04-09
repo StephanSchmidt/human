@@ -11,12 +11,25 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/agent"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/devcontainer"
 )
+
+func isTerminal(fd uintptr) bool {
+	return term.IsTerminal(int(fd)) // #nosec G115 -- fd is from os.Stdin.Fd(), safe range
+}
+
+// dockerExecFlag returns "-it" if stdin is a TTY, "-i" otherwise.
+func dockerExecFlag() string {
+	if isTerminal(os.Stdin.Fd()) {
+		return "-it"
+	}
+	return "-i"
+}
 
 // BuildAgentCmd returns the parent "agent" command with start/stop/list/attach subcommands.
 func BuildAgentCmd() *cobra.Command {
@@ -103,21 +116,13 @@ Examples:
 
 			// Interactive mode: exec into the container with Claude.
 			if interactive {
-				claudeArgs := []string{"exec", "-it", meta.ContainerName, "claude"}
-				if skipPerms {
-					claudeArgs = append(claudeArgs, "--dangerously-skip-permissions")
-				} else {
-					claudeArgs = append(claudeArgs, "--permission-mode=auto")
-				}
-				if model != "" {
-					claudeArgs = append(claudeArgs, "--model", model)
-				}
-
 				dockerPath, lookErr := exec.LookPath("docker")
 				if lookErr != nil {
 					return errors.WithDetails("docker not found in PATH")
 				}
-				return syscallExec(dockerPath, append([]string{"docker"}, claudeArgs...), os.Environ())
+				claudeFlags := mgr.BuildClaudeArgs(opts)
+				dockerArgs := append([]string{"docker", "exec", dockerExecFlag(), meta.ContainerName, "claude"}, claudeFlags...)
+				return syscallExec(dockerPath, dockerArgs, os.Environ())
 			}
 
 			out := cmd.OutOrStdout()
@@ -231,7 +236,7 @@ func buildAttachCmd() *cobra.Command {
 				return errors.WithDetails("docker not found in PATH")
 			}
 
-			return syscallExec(dockerPath, []string{"docker", "exec", "-it", containerName, "bash"}, os.Environ())
+			return syscallExec(dockerPath, []string{"docker", "exec", dockerExecFlag(), containerName, "bash"}, os.Environ())
 		},
 	}
 }
