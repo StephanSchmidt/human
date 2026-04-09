@@ -4,23 +4,23 @@ import "encoding/json"
 
 // cuTask is the ClickUp API representation of a task.
 type cuTask struct {
-	ID           string          `json:"id"`
-	CustomID     string          `json:"custom_id"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	TextContent  string          `json:"text_content"`
-	Status       cuStatus        `json:"status"`
-	Assignees    []cuUser        `json:"assignees"`
-	Creator      cuUser          `json:"creator"`
-	DateCreated  string          `json:"date_created"` // unix ms as string
-	DateUpdated  string          `json:"date_updated"` // unix ms as string
-	URL          string          `json:"url"`
-	List         cuListRef       `json:"list"`
-	Priority     *cuPriority     `json:"priority"`
-	Parent       string          `json:"parent"`        // parent task ID (subtask support)
-	Tags         []cuTag         `json:"tags"`           // task tags/labels
-	CustomFields        []cuCustomField `json:"custom_fields"`         // custom field values
-	MarkdownDescription string          `json:"markdown_description"`  // markdown source (only with include_markdown_description=true)
+	ID                  string          `json:"id"`
+	CustomID            string          `json:"custom_id"`
+	Name                string          `json:"name"`
+	Description         string          `json:"description"`
+	TextContent         string          `json:"text_content"`
+	Status              cuStatus        `json:"status"`
+	Assignees           []cuUser        `json:"assignees"`
+	Creator             cuUser          `json:"creator"`
+	DateCreated         string          `json:"date_created"` // unix ms as string
+	DateUpdated         string          `json:"date_updated"` // unix ms as string
+	URL                 string          `json:"url"`
+	List                cuListRef       `json:"list"`
+	Priority            *cuPriority     `json:"priority"`
+	Parent              string          `json:"parent"`               // parent task ID (subtask support)
+	Tags                []cuTag         `json:"tags"`                 // task tags/labels
+	CustomFields        []cuCustomField `json:"custom_fields"`        // custom field values
+	MarkdownDescription string          `json:"markdown_description"` // markdown source (only with include_markdown_description=true)
 }
 
 // cuStatus is an embedded status within a task or list.

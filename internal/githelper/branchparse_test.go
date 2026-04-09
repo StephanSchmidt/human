@@ -39,8 +39,8 @@ func TestTaskIDFromBranch(t *testing.T) {
 		{"CI-5-pipeline", ""},
 
 		// Edge cases
-		{"CU-", ""},       // no ID after prefix
-		{"CU--desc", ""},  // hyphen is not alphanumeric
+		{"CU-", ""},      // no ID after prefix
+		{"CU--desc", ""}, // hyphen is not alphanumeric
 		{"", ""},
 	}
 

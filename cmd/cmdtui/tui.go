@@ -202,17 +202,21 @@ type snapshotMsg struct {
 	gen  uint64
 }
 
-type logModeMsg    string              // result of log-mode set/get from daemon
-type projectsMsg   []daemon.ProjectInfo // projects loaded from daemon info
+type logModeMsg string                // result of log-mode set/get from daemon
+type projectsMsg []daemon.ProjectInfo // projects loaded from daemon info
 
-type issueTickMsg  time.Time
+type issueTickMsg time.Time
 type issuesResultMsg struct {
 	results []trackerIssues
 }
 
-type pendingConfirmsMsg  []daemon.PendingConfirm
-type confirmDecisionMsg  struct{ err error }
-type createResultMsg     struct{ key string; trackerKind string; err error }
+type pendingConfirmsMsg []daemon.PendingConfirm
+type confirmDecisionMsg struct{ err error }
+type createResultMsg struct {
+	key         string
+	trackerKind string
+	err         error
+}
 
 // --- tea.Model ---
 
@@ -1775,7 +1779,7 @@ func renderIssuesPanel(groups []trackerIssues, fetchedAt time.Time, w, cursor in
 
 	header := "  " + subtleStyle.Render("Pipeline")
 	if !fetchedAt.IsZero() {
-		header += "  " + subtleStyle.Render(formatElapsed(time.Since(fetchedAt)) + " ago")
+		header += "  " + subtleStyle.Render(formatElapsed(time.Since(fetchedAt))+" ago")
 	}
 	b.WriteString(header)
 	b.WriteByte('\n')

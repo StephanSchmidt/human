@@ -431,7 +431,7 @@ func TestCycleLogMode(t *testing.T) {
 	assert.Equal(t, "off", cycleLogMode("meta"))
 	assert.Equal(t, "full", cycleLogMode("off"))
 	assert.Equal(t, "full", cycleLogMode(""))      // unknown defaults to full
-	assert.Equal(t, "full", cycleLogMode("bogus"))  // unknown defaults to full
+	assert.Equal(t, "full", cycleLogMode("bogus")) // unknown defaults to full
 }
 
 func TestModelUpdate_LogModeKey(t *testing.T) {

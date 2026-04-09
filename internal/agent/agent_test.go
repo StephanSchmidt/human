@@ -8,22 +8,19 @@ import (
 )
 
 func TestWriteReadMeta(t *testing.T) {
-	// Use a temp dir for metadata.
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpDir)
-	defer func() { _ = os.Setenv("HOME", origHome) }()
 
 	meta := Meta{
-		Name:        "test-agent",
-		SessionName: TmuxSessionName("test-agent"),
-		Cwd:         "/home/user/project",
-		Prompt:      "implement feature X",
-		TicketKey:   "HUM-42",
-		Status:      StatusRunning,
-		CreatedAt:   time.Now().Truncate(time.Second),
-		SkipPerms:   true,
-		Model:       "opus",
+		Name:          "test-agent",
+		ContainerID:   "abc123",
+		ContainerName: ContainerName("test-agent"),
+		Cwd:           "/home/user/project",
+		Prompt:        "implement feature X",
+		Status:        StatusRunning,
+		CreatedAt:     time.Now().Truncate(time.Second),
+		SkipPerms:     true,
+		Model:         "opus",
 	}
 
 	if err := WriteMeta(meta); err != nil {
@@ -38,17 +35,14 @@ func TestWriteReadMeta(t *testing.T) {
 	if got.Name != meta.Name {
 		t.Errorf("Name = %q, want %q", got.Name, meta.Name)
 	}
-	if got.SessionName != meta.SessionName {
-		t.Errorf("SessionName = %q, want %q", got.SessionName, meta.SessionName)
+	if got.ContainerName != meta.ContainerName {
+		t.Errorf("ContainerName = %q, want %q", got.ContainerName, meta.ContainerName)
 	}
 	if got.Cwd != meta.Cwd {
 		t.Errorf("Cwd = %q, want %q", got.Cwd, meta.Cwd)
 	}
 	if got.Prompt != meta.Prompt {
 		t.Errorf("Prompt = %q, want %q", got.Prompt, meta.Prompt)
-	}
-	if got.TicketKey != meta.TicketKey {
-		t.Errorf("TicketKey = %q, want %q", got.TicketKey, meta.TicketKey)
 	}
 	if got.Status != meta.Status {
 		t.Errorf("Status = %q, want %q", got.Status, meta.Status)
@@ -65,8 +59,7 @@ func TestWriteReadMeta(t *testing.T) {
 }
 
 func TestListMetas_empty(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
 
 	metas, err := ListMetas()
 	if err != nil {
@@ -78,17 +71,15 @@ func TestListMetas_empty(t *testing.T) {
 }
 
 func TestListMetas_multiple(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
 
 	for _, name := range []string{"agent-a", "agent-b"} {
-		meta := Meta{
-			Name:        name,
-			SessionName: TmuxSessionName(name),
-			Status:      StatusRunning,
-			CreatedAt:   time.Now(),
-		}
-		if err := WriteMeta(meta); err != nil {
+		if err := WriteMeta(Meta{
+			Name:          name,
+			ContainerName: ContainerName(name),
+			Status:        StatusRunning,
+			CreatedAt:     time.Now(),
+		}); err != nil {
 			t.Fatalf("WriteMeta(%s): %v", name, err)
 		}
 	}
@@ -103,16 +94,14 @@ func TestListMetas_multiple(t *testing.T) {
 }
 
 func TestDeleteMeta(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
 
-	meta := Meta{
-		Name:        "delete-me",
-		SessionName: TmuxSessionName("delete-me"),
-		Status:      StatusStopped,
-		CreatedAt:   time.Now(),
-	}
-	if err := WriteMeta(meta); err != nil {
+	if err := WriteMeta(Meta{
+		Name:          "delete-me",
+		ContainerName: ContainerName("delete-me"),
+		Status:        StatusStopped,
+		CreatedAt:     time.Now(),
+	}); err != nil {
 		t.Fatalf("WriteMeta: %v", err)
 	}
 
@@ -120,26 +109,24 @@ func TestDeleteMeta(t *testing.T) {
 		t.Fatalf("DeleteMeta: %v", err)
 	}
 
-	_, err := ReadMeta("delete-me")
-	if err == nil {
-		t.Fatal("expected error reading deleted meta, got nil")
+	if _, err := ReadMeta("delete-me"); err == nil {
+		t.Fatal("expected error reading deleted meta")
 	}
 }
 
-func TestTmuxSessionName(t *testing.T) {
-	got := TmuxSessionName("my-agent")
+func TestContainerName(t *testing.T) {
+	got := ContainerName("my-agent")
 	want := "human-agent-my-agent"
 	if got != want {
-		t.Errorf("TmuxSessionName = %q, want %q", got, want)
+		t.Errorf("ContainerName = %q, want %q", got, want)
 	}
 }
 
 func TestMetaPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
 
 	got := MetaPath("test")
-	want := filepath.Join(tmpDir, ".human", "agents", "test.json")
+	want := filepath.Join(os.Getenv("HOME"), ".human", "agents", "test.json")
 	if got != want {
 		t.Errorf("MetaPath = %q, want %q", got, want)
 	}

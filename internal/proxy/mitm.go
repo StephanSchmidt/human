@@ -84,11 +84,11 @@ type Interceptor interface {
 // TrafficLog is a single JSON-lines entry written to the traffic log.
 type TrafficLog struct {
 	Timestamp time.Time `json:"ts"`
-	Direction string    `json:"dir"`              // "request" or "response"
+	Direction string    `json:"dir"` // "request" or "response"
 	Host      string    `json:"host"`
-	Method    string    `json:"method,omitempty"`  // request only
-	Path      string    `json:"path,omitempty"`    // request only
-	Status    int       `json:"status,omitempty"`  // response only
+	Method    string    `json:"method,omitempty"` // request only
+	Path      string    `json:"path,omitempty"`   // request only
+	Status    int       `json:"status,omitempty"` // response only
 	Body      string    `json:"body"`
 	BodySize  int64     `json:"body_size"`
 }

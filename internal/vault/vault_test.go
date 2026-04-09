@@ -99,5 +99,5 @@ type fakeProvider struct {
 	resolve    func(ref string) (string, error)
 }
 
-func (f *fakeProvider) CanResolve(ref string) bool       { return f.canResolve(ref) }
+func (f *fakeProvider) CanResolve(ref string) bool         { return f.canResolve(ref) }
 func (f *fakeProvider) Resolve(ref string) (string, error) { return f.resolve(ref) }

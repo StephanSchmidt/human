@@ -237,9 +237,9 @@ func TestLspSetupStep_MarketplaceErrorContinues(t *testing.T) {
 }
 
 func TestLspSetupStep_MultiplePlugins(t *testing.T) {
-	gopls := findPlugin(t, "gopls")  // has InstallCmd, binary not installed
-	jdtls := findPlugin(t, "jdtls")  // manual only
-	vtsls := findPlugin(t, "vtsls")  // has InstallCmd, binary already installed
+	gopls := findPlugin(t, "gopls") // has InstallCmd, binary not installed
+	jdtls := findPlugin(t, "jdtls") // manual only
+	vtsls := findPlugin(t, "vtsls") // has InstallCmd, binary already installed
 
 	prompter := &mockPrompter{
 		confirmLspSetup: true,

@@ -7,10 +7,10 @@ import (
 	"os/exec"
 )
 
-// execTmuxAttach runs tmux attach-session as a child process on Windows,
-// since syscall.Exec is not available.
-func execTmuxAttach(tmuxPath, sessionName string) error {
-	cmd := exec.Command(tmuxPath, "attach-session", "-t", sessionName) // #nosec G204 -- tmuxPath from exec.LookPath, sessionName validated
+// syscallExec on Windows falls back to running the command as a child process.
+func syscallExec(path string, args []string, env []string) error {
+	cmd := exec.Command(path, args[1:]...) // #nosec G204 -- intentional
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

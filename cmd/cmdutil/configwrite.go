@@ -10,7 +10,6 @@ import (
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
-
 // AutoSaveTrackerConfig ensures the parsed tracker URL is represented in
 // .humanconfig.yaml. If the config file doesn't exist, it creates one.
 // If it exists, it appends the tracker entry if not already present.

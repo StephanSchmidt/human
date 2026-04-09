@@ -20,8 +20,8 @@ import (
 
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/internal/chrome"
-	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/config"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/proxy"

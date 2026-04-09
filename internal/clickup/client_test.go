@@ -601,7 +601,7 @@ func TestLooksLikeCustomID(t *testing.T) {
 	assert.False(t, looksLikeCustomID("proj-42"))  // lowercase prefix
 	assert.False(t, looksLikeCustomID("PROJ-abc")) // non-numeric suffix
 	assert.False(t, looksLikeCustomID("PROJ-"))    // empty suffix
-	assert.False(t, looksLikeCustomID("-42"))       // empty prefix
+	assert.False(t, looksLikeCustomID("-42"))      // empty prefix
 }
 
 func TestMapStatusType(t *testing.T) {

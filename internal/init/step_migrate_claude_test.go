@@ -364,4 +364,3 @@ func (m *mockMigratePrompter) PromptContainerPath(detected string) (string, erro
 	}
 	return detected, nil
 }
-

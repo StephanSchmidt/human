@@ -18,18 +18,18 @@ var hookEvents = []struct {
 	async   bool
 	matcher string // "" for default empty matcher; set for events like Notification
 }{
-	{"UserPromptSubmit", false, ""},    // blocking — must not be async
+	{"UserPromptSubmit", false, ""}, // blocking — must not be async
 	{"Stop", true, ""},
 	{"SubagentStart", true, ""},
 	{"SubagentStop", true, ""},
-	{"PreToolUse", true, ""},           // tool about to execute — current activity indicator
-	{"PostToolUse", true, ""},          // tool completed — transitions waiting/blocked → working
-	{"PostToolUseFailure", true, ""},   // tool failed
-	{"PermissionRequest", true, ""},    // blocked waiting for tool permission
-	{"Notification", true, ".*"},       // catches idle_prompt, permission_prompt, etc.
-	{"StopFailure", true, ""},          // API error or crash
-	{"SessionStart", true, ""},         // new session began
-	{"SessionEnd", true, ""},           // session ended (e.g. /clear)
+	{"PreToolUse", true, ""},         // tool about to execute — current activity indicator
+	{"PostToolUse", true, ""},        // tool completed — transitions waiting/blocked → working
+	{"PostToolUseFailure", true, ""}, // tool failed
+	{"PermissionRequest", true, ""},  // blocked waiting for tool permission
+	{"Notification", true, ".*"},     // catches idle_prompt, permission_prompt, etc.
+	{"StopFailure", true, ""},        // API error or crash
+	{"SessionStart", true, ""},       // new session began
+	{"SessionEnd", true, ""},         // session ended (e.g. /clear)
 }
 
 // InstallHooks registers hooks in ~/.claude/settings.json.

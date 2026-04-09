@@ -31,7 +31,7 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 	keyPath := filepath.Join(dir, "ca.key")
 
 	certPEM, certErr := os.ReadFile(certPath) // #nosec G304 -- dir is from ~/.human/
-	keyPEM, keyErr := os.ReadFile(keyPath)     // #nosec G304 -- dir is from ~/.human/
+	keyPEM, keyErr := os.ReadFile(keyPath)    // #nosec G304 -- dir is from ~/.human/
 
 	certExists := certErr == nil
 	keyExists := keyErr == nil

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -29,34 +30,96 @@ type ImageBuilder struct {
 func (b *ImageBuilder) EnsureImage(ctx context.Context, cfg *DevcontainerConfig, projectDir, configHash string, rebuild bool, out io.Writer) (string, string, error) {
 	imageName := ImageName(projectDir, configHash)
 
-	// Check cache unless rebuild forced. Look up by metadata first (the
-	// stored imageID is stable across tag changes), then by our tag name.
+	// Check cache: a committed image with features already baked in.
 	if !rebuild {
-		if meta, found := FindMetaByProject(projectDir); found && meta.ConfigHash == configHash && meta.ImageID != "" {
-			if resp, err := b.Docker.ImageInspect(ctx, meta.ImageID); err == nil {
-				_, _ = fmt.Fprintf(out, "Using cached image %s\n", meta.ImageName)
-				return resp.ID, meta.ImageName, nil
-			}
-		}
 		if resp, err := b.Docker.ImageInspect(ctx, imageName); err == nil {
 			_, _ = fmt.Fprintf(out, "Using cached image %s\n", imageName) // #nosec G705 -- CLI output
 			return resp.ID, imageName, nil
 		}
 	}
 
-	// Determine build mode.
+	// Pull or build the base image.
+	var baseRef string
 	switch {
 	case cfg.Build != nil && cfg.Build.Dockerfile != "":
-		return b.buildFromDockerfile(ctx, cfg, projectDir, imageName, out)
+		id, name, err := b.buildFromDockerfile(ctx, cfg, projectDir, imageName, out)
+		if err != nil {
+			return "", "", err
+		}
+		if len(cfg.Features) == 0 {
+			return id, name, nil
+		}
+		baseRef = name
 	case cfg.DockerFile != "":
-		// Legacy dockerFile field; context defaults to the .devcontainer directory.
 		build := &BuildConfig{Dockerfile: cfg.DockerFile}
-		return b.buildFromDockerfile(ctx, &DevcontainerConfig{Build: build}, projectDir, imageName, out)
+		id, name, err := b.buildFromDockerfile(ctx, &DevcontainerConfig{Build: build}, projectDir, imageName, out)
+		if err != nil {
+			return "", "", err
+		}
+		if len(cfg.Features) == 0 {
+			return id, name, nil
+		}
+		baseRef = name
 	case cfg.Image != "":
-		return b.pullImage(ctx, cfg.Image, imageName, out)
+		id, ref, err := b.pullImage(ctx, cfg.Image, imageName, out)
+		if err != nil {
+			return "", "", err
+		}
+		if len(cfg.Features) == 0 {
+			return id, ref, nil
+		}
+		baseRef = ref
 	default:
 		return "", "", errors.WithDetails("devcontainer.json must specify image or build.dockerfile")
 	}
+
+	// Features present: install in a temp container and commit as the cached image.
+	return b.buildWithFeatures(ctx, cfg, baseRef, imageName, out)
+}
+
+// buildWithFeatures creates a temp container, installs features, and commits
+// the result as the cached image. This ensures subsequent container creations
+// from this image skip feature installation entirely.
+func (b *ImageBuilder) buildWithFeatures(ctx context.Context, cfg *DevcontainerConfig, baseRef, imageName string, out io.Writer) (string, string, error) {
+	remoteUser := cfg.RemoteUser
+	if remoteUser == "" {
+		remoteUser = "root"
+	}
+
+	_, _ = fmt.Fprintln(out, "Installing features into image (this is cached for future use)...")
+
+	// Create a temp container from the base image.
+	tempName := "human-dc-build-" + fmt.Sprintf("%d", time.Now().UnixNano())
+	tempID, err := b.Docker.ContainerCreate(ctx, ContainerCreateOptions{
+		Name:  tempName,
+		Image: baseRef,
+		Cmd:   []string{"sleep", "infinity"},
+	})
+	if err != nil {
+		return "", "", errors.WrapWithDetails(err, "creating temp container for features")
+	}
+	defer func() {
+		_ = b.Docker.ContainerRemove(ctx, tempID, ContainerRemoveOptions{Force: true})
+	}()
+
+	if err := b.Docker.ContainerStart(ctx, tempID); err != nil {
+		return "", "", errors.WrapWithDetails(err, "starting temp container")
+	}
+
+	// Install features.
+	puller := &OCIFeaturePuller{}
+	if err := InstallFeatures(ctx, b.Docker, puller, tempID, cfg.Features, remoteUser, b.Logger, out); err != nil {
+		return "", "", errors.WrapWithDetails(err, "installing features")
+	}
+
+	// Commit the container as the cached image.
+	committedID, err := b.Docker.ContainerCommit(ctx, tempID, imageName)
+	if err != nil {
+		return "", "", errors.WrapWithDetails(err, "committing image with features")
+	}
+
+	_, _ = fmt.Fprintf(out, "Image cached: %s\n", imageName) // #nosec G705 -- CLI output
+	return committedID, imageName, nil
 }
 
 // pullImage pulls a base image. The container is created using the original

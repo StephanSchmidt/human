@@ -15,10 +15,10 @@ import (
 // DestructiveEntry represents a destructive operation log record.
 type DestructiveEntry struct {
 	Timestamp string `json:"timestamp"`
-	Operation string `json:"operation"`       // "DeleteIssue", "EditIssue", "TransitionIssue"
-	Tracker   string `json:"tracker"`         // instance name
-	Kind      string `json:"kind"`            // "jira", "linear", etc.
-	Key       string `json:"key"`             // issue key
+	Operation string `json:"operation"`        // "DeleteIssue", "EditIssue", "TransitionIssue"
+	Tracker   string `json:"tracker"`          // instance name
+	Kind      string `json:"kind"`             // "jira", "linear", etc.
+	Key       string `json:"key"`              // issue key
 	Detail    string `json:"detail,omitempty"` // e.g. target status for transition, changed fields for edit
 	Error     string `json:"error,omitempty"`
 }

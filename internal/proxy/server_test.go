@@ -660,4 +660,3 @@ func TestServer_emitsInterceptOnInterceptDomain(t *testing.T) {
 	})
 	assert.Equal(t, hostname, evt.host)
 }
-

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/StephanSchmidt/human/errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/StephanSchmidt/human/errors"
 
 	"github.com/rs/zerolog/log"
 )

@@ -38,9 +38,9 @@ type Response struct {
 // awaiting user confirmation via the TUI.
 type PendingConfirm struct {
 	ID        string `json:"id"`
-	Operation string `json:"operation"`  // "DeleteIssue", "EditIssue"
-	Tracker   string `json:"tracker"`    // tracker kind, e.g. "jira", "linear"
-	Key       string `json:"key"`        // issue key, e.g. "KAN-1"
+	Operation string `json:"operation"` // "DeleteIssue", "EditIssue"
+	Tracker   string `json:"tracker"`   // tracker kind, e.g. "jira", "linear"
+	Key       string `json:"key"`       // issue key, e.g. "KAN-1"
 	Prompt    string `json:"prompt"`
 	CreatedAt string `json:"created_at"`
 	ClientPID int    `json:"client_pid"` // PID of the Claude instance that triggered the operation

@@ -34,21 +34,21 @@ func (defaultBrowserOpener) Open(url string) error {
 
 // Server listens for incoming client connections and executes CLI commands.
 type Server struct {
-	Addr          string
-	Token         string
-	SafeMode      bool
-	CmdFactory    func() *cobra.Command
-	Opener        BrowserOpener  // used for OAuth relay; defaults to browser.DefaultOpener
-	Logger        zerolog.Logger
-	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
-	HookEvents    *HookEventStore    // in-memory hook event buffer; nil disables hook event tracking
-	NetworkEvents *NetworkEventStore // in-memory ambient network activity buffer; nil disables
+	Addr             string
+	Token            string
+	SafeMode         bool
+	CmdFactory       func() *cobra.Command
+	Opener           BrowserOpener // used for OAuth relay; defaults to browser.DefaultOpener
+	Logger           zerolog.Logger
+	ConnectedPIDs    *ConnectedTracker                        // tracks client PIDs that have pinged; nil disables tracking
+	HookEvents       *HookEventStore                          // in-memory hook event buffer; nil disables hook event tracking
+	NetworkEvents    *NetworkEventStore                       // in-memory ambient network activity buffer; nil disables
 	IssueFetcher     func() ([]TrackerIssuesResult, error)    // injected; fetches issues from configured trackers
 	TrackerDiagnoser func(dir string) []tracker.TrackerStatus // injected; diagnoses tracker status with vault resolution
-	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
-	PendingConfirms *PendingConfirmStore                  // pending destructive operation confirmations; nil disables
-	StatsWriter     *stats.Writer                         // async SQLite writer for tool event persistence; nil disables
-	StatsStore      *stats.StatsStore                     // for query-time aggregation; nil disables tool-stats route
+	Projects         *ProjectRegistry                         // multi-project routing; nil means single-project mode
+	PendingConfirms  *PendingConfirmStore                     // pending destructive operation confirmations; nil disables
+	StatsWriter      *stats.Writer                            // async SQLite writer for tool event persistence; nil disables
+	StatsStore       *stats.StatsStore                        // for query-time aggregation; nil disables tool-stats route
 
 	wg sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }

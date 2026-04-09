@@ -16,10 +16,10 @@ const maxNetworkEvents = 200
 // Source are collapsed into one row with an incrementing Count and a
 // refreshed LastSeen timestamp.
 type NetworkEvent struct {
-	Source   string    `json:"source"`   // "proxy" | "oauth" | "fail"
-	Status   string    `json:"status"`   // "forward" | "intercept" | "block" | "no-sni" | "parse-fail" | "dial-fail" | "callback"
-	Host     string    `json:"host"`     // may be empty for pre-SNI failures
-	Count    int       `json:"count"`    // >=1
+	Source   string    `json:"source"` // "proxy" | "oauth" | "fail"
+	Status   string    `json:"status"` // "forward" | "intercept" | "block" | "no-sni" | "parse-fail" | "dial-fail" | "callback"
+	Host     string    `json:"host"`   // may be empty for pre-SNI failures
+	Count    int       `json:"count"`  // >=1
 	LastSeen time.Time `json:"last_seen"`
 }
 

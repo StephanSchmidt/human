@@ -12,13 +12,13 @@ func TestIsAllowed(t *testing.T) {
 	weirdChat := Chat{ID: 7, Type: "something_new"}
 
 	cases := []struct {
-		name          string
-		user          *User
-		chat          Chat
-		allowedUsers  []int64
-		allowedChats  []int64
-		wantOK        bool
-		wantReason    AuthzReason
+		name         string
+		user         *User
+		chat         Chat
+		allowedUsers []int64
+		allowedChats []int64
+		wantOK       bool
+		wantReason   AuthzReason
 	}{
 		{
 			name:         "empty allowlist denies even a would-be allowed user",

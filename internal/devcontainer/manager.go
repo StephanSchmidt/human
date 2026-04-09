@@ -123,15 +123,8 @@ func (m *Manager) createFresh(ctx context.Context, cfg *DevcontainerConfig, proj
 		return nil, errors.WrapWithDetails(err, "starting container", "id", containerID)
 	}
 
-	// Install devcontainer features inside the running container.
-	if len(cfg.Features) > 0 {
-		_, _ = fmt.Fprintln(out, "Installing features...")
-		puller := &OCIFeaturePuller{}
-		if err := InstallFeatures(ctx, m.Docker, puller, containerID, cfg.Features, remoteUser, m.Logger, out); err != nil {
-			return nil, errors.WrapWithDetails(err, "installing features")
-		}
-	}
-
+	// Features are already baked into the image by EnsureImage.
+	// Run lifecycle hooks only.
 	if err := RunLifecycleHooks(ctx, m.Docker, containerID, remoteUser, cfg, m.Logger, out); err != nil {
 		m.Logger.Warn().Err(err).Msg("lifecycle hooks failed, container is running but may be incomplete")
 	}

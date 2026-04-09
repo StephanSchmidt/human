@@ -3,20 +3,12 @@ package cmdagent
 import (
 	"strings"
 	"testing"
-
-	"github.com/StephanSchmidt/human/cmd/cmdutil"
-	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 func TestBuildAgentCmd_hasSubcommands(t *testing.T) {
-	deps := cmdutil.Deps{
-		LoadInstances: func(_ string) ([]tracker.Instance, error) {
-			return nil, nil
-		},
-	}
-	cmd := BuildAgentCmd(deps)
+	cmd := BuildAgentCmd()
 
-	want := []string{"start", "stop", "list", "attach", "resume"}
+	want := []string{"start", "stop", "list", "attach"}
 	subs := cmd.Commands()
 
 	found := make(map[string]bool)
@@ -32,12 +24,7 @@ func TestBuildAgentCmd_hasSubcommands(t *testing.T) {
 }
 
 func TestBuildAgentCmd_startRequiresName(t *testing.T) {
-	deps := cmdutil.Deps{
-		LoadInstances: func(_ string) ([]tracker.Instance, error) {
-			return nil, nil
-		},
-	}
-	cmd := BuildAgentCmd(deps)
+	cmd := BuildAgentCmd()
 	cmd.SetArgs([]string{"start"})
 
 	err := cmd.Execute()
@@ -50,12 +37,7 @@ func TestBuildAgentCmd_startRequiresName(t *testing.T) {
 }
 
 func TestBuildAgentCmd_stopRequiresName(t *testing.T) {
-	deps := cmdutil.Deps{
-		LoadInstances: func(_ string) ([]tracker.Instance, error) {
-			return nil, nil
-		},
-	}
-	cmd := BuildAgentCmd(deps)
+	cmd := BuildAgentCmd()
 	cmd.SetArgs([]string{"stop"})
 
 	err := cmd.Execute()
@@ -65,13 +47,7 @@ func TestBuildAgentCmd_stopRequiresName(t *testing.T) {
 }
 
 func TestBuildAgentCmd_listNoArgs(t *testing.T) {
-	deps := cmdutil.Deps{
-		LoadInstances: func(_ string) ([]tracker.Instance, error) {
-			return nil, nil
-		},
-	}
-	cmd := BuildAgentCmd(deps)
-	// List with an argument should fail.
+	cmd := BuildAgentCmd()
 	cmd.SetArgs([]string{"list", "extra"})
 
 	err := cmd.Execute()

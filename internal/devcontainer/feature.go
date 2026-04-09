@@ -132,7 +132,7 @@ func InstallFeatures(ctx context.Context, docker DockerClient, puller FeaturePul
 
 	for _, ref := range refs {
 		opts, _ := features[ref].(map[string]interface{})
-		_, _ = fmt.Fprintf(out, "  Installing feature: %s\n", ref)
+		_, _ = fmt.Fprintf(out, "  Installing feature: %s\n", ref) // #nosec G705 -- CLI output
 
 		tarData, meta, err := puller.Pull(ctx, ref)
 		if err != nil {

@@ -2,11 +2,9 @@
 
 package cmdagent
 
-import (
-	"syscall"
-)
+import "syscall"
 
-// execTmuxAttach replaces the current process with tmux attach-session.
-func execTmuxAttach(tmuxPath, sessionName string) error {
-	return syscall.Exec(tmuxPath, []string{"tmux", "attach-session", "-t", sessionName}, nil) // #nosec G204 -- tmuxPath from exec.LookPath, sessionName validated
+// syscallExec replaces the current process with the given command.
+func syscallExec(path string, args []string, env []string) error {
+	return syscall.Exec(path, args, env) // #nosec G204 -- intentional process replacement
 }

@@ -459,4 +459,3 @@ func PrintStatusesTable(out io.Writer, statuses []tracker.Status) error {
 	}
 	return w.Flush()
 }
-

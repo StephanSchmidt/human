@@ -1,101 +1,99 @@
-// Package cmdagent provides cobra commands for managing background Claude Code
-// agents via tmux sessions.
+// Package cmdagent provides cobra commands for managing container-based
+// Claude Code agents.
 package cmdagent
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/StephanSchmidt/human/cmd/cmdutil"
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/agent"
 	"github.com/StephanSchmidt/human/internal/claude"
-	"github.com/StephanSchmidt/human/internal/config"
+	"github.com/StephanSchmidt/human/internal/devcontainer"
 )
 
-// BuildAgentCmd returns the parent "agent" command with start/stop/list/attach/resume subcommands.
-func BuildAgentCmd(deps cmdutil.Deps) *cobra.Command {
+// BuildAgentCmd returns the parent "agent" command with start/stop/list/attach subcommands.
+func BuildAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "Manage background Claude Code agents",
-		Long: `Spawn, stop, list, attach, and resume background Claude Code agents.
+		Short: "Manage container-based Claude Code agents",
+		Long: `Start, stop, list, and attach to Claude Code agents running in devcontainers.
 
-Each agent runs in an isolated tmux session, optionally in its own git worktree,
-so multiple agents can work on different tasks in parallel without interference.`,
+Each agent runs in its own Docker container with full tool isolation.
+The container image is built once (with devcontainer features) and cached.`,
 	}
 
-	mgr := &agent.Manager{
-		Runner: claude.OSCommandRunner{},
-	}
-
-	cmd.AddCommand(buildStartCmd(mgr, deps))
-	cmd.AddCommand(buildStopCmd(mgr))
-	cmd.AddCommand(buildListCmd(mgr))
-	cmd.AddCommand(buildAttachCmd(mgr))
-	cmd.AddCommand(buildResumeCmd(mgr))
+	cmd.AddCommand(buildStartCmd())
+	cmd.AddCommand(buildStopCmd())
+	cmd.AddCommand(buildListCmd())
+	cmd.AddCommand(buildAttachCmd())
 	return cmd
 }
 
-func buildStartCmd(mgr *agent.Manager, deps cmdutil.Deps) *cobra.Command {
+func newManager(cmd *cobra.Command) (*agent.Manager, func(), error) {
+	docker, err := devcontainer.NewDockerClient()
+	if err != nil {
+		return nil, nil, errors.WrapWithDetails(err, "connecting to Docker")
+	}
+	cleanup := func() { _ = docker.Close() }
+
+	return &agent.Manager{
+		Docker:    docker,
+		GitRunner: &osGitRunner{},
+	}, cleanup, nil
+}
+
+func buildStartCmd() *cobra.Command {
 	var prompt string
-	var ticketKey string
 	var model string
-	var noWorktree bool
 	var skipPerms bool
-	var useContainer bool
+	var interactive bool
+	var configDir string
+	var workspace string
+	var noWorktree bool
+	var rebuild bool
 
 	cmd := &cobra.Command{
 		Use:   "start NAME",
-		Short: "Start a new background Claude Code agent",
-		Long: `Create a tmux session with Claude Code running in interactive mode.
+		Short: "Start a new Claude Code agent in a container",
+		Long: `Create a devcontainer and run Claude Code inside it.
 
-By default a git worktree is created in .worktrees/<name> for isolation.
-Use --no-worktree to run in the current directory instead.
+The container image is built from .devcontainer/devcontainer.json on first use,
+then cached. Subsequent agents start in seconds.
 
-Use --container to run inside a devcontainer (requires Docker and a
-.devcontainer/devcontainer.json in the project). Multiple container agents
-can run in parallel, each with their own worktree mounted into the container.
+Use --interactive for a foreground TTY session (you sit at Claude).
+Use --prompt to run Claude with a task in the background.
 
-The agent runs with --permission-mode=auto by default. Use --skip-permissions
-to run with --dangerously-skip-permissions instead.`,
+Examples:
+  human agent start fix-bug --prompt "/human-plan HUM-42"
+  human agent start dev --interactive
+  human agent start review --prompt "/human-review HUM-42" --model opus`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
+			mgr, cleanup, err := newManager(cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			opts := agent.StartOpts{
-				Name:       name,
-				Prompt:     prompt,
-				TicketKey:  ticketKey,
-				Model:      model,
-				NoWorktree: noWorktree,
-				SkipPerms:  skipPerms,
-				Container:  useContainer,
-			}
-
-			// If ticket is provided but no prompt, fetch the ticket as the prompt.
-			if ticketKey != "" && prompt == "" {
-				instances, err := deps.LoadInstances(config.DirProject)
-				if err != nil {
-					return errors.WrapWithDetails(err, "loading tracker instances")
-				}
-				fetchedPrompt, err := agent.FetchTicketPrompt(cmd.Context(), ticketKey, instances)
-				if err != nil {
-					return err
-				}
-				opts.Prompt = fetchedPrompt
-			}
-
-			// Wire up container starter if --container is used.
-			if useContainer {
-				starter, starterErr := newContainerStarter(cmd)
-				if starterErr != nil {
-					return starterErr
-				}
-				mgr.ContainerStarter = starter
+				Name:        name,
+				Prompt:      prompt,
+				Model:       model,
+				SkipPerms:   skipPerms,
+				Interactive: interactive,
+				ConfigDir:   configDir,
+				Workspace:   workspace,
+				NoWorktree:  noWorktree,
+				Rebuild:     rebuild,
 			}
 
 			meta, err := mgr.Start(cmd.Context(), opts)
@@ -103,36 +101,60 @@ to run with --dangerously-skip-permissions instead.`,
 				return err
 			}
 
-			if meta.ContainerID != "" {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q started (container: %s)\n", meta.Name, meta.ContainerName)
-			} else {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q started (session: %s)\n", meta.Name, meta.SessionName)
+			// Interactive mode: exec into the container with Claude.
+			if interactive {
+				claudeArgs := []string{"exec", "-it", meta.ContainerName, "claude"}
+				if skipPerms {
+					claudeArgs = append(claudeArgs, "--dangerously-skip-permissions")
+				} else {
+					claudeArgs = append(claudeArgs, "--permission-mode=auto")
+				}
+				if model != "" {
+					claudeArgs = append(claudeArgs, "--model", model)
+				}
+
+				dockerPath, lookErr := exec.LookPath("docker")
+				if lookErr != nil {
+					return errors.WithDetails("docker not found in PATH")
+				}
+				return syscallExec(dockerPath, append([]string{"docker"}, claudeArgs...), os.Environ())
 			}
+
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintf(out, "Agent %q started (container: %s)\n", meta.Name, meta.ContainerName)
 			if meta.WorktreeDir != "" {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Worktree: %s\n", meta.WorktreeDir)
+				_, _ = fmt.Fprintf(out, "Worktree: %s\n", meta.WorktreeDir)
 			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Attach:   human agent attach %s\n", meta.Name)
+			_, _ = fmt.Fprintf(out, "Attach:   human agent attach %s\n", meta.Name)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&prompt, "prompt", "", "Initial prompt to send to Claude Code")
-	cmd.Flags().StringVar(&ticketKey, "ticket", "", "Ticket key to fetch as the initial prompt")
+	cmd.Flags().StringVar(&prompt, "prompt", "", "Task for Claude (e.g. /human-plan HUM-42)")
+	cmd.Flags().BoolVar(&interactive, "interactive", false, "Foreground TTY mode (you sit at Claude)")
+	cmd.Flags().StringVar(&configDir, "configdir", "", "Directory with .devcontainer/devcontainer.json (default: cwd)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Directory to mount into container (default: cwd)")
 	cmd.Flags().StringVar(&model, "model", "", "Claude model to use")
-	cmd.Flags().BoolVar(&noWorktree, "no-worktree", false, "Run in the current directory instead of creating a worktree")
 	cmd.Flags().BoolVar(&skipPerms, "skip-permissions", false, "Run with --dangerously-skip-permissions")
-	cmd.Flags().BoolVar(&useContainer, "container", false, "Run inside a devcontainer (requires Docker)")
+	cmd.Flags().BoolVar(&noWorktree, "no-worktree", false, "Mount workspace directly, no git worktree")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Force image rebuild")
 	return cmd
 }
 
-func buildStopCmd(mgr *agent.Manager) *cobra.Command {
+func buildStopCmd() *cobra.Command {
 	var clean bool
 
 	cmd := &cobra.Command{
 		Use:   "stop NAME",
-		Short: "Stop a running agent",
+		Short: "Stop and remove an agent's container",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mgr, cleanup, err := newManager(cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			if err := mgr.Stop(cmd.Context(), args[0], clean); err != nil {
 				return err
 			}
@@ -145,13 +167,18 @@ func buildStopCmd(mgr *agent.Manager) *cobra.Command {
 	return cmd
 }
 
-func buildListCmd(mgr *agent.Manager) *cobra.Command {
+func buildListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List all agents with their status",
+		Short: "List all agents",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Refresh statuses before listing.
+			mgr, cleanup, err := newManager(cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
 			_ = mgr.Refresh(cmd.Context())
 
 			metas, err := agent.ListMetas()
@@ -164,69 +191,54 @@ func buildListCmd(mgr *agent.Manager) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			_, _ = fmt.Fprintln(w, "NAME\tSTATUS\tTICKET\tCWD\tAGE")
+			_, _ = fmt.Fprintln(w, "NAME\tSTATUS\tCONTAINER\tIMAGE\tAGE")
 			for _, m := range metas {
 				age := agent.FormatDuration(time.Since(m.CreatedAt))
-				ticket := m.TicketKey
-				if ticket == "" {
-					ticket = "-"
+				ctr := m.ContainerName
+				if ctr == "" {
+					ctr = "-"
 				}
-				cwd := m.Cwd
-				if cwd == "" {
-					cwd = "-"
+				img := m.ImageName
+				if img == "" {
+					img = "-"
 				}
-				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.Name, m.Status, ticket, cwd, age)
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.Name, m.Status, ctr, img, age)
 			}
 			return w.Flush()
 		},
 	}
 }
 
-func buildAttachCmd(mgr *agent.Manager) *cobra.Command {
+func buildAttachCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach NAME",
-		Short: "Attach to a running agent's tmux session",
+		Short: "Attach to a running agent's container",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sessionName, err := mgr.Attach(cmd.Context(), args[0])
+			mgr, cleanup, err := newManager(cmd)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			containerName, err := mgr.Attach(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
 
-			tmuxPath, err := lookupTmux()
-			if err != nil {
-				return errors.WithDetails("tmux not found in PATH")
+			dockerPath, lookErr := exec.LookPath("docker")
+			if lookErr != nil {
+				return errors.WithDetails("docker not found in PATH")
 			}
 
-			return execTmuxAttach(tmuxPath, sessionName)
+			return syscallExec(dockerPath, []string{"docker", "exec", "-it", containerName, "bash"}, os.Environ())
 		},
 	}
 }
 
-func buildResumeCmd(mgr *agent.Manager) *cobra.Command {
-	var prompt string
+// osGitRunner runs git commands via os/exec.
+type osGitRunner struct{}
 
-	cmd := &cobra.Command{
-		Use:   "resume NAME",
-		Short: "Resume a stopped agent or send a new prompt to a running one",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := mgr.Resume(cmd.Context(), args[0], prompt); err != nil {
-				return err
-			}
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q resumed\n", args[0])
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&prompt, "prompt", "", "Prompt to send to the agent")
-	return cmd
+func (r *osGitRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return claude.OSCommandRunner{}.Run(ctx, name, args...)
 }
-
-// lookupTmux finds the tmux binary in PATH.
-func lookupTmux() (string, error) {
-	return lookPath("tmux")
-}
-
-// lookPath is a variable for testability.
-var lookPath = exec.LookPath
