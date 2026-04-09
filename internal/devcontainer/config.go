@@ -9,7 +9,22 @@ import (
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
+	"github.com/StephanSchmidt/human/internal/config"
 )
+
+// HumanConfig holds devcontainer settings from .humanconfig.
+type HumanConfig struct {
+	ConfigDir string `yaml:"configdir"`
+}
+
+// LoadHumanConfig reads the devcontainer section from .humanconfig.
+func LoadHumanConfig(dir string) (*HumanConfig, error) {
+	var cfg HumanConfig
+	if err := config.UnmarshalSection(dir, "devcontainer", &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
 
 // DevcontainerConfig represents a parsed devcontainer.json.
 // Supports the subset of the spec needed for image-based and Dockerfile-based configs.

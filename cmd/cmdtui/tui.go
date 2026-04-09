@@ -103,7 +103,11 @@ func ensureDaemon(projectDirs []string) {
 	if err != nil {
 		return
 	}
-	args := []string{"daemon", "start"}
+	args := []string{"daemon", "start",
+		"--addr", "0.0.0.0:19285",
+		"--chrome-addr", "0.0.0.0:19286",
+		"--proxy-addr", "0.0.0.0:19287",
+	}
 	for _, dir := range projectDirs {
 		args = append(args, "--project", dir)
 	}
@@ -544,9 +548,22 @@ func (m model) handleSpawnAgent() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	name := nextAgentName()
+	projectDir := m.activeProjectDir()
 	m.dispatchStatus = fmt.Sprintf("Spawning %s...", name)
 	m.dispatchAt = time.Now()
-	return m, spawnAgentCmd(name)
+	return m, spawnAgentCmd(name, projectDir)
+}
+
+// activeProjectDir returns the directory of the active project tab.
+func (m model) activeProjectDir() string {
+	tabs := m.tabs()
+	if m.activeTab < len(tabs) && tabs[m.activeTab].Dir != "" {
+		return tabs[m.activeTab].Dir
+	}
+	if len(m.projects) > 0 {
+		return m.projects[0].Dir
+	}
+	return ""
 }
 
 func (m *model) handleSpawnAgentResult(msg spawnAgentMsg) {
@@ -558,17 +575,23 @@ func (m *model) handleSpawnAgentResult(msg spawnAgentMsg) {
 	m.dispatchAt = time.Now()
 }
 
-func spawnAgentCmd(name string) tea.Cmd {
+func spawnAgentCmd(name, projectDir string) tea.Cmd {
 	return func() tea.Msg {
 		humanExe, err := os.Executable()
 		if err != nil {
 			return spawnAgentMsg{name: name, err: fmt.Errorf("cannot find executable: %w", err)}
 		}
-		cwd, _ := os.Getwd()
-		agentCmd := fmt.Sprintf("%s agent start %s --interactive", humanExe, name)
+
+		cmd := fmt.Sprintf("%s agent start %s --interactive", humanExe, name)
+		paneDir, _ := os.Getwd()
+		if projectDir != "" {
+			cmd += fmt.Sprintf(" --workspace %s", projectDir)
+			paneDir = projectDir
+		}
+		cmd += "; echo; echo 'Press enter to close'; read"
 
 		runner := claude.OSCommandRunner{}
-		_, err = runner.Run(context.Background(), "tmux", "split-window", "-h", "-c", cwd, agentCmd)
+		_, err = runner.Run(context.Background(), "tmux", "split-window", "-h", "-c", paneDir, cmd)
 		return spawnAgentMsg{name: name, err: err}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -99,7 +100,16 @@ func resolveDirectories(opts StartOpts) (workspace, configDir string) {
 	}
 	configDir = opts.ConfigDir
 	if configDir == "" {
-		configDir = workspace
+		// Check .humanconfig for devcontainer.configdir.
+		if hcfg, err := devcontainer.LoadHumanConfig(workspace); err == nil && hcfg.ConfigDir != "" {
+			configDir = hcfg.ConfigDir
+			if !filepath.IsAbs(configDir) {
+				abs, _ := filepath.Abs(workspace)
+				configDir = filepath.Join(abs, configDir)
+			}
+		} else {
+			configDir = workspace
+		}
 	}
 	return
 }
@@ -111,6 +121,10 @@ func (m *Manager) maybeCreateWorktree(ctx context.Context, opts StartOpts, works
 	repoRoot, rootErr := m.gitRepoRoot(ctx)
 	if rootErr != nil {
 		return "", workspace
+	}
+	wDir := fmt.Sprintf("%s/.worktrees/%s", repoRoot, opts.Name)
+	if _, err := os.Stat(wDir); err == nil {
+		return wDir, wDir
 	}
 	wDir, wErr := m.createWorktree(ctx, repoRoot, opts.Name, "agent/"+opts.Name)
 	if wErr != nil {
