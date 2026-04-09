@@ -30,10 +30,23 @@ type Server struct {
 	Policy      Decider
 	Interceptor Interceptor // optional: MITM interceptor for specific domains
 	Logger      zerolog.Logger
+	// Emitter records ambient network decisions for the TUI activity
+	// panel. Optional — nil means no events are recorded so tests and
+	// standalone use pay nothing for the feature.
+	Emitter NetworkEventEmitter
 	// Dialer connects to upstream servers. Injected for testing.
 	Dialer func(ctx context.Context, network, address string) (net.Conn, error)
 
 	activeConns atomic.Int64 // number of currently-active forwarded connections
+}
+
+// emit safely forwards a network decision to the configured emitter.
+// A nil Emitter is a valid configuration (e.g. tests, standalone use)
+// and is silently ignored so the hot path pays no cost when unused.
+func (s *Server) emit(source, status, host string) {
+	if s.Emitter != nil {
+		s.Emitter.Emit(source, status, host)
+	}
 }
 
 // ActiveConns returns the number of currently active forwarded connections.
@@ -97,6 +110,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	peeked, serverName, err := PeekClientHello(conn)
 	if err != nil {
 		s.Logger.Debug().Err(err).Msg("SNI extraction failed")
+		s.emit("fail", "parse-fail", "")
 		return
 	}
 
@@ -106,11 +120,13 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 
 	if serverName == "" {
 		s.Logger.Debug().Msg("no SNI in ClientHello, blocking")
+		s.emit("fail", "no-sni", "")
 		return
 	}
 
 	if !s.Policy.Allowed(serverName) {
 		s.Logger.Info().Str("host", serverName).Msg("blocked by policy")
+		s.emit("proxy", "block", serverName)
 		return
 	}
 
@@ -120,6 +136,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		defer s.activeConns.Add(-1)
 
 		s.Logger.Info().Str("host", serverName).Msg("intercepting (MITM)")
+		s.emit("proxy", "intercept", serverName)
 		if interceptErr := s.Interceptor.Intercept(ctx, conn, serverName, peeked); interceptErr != nil {
 			s.Logger.Warn().Err(interceptErr).Str("host", serverName).Msg("intercept failed")
 		}
@@ -136,6 +153,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 			_ = upstream.Close()
 		}
 		s.Logger.Warn().Err(err).Str("host", serverName).Msg("upstream dial failed")
+		s.emit("fail", "dial-fail", serverName)
 		return
 	}
 
@@ -143,6 +161,7 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer s.activeConns.Add(-1)
 
 	s.Logger.Info().Str("host", serverName).Msg("forwarding")
+	s.emit("proxy", "forward", serverName)
 	Forward(ctx, conn, upstream, peeked, s.Logger)
 }
 

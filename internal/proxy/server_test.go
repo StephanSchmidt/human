@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -402,3 +403,261 @@ func TestServer_realTLSClientHello(t *testing.T) {
 		t.Fatal("dialer was not called")
 	}
 }
+
+// recordingEmitter captures Emit calls for assertion. Safe for
+// concurrent use so it can be shared across the proxy's handler
+// goroutines.
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []recordedEvent
+}
+
+type recordedEvent struct {
+	source, status, host string
+}
+
+func (r *recordingEmitter) Emit(source, status, host string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, recordedEvent{source: source, status: status, host: host})
+}
+
+func (r *recordingEmitter) snapshot() []recordedEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]recordedEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// waitForEvent polls the emitter until at least one event matches the
+// predicate or the deadline expires. Returns the matched event on
+// success and fails the test otherwise.
+func waitForEvent(t *testing.T, rec *recordingEmitter, match func(recordedEvent) bool) recordedEvent {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, e := range rec.snapshot() {
+			if match(e) {
+				return e
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no matching event observed before deadline")
+	return recordedEvent{}
+}
+
+func startProxyForTest(t *testing.T, srv *Server) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	srv.Addr = ln.Addr().String()
+	_ = ln.Close()
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestServer_emitsForwardOnAllowedHost(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"allowed.example.com"})
+	require.NoError(t, err)
+
+	upstreamLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = upstreamLn.Close() }()
+	go func() {
+		conn, acceptErr := upstreamLn.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		buf := make([]byte, 4096)
+		_, _ = conn.Read(buf)
+	}()
+
+	rec := &recordingEmitter{}
+	srv := &Server{
+		Policy:  policy,
+		Logger:  zerolog.Nop(),
+		Emitter: rec,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("tcp", upstreamLn.Addr().String())
+		},
+	}
+	startProxyForTest(t, srv)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.Write(buildClientHello("allowed.example.com"))
+	require.NoError(t, err)
+
+	evt := waitForEvent(t, rec, func(e recordedEvent) bool {
+		return e.source == "proxy" && e.status == "forward"
+	})
+	assert.Equal(t, "allowed.example.com", evt.host)
+}
+
+func TestServer_emitsBlockOnDeniedHost(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"allowed.example.com"})
+	require.NoError(t, err)
+
+	rec := &recordingEmitter{}
+	srv := &Server{
+		Policy:  policy,
+		Logger:  zerolog.Nop(),
+		Emitter: rec,
+	}
+	startProxyForTest(t, srv)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.Write(buildClientHello("denied.example.com"))
+	require.NoError(t, err)
+
+	evt := waitForEvent(t, rec, func(e recordedEvent) bool {
+		return e.source == "proxy" && e.status == "block"
+	})
+	assert.Equal(t, "denied.example.com", evt.host)
+}
+
+func TestServer_emitsNoSniOnEmptySNI(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"*.example.com"})
+	require.NoError(t, err)
+
+	rec := &recordingEmitter{}
+	srv := &Server{
+		Policy:  policy,
+		Logger:  zerolog.Nop(),
+		Emitter: rec,
+	}
+	startProxyForTest(t, srv)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.Write(buildClientHello(""))
+	require.NoError(t, err)
+
+	evt := waitForEvent(t, rec, func(e recordedEvent) bool {
+		return e.source == "fail" && e.status == "no-sni"
+	})
+	assert.Equal(t, "", evt.host)
+}
+
+func TestServer_emitsDialFailOnUpstreamError(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"broken.example.com"})
+	require.NoError(t, err)
+
+	rec := &recordingEmitter{}
+	srv := &Server{
+		Policy:  policy,
+		Logger:  zerolog.Nop(),
+		Emitter: rec,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return nil, net.UnknownNetworkError("simulated upstream failure")
+		},
+	}
+	startProxyForTest(t, srv)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.Write(buildClientHello("broken.example.com"))
+	require.NoError(t, err)
+
+	evt := waitForEvent(t, rec, func(e recordedEvent) bool {
+		return e.source == "fail" && e.status == "dial-fail"
+	})
+	assert.Equal(t, "broken.example.com", evt.host)
+}
+
+func TestServer_nilEmitterIsSafe(t *testing.T) {
+	policy, err := NewPolicy(ModeAllow, []string{"allowed.example.com"})
+	require.NoError(t, err)
+
+	upstreamLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = upstreamLn.Close() }()
+	go func() {
+		conn, acceptErr := upstreamLn.Accept()
+		if acceptErr != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+
+	srv := &Server{
+		Policy: policy,
+		Logger: zerolog.Nop(),
+		// Emitter intentionally nil.
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return net.Dial("tcp", upstreamLn.Addr().String())
+		},
+	}
+	startProxyForTest(t, srv)
+
+	conn, err := net.DialTimeout("tcp", srv.Addr, time.Second)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	// Should not panic.
+	_, err = conn.Write(buildClientHello("allowed.example.com"))
+	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestServer_emitsInterceptOnInterceptDomain(t *testing.T) {
+	env := newInterceptTestEnv(t)
+	hostname := "intercept.example.com"
+
+	policy, err := NewPolicy(ModeAllow, []string{hostname})
+	require.NoError(t, err)
+
+	upstreamLn := startUpstreamTLS(t, env, hostname, handleEchoHTTPS)
+
+	li := &LoggingInterceptor{
+		Domains:   []string{hostname},
+		LeafCache: env.LeafCache,
+		Logger:    zerolog.Nop(),
+		LogDir:    env.LogDir,
+		Dialer: func(_ context.Context, _, _ string) (net.Conn, error) {
+			return tls.Dial("tcp", upstreamLn.Addr().String(), &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // test only
+			})
+		},
+	}
+
+	rec := &recordingEmitter{}
+	srv := &Server{
+		Policy:      policy,
+		Interceptor: li,
+		Logger:      zerolog.Nop(),
+		Emitter:     rec,
+	}
+	startProxyForTest(t, srv)
+
+	// Start a goroutine to open a TLS connection; we don't need the
+	// full handshake to complete, only the ClientHello to be consumed
+	// so the intercept branch runs.
+	go func() {
+		conn, dialErr := tls.Dial("tcp", srv.Addr, &tls.Config{
+			ServerName: hostname,
+			RootCAs:    env.CAPool,
+		})
+		if dialErr != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+
+	evt := waitForEvent(t, rec, func(e recordedEvent) bool {
+		return e.source == "proxy" && e.status == "intercept"
+	})
+	assert.Equal(t, hostname, evt.host)
+}
+
