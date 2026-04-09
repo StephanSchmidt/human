@@ -127,6 +127,15 @@ func (s *Server) awaitCallback(ln net.Listener, info *oauth.RedirectInfo) (strin
 		sort.Strings(paramKeys)
 		s.Logger.Debug().Str("path", r.URL.Path).Strs("param_keys", paramKeys).Msg("OAuth callback received")
 
+		// Ambient network activity: the OAuth callback is exactly the
+		// opaque "what is Claude reaching out to" signal the TUI panel
+		// is for. Emit with a synthetic host of "oauth:<port><path>" so
+		// the panel has a non-empty identifier; the store collapses
+		// bursts consecutively.
+		if s.NetworkEvents != nil {
+			s.NetworkEvents.Emit("oauth", "callback", fmt.Sprintf("oauth:%d%s", info.Port, info.Path))
+		}
+
 		// Non-blocking send so a duplicate browser callback (or a favicon
 		// retry that survives the dispatcher's path filter) can never
 		// block this handler goroutine forever.

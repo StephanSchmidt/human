@@ -138,6 +138,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	connTracker := daemon.NewConnectedTracker()
 
 	hookStore := daemon.NewHookEventStore()
+	networkStore := daemon.NewNetworkEventStore()
 	confirmStore := daemon.NewPendingConfirmStore()
 
 	// Periodically purge stale confirmations so a TUI that misses an event
@@ -165,6 +166,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		Logger:           logger,
 		ConnectedPIDs:    connTracker,
 		HookEvents:       hookStore,
+		NetworkEvents:    networkStore,
 		IssueFetcher:     fetchTrackerIssuesFunc(projectRegistry, vaultResolver),
 		TrackerDiagnoser: trackerDiagnoserFunc(projectRegistry, vaultResolver),
 		Projects:         projectRegistry,
@@ -209,7 +211,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		}
 	}()
 
-	proxySrv, proxyStatus, proxyErr := buildProxyServer(proxyAddr, interactive, logger)
+	proxySrv, proxyStatus, proxyErr := buildProxyServer(proxyAddr, interactive, logger, networkStore)
 	if proxyErr != nil {
 		return proxyErr
 	}
@@ -633,7 +635,9 @@ func writeDaemonStats(ctx context.Context, proxySrv *proxy.Server, tracker *daem
 
 // buildProxyServer creates the HTTPS proxy server with policy and optional
 // MITM interceptor. Returns a status string for the startup banner.
-func buildProxyServer(addr string, interactive bool, logger zerolog.Logger) (*proxy.Server, string, error) {
+// emitter is injected so the proxy can publish ambient network activity to
+// the daemon's in-memory store without circular imports.
+func buildProxyServer(addr string, interactive bool, logger zerolog.Logger, emitter proxy.NetworkEventEmitter) (*proxy.Server, string, error) {
 	proxyCfg, _ := proxy.LoadConfig(".")
 
 	var policy proxy.Decider
@@ -664,6 +668,7 @@ func buildProxyServer(addr string, interactive bool, logger zerolog.Logger) (*pr
 		Policy:      policy,
 		Interceptor: interceptor,
 		Logger:      logger,
+		Emitter:     emitter,
 	}
 
 	return srv, status, nil
