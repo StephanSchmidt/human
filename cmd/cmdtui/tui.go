@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/internal/agent"
 	"github.com/StephanSchmidt/human/internal/browser"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
@@ -260,6 +262,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleOpenBrowser()
 	case "n":
 		return m.handleCreateStart()
+	case "a":
+		return m.handleSpawnAgent()
 	default:
 		return m.handleTabKey(msg)
 	}
@@ -303,16 +307,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSnapshot(msg)
 	case issueTickMsg:
 		return m.handleIssueTick()
-	case issuesResultMsg:
-		m.handleIssuesResult(msg)
-	case dispatchResultMsg:
-		m.handleDispatchResult(msg)
-	case openBrowserMsg:
-		m.handleOpenBrowserResult(msg)
-	case pendingConfirmsMsg:
-		m.handlePendingConfirms(msg)
-	case confirmDecisionMsg:
-		m.handleConfirmDecision(msg)
+	case issuesResultMsg, dispatchResultMsg, openBrowserMsg, spawnAgentMsg, pendingConfirmsMsg, confirmDecisionMsg:
+		m.handleResultMsg(msg)
 	case createResultMsg:
 		return m.handleCreateResult(msg)
 	case spinner.TickMsg:
@@ -534,6 +530,66 @@ func openBrowserCmd(url, issueKey string) tea.Cmd {
 	}
 }
 
+// --- spawn agent via tmux split ---
+
+type spawnAgentMsg struct {
+	name string
+	err  error
+}
+
+func (m model) handleSpawnAgent() (tea.Model, tea.Cmd) {
+	if os.Getenv("TMUX") == "" {
+		m.dispatchStatus = "Not in tmux"
+		m.dispatchAt = time.Now()
+		return m, nil
+	}
+	name := nextAgentName()
+	m.dispatchStatus = fmt.Sprintf("Spawning %s...", name)
+	m.dispatchAt = time.Now()
+	return m, spawnAgentCmd(name)
+}
+
+func (m *model) handleSpawnAgentResult(msg spawnAgentMsg) {
+	if msg.err != nil {
+		m.dispatchStatus = fmt.Sprintf("Spawn failed: %s", msg.err)
+	} else {
+		m.dispatchStatus = fmt.Sprintf("Spawned %s", msg.name)
+	}
+	m.dispatchAt = time.Now()
+}
+
+func spawnAgentCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		humanExe, err := os.Executable()
+		if err != nil {
+			return spawnAgentMsg{name: name, err: fmt.Errorf("cannot find executable: %w", err)}
+		}
+		cwd, _ := os.Getwd()
+		agentCmd := fmt.Sprintf("%s agent start %s --interactive", humanExe, name)
+
+		runner := claude.OSCommandRunner{}
+		_, err = runner.Run(context.Background(), "tmux", "split-window", "-h", "-c", cwd, agentCmd)
+		return spawnAgentMsg{name: name, err: err}
+	}
+}
+
+// nextAgentName returns agent-1, agent-2, etc. based on existing agent metadata.
+func nextAgentName() string {
+	metas, err := agent.ListMetas()
+	if err != nil {
+		return fmt.Sprintf("agent-%d", time.Now().Unix())
+	}
+	maxN := 0
+	for _, m := range metas {
+		if strings.HasPrefix(m.Name, "agent-") {
+			if n, parseErr := strconv.Atoi(strings.TrimPrefix(m.Name, "agent-")); parseErr == nil && n > maxN {
+				maxN = n
+			}
+		}
+	}
+	return fmt.Sprintf("agent-%d", maxN+1)
+}
+
 // --- destructive confirmation overlay ---
 
 func (m model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -625,6 +681,23 @@ func (m *model) applyWindowSize(msg tea.WindowSizeMsg) {
 }
 
 // handleDefault routes unmatched messages: logModeMsg, and create form delegation.
+func (m *model) handleResultMsg(msg tea.Msg) {
+	switch msg := msg.(type) {
+	case issuesResultMsg:
+		m.handleIssuesResult(msg)
+	case dispatchResultMsg:
+		m.handleDispatchResult(msg)
+	case openBrowserMsg:
+		m.handleOpenBrowserResult(msg)
+	case spawnAgentMsg:
+		m.handleSpawnAgentResult(msg)
+	case pendingConfirmsMsg:
+		m.handlePendingConfirms(msg)
+	case confirmDecisionMsg:
+		m.handleConfirmDecision(msg)
+	}
+}
+
 func (m model) handleDefault(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if lm, ok := msg.(logModeMsg); ok {
 		m.logMode = string(lm)
@@ -1319,7 +1392,7 @@ func renderFooter(w int, logMode, dispatchStatus string, showTabs bool) string {
 	if dispatchStatus != "" {
 		left += "  " + specialStyle.Render(dispatchStatus)
 	}
-	keys := "j/k nav  ⏎ send  o open  n new  l log  q quit"
+	keys := "j/k nav  ⏎ send  o open  n new  a agent  l log  q quit"
 	if showTabs {
 		keys = "Tab switch  " + keys
 	}

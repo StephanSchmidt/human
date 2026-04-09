@@ -1234,3 +1234,40 @@ func TestModelView_TabBarSingleProject(t *testing.T) {
 	assert.Contains(t, view, "1:cli")
 	assert.Contains(t, view, "Tab switch")
 }
+
+func TestNextAgentName(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	// No existing agents: should return agent-1.
+	name := nextAgentName()
+	assert.Equal(t, "agent-1", name)
+}
+
+func TestHandleSpawnAgent_NotInTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+
+	m := testModel()
+	result, cmd := m.handleSpawnAgent()
+	resultModel := result.(model)
+
+	assert.Nil(t, cmd)
+	assert.Contains(t, resultModel.dispatchStatus, "Not in tmux")
+}
+
+func TestHandleSpawnAgentResult_Success(t *testing.T) {
+	m := testModel()
+	m.handleSpawnAgentResult(spawnAgentMsg{name: "agent-1"})
+	assert.Contains(t, m.dispatchStatus, "Spawned agent-1")
+}
+
+func TestHandleSpawnAgentResult_Error(t *testing.T) {
+	m := testModel()
+	m.handleSpawnAgentResult(spawnAgentMsg{name: "agent-1", err: fmt.Errorf("pane too small")})
+	assert.Contains(t, m.dispatchStatus, "Spawn failed")
+}
+
+func TestFooterContainsAgentHint(t *testing.T) {
+	footer := renderFooter(80, "", "", false)
+	assert.Contains(t, footer, "a agent")
+}
