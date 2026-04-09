@@ -636,8 +636,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, buf.String(), "Wrote .devcontainer/devcontainer.json")
-	assert.Contains(t, hints, "  1. Start the daemon:  human daemon start")
-	assert.Contains(t, hints, "  2. Start container:  export HUMAN_DAEMON_TOKEN=$(human daemon token) && devcontainer up --workspace-folder .")
+	assert.Contains(t, hints, "  Start container:  human devcontainer up")
 
 	data := string(fw.files[".devcontainer/devcontainer.json"])
 	assert.Contains(t, data, "mcr.microsoft.com/devcontainers/base:ubuntu")

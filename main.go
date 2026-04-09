@@ -19,6 +19,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdbrowser"
 	"github.com/StephanSchmidt/human/cmd/cmdclickup"
 	"github.com/StephanSchmidt/human/cmd/cmddaemon"
+	"github.com/StephanSchmidt/human/cmd/cmddevcontainer"
 	"github.com/StephanSchmidt/human/cmd/cmdfigma"
 	"github.com/StephanSchmidt/human/cmd/cmdindex"
 	"github.com/StephanSchmidt/human/cmd/cmdinit"
@@ -282,6 +283,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	agentCmd.GroupID = "utility"
 	rootCmd.AddCommand(agentCmd)
 
+	devcontainerCmd := cmddevcontainer.BuildDevcontainerCmd()
+	devcontainerCmd.GroupID = "utility"
+	rootCmd.AddCommand(devcontainerCmd)
+
 	pingCmd := cmdping.BuildPingCmd()
 	pingCmd.GroupID = "utility"
 	rootCmd.AddCommand(pingCmd)
@@ -402,6 +407,7 @@ var localSubcommands = map[string]bool{
 	"proxy":         true,
 	"hook":          true,
 	"agent":         true,
+	"devcontainer":  true,
 }
 
 // globalValueFlags lists global persistent flags that take a value. When these

@@ -93,9 +93,9 @@ func (s *devcontainerStep) Run(w io.Writer, fw claude.FileWriter) ([]string, err
 	_, _ = fmt.Fprintf(w, "Wrote %s\n", devcontainerPath)
 
 	hints := []string{
-		"Next steps (run on the host before starting the container):",
-		"  1. Start the daemon:  human daemon start",
-		"  2. Start container:  export HUMAN_DAEMON_TOKEN=$(human daemon token) && devcontainer up --workspace-folder .",
+		"Next steps:",
+		"  Start container:  human devcontainer up",
+		"  (This auto-starts the daemon and injects all connectivity.)",
 	}
 	hints = append(hints, checkDevcontainerPrereqs()...)
 

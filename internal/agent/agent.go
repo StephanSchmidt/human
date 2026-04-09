@@ -29,19 +29,21 @@ const (
 
 // Meta holds the persisted metadata for a single agent.
 type Meta struct {
-	Name        string    `json:"name"`
-	SessionName string    `json:"session_name"`
-	WorktreeDir string    `json:"worktree_dir,omitempty"`
-	Cwd         string    `json:"cwd"`
-	Prompt      string    `json:"prompt,omitempty"`
-	TicketKey   string    `json:"ticket_key,omitempty"`
-	Status      Status    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	StoppedAt   time.Time `json:"stopped_at,omitempty"`
-	PID         int       `json:"pid,omitempty"`
-	Branch      string    `json:"branch,omitempty"`
-	SkipPerms   bool      `json:"skip_perms,omitempty"`
-	Model       string    `json:"model,omitempty"`
+	Name          string    `json:"name"`
+	SessionName   string    `json:"session_name"`
+	WorktreeDir   string    `json:"worktree_dir,omitempty"`
+	Cwd           string    `json:"cwd"`
+	Prompt        string    `json:"prompt,omitempty"`
+	TicketKey     string    `json:"ticket_key,omitempty"`
+	Status        Status    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	StoppedAt     time.Time `json:"stopped_at,omitempty"`
+	PID           int       `json:"pid,omitempty"`
+	Branch        string    `json:"branch,omitempty"`
+	SkipPerms     bool      `json:"skip_perms,omitempty"`
+	Model         string    `json:"model,omitempty"`
+	ContainerID   string    `json:"container_id,omitempty"`
+	ContainerName string    `json:"container_name,omitempty"`
 }
 
 // TmuxSessionName returns the tmux session name for the given agent name.

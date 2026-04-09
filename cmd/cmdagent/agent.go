@@ -46,6 +46,7 @@ func buildStartCmd(mgr *agent.Manager, deps cmdutil.Deps) *cobra.Command {
 	var model string
 	var noWorktree bool
 	var skipPerms bool
+	var useContainer bool
 
 	cmd := &cobra.Command{
 		Use:   "start NAME",
@@ -54,6 +55,10 @@ func buildStartCmd(mgr *agent.Manager, deps cmdutil.Deps) *cobra.Command {
 
 By default a git worktree is created in .worktrees/<name> for isolation.
 Use --no-worktree to run in the current directory instead.
+
+Use --container to run inside a devcontainer (requires Docker and a
+.devcontainer/devcontainer.json in the project). Multiple container agents
+can run in parallel, each with their own worktree mounted into the container.
 
 The agent runs with --permission-mode=auto by default. Use --skip-permissions
 to run with --dangerously-skip-permissions instead.`,
@@ -68,6 +73,7 @@ to run with --dangerously-skip-permissions instead.`,
 				Model:      model,
 				NoWorktree: noWorktree,
 				SkipPerms:  skipPerms,
+				Container:  useContainer,
 			}
 
 			// If ticket is provided but no prompt, fetch the ticket as the prompt.
@@ -83,12 +89,25 @@ to run with --dangerously-skip-permissions instead.`,
 				opts.Prompt = fetchedPrompt
 			}
 
+			// Wire up container starter if --container is used.
+			if useContainer {
+				starter, starterErr := newContainerStarter(cmd)
+				if starterErr != nil {
+					return starterErr
+				}
+				mgr.ContainerStarter = starter
+			}
+
 			meta, err := mgr.Start(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q started (session: %s)\n", meta.Name, meta.SessionName)
+			if meta.ContainerID != "" {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q started (container: %s)\n", meta.Name, meta.ContainerName)
+			} else {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q started (session: %s)\n", meta.Name, meta.SessionName)
+			}
 			if meta.WorktreeDir != "" {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Worktree: %s\n", meta.WorktreeDir)
 			}
@@ -102,6 +121,7 @@ to run with --dangerously-skip-permissions instead.`,
 	cmd.Flags().StringVar(&model, "model", "", "Claude model to use")
 	cmd.Flags().BoolVar(&noWorktree, "no-worktree", false, "Run in the current directory instead of creating a worktree")
 	cmd.Flags().BoolVar(&skipPerms, "skip-permissions", false, "Run with --dangerously-skip-permissions")
+	cmd.Flags().BoolVar(&useContainer, "container", false, "Run inside a devcontainer (requires Docker)")
 	return cmd
 }
 

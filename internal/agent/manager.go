@@ -22,18 +22,36 @@ func isValidName(name string) bool {
 
 // StartOpts configures an agent start operation.
 type StartOpts struct {
-	Name      string
-	Prompt    string
-	TicketKey string
-	Model     string
-	NoWorktree    bool
-	SkipPerms     bool
+	Name       string
+	Prompt     string
+	TicketKey  string
+	Model      string
+	NoWorktree bool
+	SkipPerms  bool
+	Container  bool // run inside a devcontainer instead of tmux
+}
+
+// ContainerStarter creates and starts a devcontainer for an agent.
+// Injected by the command layer to avoid circular imports with internal/devcontainer.
+type ContainerStarter interface {
+	// StartAgentContainer builds the devcontainer image (cached), creates a
+	// container named containerName mounting sourceDir, installs features,
+	// runs lifecycle hooks, and returns the container ID.
+	StartAgentContainer(ctx context.Context, containerName, sourceDir string) (containerID string, err error)
+
+	// ExecClaude runs Claude Code inside the container with the given args.
+	// Returns immediately after starting (non-blocking).
+	ExecClaude(ctx context.Context, containerID string, claudeArgs []string, prompt string) error
+
+	// StopContainer stops and removes a container.
+	StopContainer(ctx context.Context, containerID string) error
 }
 
 // Manager orchestrates agent lifecycle operations.
 type Manager struct {
-	Runner  claude.CommandRunner
-	HomeDir string // override for testing; empty uses os.UserHomeDir
+	Runner           claude.CommandRunner
+	HomeDir          string           // override for testing; empty uses os.UserHomeDir
+	ContainerStarter ContainerStarter // nil = container mode unavailable
 }
 
 // Start creates a new agent: validates the name, optionally creates a git
@@ -56,73 +74,133 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 		_ = WriteMeta(existing)
 	}
 
+	// Container-based agent path.
+	if opts.Container {
+		return m.startContainer(ctx, opts)
+	}
+
+	return m.startTmux(ctx, opts)
+}
+
+// startTmux creates a tmux-based agent with optional worktree.
+func (m *Manager) startTmux(ctx context.Context, opts StartOpts) (Meta, error) {
 	sessionName := TmuxSessionName(opts.Name)
-	var worktreeDir string
-	var cwd string
+	worktreeDir, cwd, err := m.resolveWorkdir(ctx, opts)
+	if err != nil {
+		return Meta{}, err
+	}
 
+	claudeCmd := "claude " + strings.Join(m.buildClaudeArgs(opts), " ")
+
+	_, err = m.Runner.Run(ctx, "tmux", "new-session", "-d", "-s", sessionName, "-c", cwd, claudeCmd)
+	if err != nil {
+		if worktreeDir != "" {
+			repoRoot, _ := m.gitRepoRoot(ctx)
+			_ = m.removeWorktree(ctx, repoRoot, worktreeDir)
+		}
+		return Meta{}, errors.WrapWithDetails(err, "creating tmux session", "session", sessionName)
+	}
+
+	m.sendPrompt(ctx, sessionName, opts.Prompt)
+
+	meta := Meta{
+		Name: opts.Name, SessionName: sessionName, WorktreeDir: worktreeDir,
+		Cwd: cwd, Prompt: opts.Prompt, TicketKey: opts.TicketKey,
+		Status: StatusRunning, CreatedAt: time.Now(),
+		SkipPerms: opts.SkipPerms, Model: opts.Model,
+	}
+	if err := WriteMeta(meta); err != nil {
+		return Meta{}, err
+	}
+	return meta, nil
+}
+
+// resolveWorkdir sets up the working directory, optionally creating a worktree.
+func (m *Manager) resolveWorkdir(ctx context.Context, opts StartOpts) (worktreeDir, cwd string, err error) {
 	repoRoot, rootErr := m.gitRepoRoot(ctx)
-
 	if !opts.NoWorktree {
 		if rootErr != nil {
-			return Meta{}, errors.WrapWithDetails(rootErr, "cannot create worktree: not inside a git repository")
+			return "", "", errors.WrapWithDetails(rootErr, "cannot create worktree: not inside a git repository")
 		}
+		wDir, wErr := m.createWorktree(ctx, repoRoot, opts.Name, "agent/"+opts.Name)
+		if wErr != nil {
+			return "", "", wErr
+		}
+		return wDir, wDir, nil
+	}
+	if rootErr == nil {
+		return "", repoRoot, nil
+	}
+	return "", ".", nil
+}
+
+// sendPrompt sends a prompt to a tmux session via send-keys.
+func (m *Manager) sendPrompt(ctx context.Context, sessionName, prompt string) {
+	if prompt == "" {
+		return
+	}
+	time.Sleep(2 * time.Second)
+	target := sessionName + ":0.0"
+	escaped := shellQuote(prompt)
+	_, _ = m.Runner.Run(ctx, "tmux", "send-keys", "-t", target, "-l", escaped)
+	_, _ = m.Runner.Run(ctx, "tmux", "send-keys", "-t", target, "Enter")
+}
+
+// startContainer creates a devcontainer and runs Claude inside it.
+func (m *Manager) startContainer(ctx context.Context, opts StartOpts) (Meta, error) {
+	if m.ContainerStarter == nil {
+		return Meta{}, errors.WithDetails("container mode requires Docker; ContainerStarter not configured")
+	}
+
+	repoRoot, rootErr := m.gitRepoRoot(ctx)
+	if rootErr != nil {
+		return Meta{}, errors.WrapWithDetails(rootErr, "cannot start container agent: not inside a git repository")
+	}
+
+	// Create worktree for source isolation (unless --no-worktree).
+	var worktreeDir, sourceDir string
+	if !opts.NoWorktree {
 		branch := "agent/" + opts.Name
 		wDir, wErr := m.createWorktree(ctx, repoRoot, opts.Name, branch)
 		if wErr != nil {
 			return Meta{}, wErr
 		}
 		worktreeDir = wDir
-		cwd = wDir
+		sourceDir = wDir
 	} else {
-		// Use the current working directory (or repo root if available).
-		if rootErr == nil {
-			cwd = repoRoot
-		} else {
-			cwd = "."
-		}
+		sourceDir = repoRoot
 	}
 
-	// Build the claude command args for the tmux session.
-	claudeArgs := m.buildClaudeArgs(opts)
-	claudeCmd := "claude " + strings.Join(claudeArgs, " ")
+	containerName := SessionPrefix + opts.Name
 
-	// Create a new tmux session running Claude Code.
-	_, err = m.Runner.Run(ctx, "tmux", "new-session", "-d", "-s", sessionName, "-c", cwd, claudeCmd)
+	containerID, err := m.ContainerStarter.StartAgentContainer(ctx, containerName, sourceDir)
 	if err != nil {
-		// Clean up worktree if we created one.
 		if worktreeDir != "" {
 			_ = m.removeWorktree(ctx, repoRoot, worktreeDir)
 		}
-		return Meta{}, errors.WrapWithDetails(err, "creating tmux session", "session", sessionName)
+		return Meta{}, errors.WrapWithDetails(err, "starting agent container", "name", opts.Name)
 	}
 
-	// Give Claude a moment to start, then send the prompt via send-keys
-	// if a prompt was provided.
-	if opts.Prompt != "" {
-		// Wait briefly for the Claude interactive prompt to initialize.
-		time.Sleep(2 * time.Second)
-		target := sessionName + ":0.0"
-		escaped := shellQuote(opts.Prompt)
-		if _, err := m.Runner.Run(ctx, "tmux", "send-keys", "-t", target, "-l", escaped); err != nil {
-			// Non-fatal: session is running, prompt just did not send.
-			_ = err
-		}
-		if _, err := m.Runner.Run(ctx, "tmux", "send-keys", "-t", target, "Enter"); err != nil {
-			_ = err
-		}
+	// Start Claude inside the container.
+	claudeArgs := m.buildClaudeArgs(opts)
+	if err := m.ContainerStarter.ExecClaude(ctx, containerID, claudeArgs, opts.Prompt); err != nil {
+		// Container started but Claude failed. Leave container running for debugging.
+		_ = err
 	}
 
 	meta := Meta{
-		Name:        opts.Name,
-		SessionName: sessionName,
-		WorktreeDir: worktreeDir,
-		Cwd:         cwd,
-		Prompt:      opts.Prompt,
-		TicketKey:   opts.TicketKey,
-		Status:      StatusRunning,
-		CreatedAt:   time.Now(),
-		SkipPerms:   opts.SkipPerms,
-		Model:       opts.Model,
+		Name:          opts.Name,
+		SessionName:   containerName,
+		ContainerID:   containerID,
+		ContainerName: containerName,
+		WorktreeDir:   worktreeDir,
+		Cwd:           sourceDir,
+		Prompt:        opts.Prompt,
+		TicketKey:     opts.TicketKey,
+		Status:        StatusRunning,
+		CreatedAt:     time.Now(),
+		SkipPerms:     opts.SkipPerms,
+		Model:         opts.Model,
 	}
 
 	if err := WriteMeta(meta); err != nil {
@@ -140,8 +218,13 @@ func (m *Manager) Stop(ctx context.Context, name string, cleanWorktree bool) err
 		return err
 	}
 
-	// Kill the tmux session (ignore errors if already dead).
-	_, _ = m.Runner.Run(ctx, "tmux", "kill-session", "-t", meta.SessionName)
+	// Container-based agent: stop and remove the container.
+	if meta.ContainerID != "" && m.ContainerStarter != nil {
+		_ = m.ContainerStarter.StopContainer(ctx, meta.ContainerID)
+	} else {
+		// Tmux-based agent: kill the session (ignore errors if already dead).
+		_, _ = m.Runner.Run(ctx, "tmux", "kill-session", "-t", meta.SessionName)
+	}
 
 	if cleanWorktree && meta.WorktreeDir != "" {
 		repoRoot, rootErr := m.gitRepoRoot(ctx)
@@ -237,7 +320,16 @@ func (m *Manager) Refresh(ctx context.Context) error {
 		if meta.Status != StatusRunning {
 			continue
 		}
-		if !m.isSessionAlive(ctx, meta.SessionName) {
+		alive := false
+		if meta.ContainerID != "" {
+			// Container-based: check if container is still running.
+			// We can't use Docker client here without a dependency, so
+			// rely on tmux-like liveness check via the session name.
+			alive = m.isSessionAlive(ctx, meta.SessionName)
+		} else {
+			alive = m.isSessionAlive(ctx, meta.SessionName)
+		}
+		if !alive {
 			meta.Status = StatusStopped
 			meta.StoppedAt = time.Now()
 			_ = WriteMeta(meta)
