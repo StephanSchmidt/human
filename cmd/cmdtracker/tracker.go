@@ -73,7 +73,7 @@ func RunTrackerList(out io.Writer, dir string, table bool, loader func(string) (
 
 	entries := make([]TrackerEntry, len(instances))
 	for i, inst := range instances {
-		entries[i] = TrackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Role: inst.Role, Description: inst.Description}
+		entries[i] = TrackerEntry{Name: inst.Name, Type: inst.Kind, URL: inst.URL, User: inst.User, Role: inst.InferRole(), Description: inst.Description}
 	}
 
 	if table {

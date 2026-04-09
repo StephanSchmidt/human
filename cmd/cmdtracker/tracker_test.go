@@ -425,6 +425,24 @@ func TestBuildTrackerCmd_FindLoaderError(t *testing.T) {
 	assert.Contains(t, err.Error(), "cannot load")
 }
 
+// --- Inferred role ---
+
+func TestRunTrackerList_InferredRole(t *testing.T) {
+	instances := []tracker.Instance{
+		{Name: "pm", Kind: "shortcut", URL: "https://shortcut.com"},
+		{Name: "eng", Kind: "linear", URL: "https://linear.app"},
+		{Name: "custom", Kind: "jira", URL: "https://jira.example.com", Role: "pm"},
+	}
+	var buf bytes.Buffer
+	err := RunTrackerList(&buf, ".", false, loaderOK(instances))
+	require.NoError(t, err)
+
+	out := buf.String()
+	// Shortcut infers "pm", Linear infers "engineering", Jira has explicit "pm"
+	assert.Contains(t, out, `"role": "pm"`)
+	assert.Contains(t, out, `"role": "engineering"`)
+}
+
 // --- Multiple instances mapping ---
 
 func TestRunTrackerList_MapsInstanceFields(t *testing.T) {

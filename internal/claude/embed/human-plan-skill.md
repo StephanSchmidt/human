@@ -44,10 +44,22 @@ If the verification reports found **issues** (mismatches, missing references, un
   - Replace deprecated APIs with their replacements
   - Mark unverifiable claims with "UNVERIFIED — confirm before implementing"
 
-Then ask the user which tracker and project to create the engineering ticket on:
+## Phase 4: Confidence check
 
-1. Ask via `AskUserQuestion`: "Which tracker should the engineering ticket be created on? (e.g. linear, jira, github, gitlab, azuredevops, shortcut)"
-2. Ask via `AskUserQuestion`: "What project should the ticket be created in? (e.g. 'HUM' for Linear, 'myorg/myrepo' for GitHub)"
+After finalizing the plan, review it yourself end-to-end:
+
+1. For every API call, library function, or external integration in the plan, verify the function signatures, parameters, and return types against real documentation (use `WebFetch` or `WebSearch` if needed) or against the actual source code in the codebase.
+2. For every file path, function name, type, and interface referenced in the plan, grep the codebase to confirm they exist and match the plan's assumptions.
+3. Rate your confidence that the plan can be implemented as-is without the executor needing to make design decisions or discover missing information. If you are not fully confident:
+   - Fix every gap, wrong assumption, or ambiguity in the plan now.
+   - Re-verify the fixes against docs and code.
+   - Repeat until you are confident the plan is correct and complete.
+
+Only proceed to ticket creation once you are confident the plan will work.
+
+## Phase 5: Create ticket
+
+Then resolve the engineering tracker: run `human tracker list` and pick the tracker with `"role": "engineering"`. Use its `type` as the tracker and its first configured project. If no tracker has role `engineering`, fall back to asking the user via `AskUserQuestion`.
 
 Confirm the plan has a `**PM ticket**:` line in its header referencing the original PM ticket key. If it is missing, add it before creating the engineering ticket so the executor can reference both tickets in commits.
 
