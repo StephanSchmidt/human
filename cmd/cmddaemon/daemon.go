@@ -84,31 +84,38 @@ func buildDaemonStartCmd(cmdFactory func() *cobra.Command, version string) *cobr
 	return cmd
 }
 
-// runDaemonForeground runs the daemon in the current process (blocking).
-// It writes a PID file on start and removes it on shutdown.
-func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool, projectDirs []string, cmdFactory func() *cobra.Command, version string) error {
-	_ = version // reserved for future use
+// daemonState holds initialized daemon components before the main event loop.
+type daemonState struct {
+	srv           *daemon.Server
+	ctx           context.Context
+	stop          context.CancelFunc
+	logger        zerolog.Logger
+	connTracker   *daemon.ConnectedTracker
+	networkStore  *daemon.NetworkEventStore
+	vaultResolver *vault.Resolver
+}
 
+// initDaemon performs the early initialization steps for the daemon: token,
+// PID file, project registry, daemon info, and signal context.
+func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, debug bool, projectDirs []string, cmdFactory func() *cobra.Command) (*daemonState, error) {
 	token, err := daemon.LoadOrCreateToken()
 	if err != nil {
-		return errors.WrapWithDetails(err, "failed to load/create token")
+		return nil, errors.WrapWithDetails(err, "failed to load/create token")
 	}
 
 	if err := WritePidFile(os.Getpid()); err != nil {
-		return errors.WrapWithDetails(err, "failed to write PID file")
+		return nil, errors.WrapWithDetails(err, "failed to write PID file")
 	}
-	defer RemovePidFile()
 
 	projectRegistry, projectInfos, err := buildProjectRegistry(projectDirs)
 	if err != nil {
-		return errors.WrapWithDetails(err, "failed to build project registry")
+		return nil, errors.WrapWithDetails(err, "failed to build project registry")
 	}
 
 	out := cmd.OutOrStdout()
 	hostIP := resolveHostIP()
 	daemonAddr := replaceHost(addr, hostIP)
 	chromeFullAddr := replaceHost(chromeAddr, hostIP)
-
 	proxyFullAddr := replaceHost(proxyAddr, hostIP)
 
 	info := daemon.DaemonInfo{
@@ -120,31 +127,20 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		Projects:   projectInfos,
 	}
 	if err := daemon.WriteInfo(info); err != nil {
-		return errors.WrapWithDetails(err, "failed to write daemon info")
+		return nil, errors.WrapWithDetails(err, "failed to write daemon info")
 	}
-	defer daemon.RemoveInfo()
 
 	printStartBanner(out, token, addr, chromeAddr, proxyAddr, daemonAddr, chromeFullAddr, proxyFullAddr, projectInfos)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	logger := newDaemonLogger(debug)
-
-	// Initialize vault resolver from the first project's .humanconfig vault section.
-	// The resolver is session-scoped (one op read per ref per daemon lifetime).
 	vaultResolver := buildVaultResolver(projectRegistry, logger)
 
 	connTracker := daemon.NewConnectedTracker()
-
 	hookStore := daemon.NewHookEventStore()
 	networkStore := daemon.NewNetworkEventStore()
 	confirmStore := daemon.NewPendingConfirmStore()
 
-	// Periodically purge stale confirmations so a TUI that misses an event
-	// (or never connects) cannot leak entries indefinitely. The maxAge is
-	// twice the per-request confirmation timeout, which gives the TUI a
-	// generous window to resolve a normal prompt.
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -173,23 +169,91 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		PendingConfirms:  confirmStore,
 	}
 
-	// Start socket relay to accept Chrome native messaging
-	// connections directly (harmless, may be useful later).
+	return &daemonState{
+		srv:           srv,
+		ctx:           ctx,
+		stop:          stop,
+		logger:        logger,
+		connTracker:   connTracker,
+		networkStore:  networkStore,
+		vaultResolver: vaultResolver,
+	}, nil
+}
+
+// runDaemonForeground runs the daemon in the current process (blocking).
+// It writes a PID file on start and removes it on shutdown.
+func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, interactive, safe, debug bool, projectDirs []string, cmdFactory func() *cobra.Command, version string) error {
+	_ = version // reserved for future use
+
+	ds, err := initDaemon(cmd, addr, chromeAddr, proxyAddr, safe, debug, projectDirs, cmdFactory)
+	if err != nil {
+		return err
+	}
+	defer RemovePidFile()
+	defer daemon.RemoveInfo()
+	defer ds.stop()
+
+	out := cmd.OutOrStdout()
+	ctx := ds.ctx
+	logger := ds.logger
+
+	startChromeServices(ctx, chromeAddr, ds.srv.Token, logger)
+
+	proxySrv, proxyStatus, proxyErr := buildProxyServer(proxyAddr, interactive, logger, ds.networkStore)
+	if proxyErr != nil {
+		return proxyErr
+	}
+	if proxyStatus != "" {
+		_, _ = fmt.Fprintln(out, proxyStatus)
+	}
+
+	go func() {
+		if err := proxySrv.ListenAndServe(ctx); err != nil {
+			logger.Error().Err(err).Msg("https proxy failed")
+		}
+	}()
+
+	statsPath := proxy.StatsPath()
+	connectedPath := daemon.ConnectedPath()
+	go writeDaemonStats(ctx, proxySrv, ds.connTracker, statsPath, connectedPath)
+	defer proxy.RemoveStats(statsPath)
+	defer daemon.RemoveConnected(connectedPath)
+
+	cwd, _ := os.Getwd()
+	if unmount := fuseMount(cwd, safe, logger); unmount != nil {
+		defer unmount()
+	}
+
+	slackNotifier, slackStatus := startSlackNotifier(logger, ds.vaultResolver)
+	if slackStatus != "" {
+		_, _ = fmt.Fprintln(out, "Slack notifications:", slackStatus)
+	}
+
+	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier, ds.vaultResolver)
+	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
+
+	if err := claude.InstallHooks(out, claude.OSFileWriter{}); err != nil {
+		logger.Warn().Err(err).Msg("hook upgrade failed")
+	}
+
+	return ds.srv.ListenAndServe(ctx)
+}
+
+// startChromeServices launches the socket relay and Chrome MCP proxy.
+func startChromeServices(ctx context.Context, chromeAddr, token string, logger zerolog.Logger) {
 	socketDir, sdErr := chrome.SocketDir()
 	if sdErr != nil {
-		return errors.WrapWithDetails(sdErr, "resolving socket directory")
+		logger.Warn().Err(sdErr).Msg("resolving socket directory")
+		return
 	}
 
 	relay := chrome.NewSocketRelay(socketDir, logger)
-
 	go func() {
 		if err := relay.ListenAndServe(ctx); err != nil {
 			logger.Error().Err(err).Msg("socket relay failed")
 		}
 	}()
 
-	// Chrome proxy: spawn claude --claude-in-chrome-mcp on the host
-	// and translate between 4-byte LE socket framing and JSON-RPC stdio.
 	claudePath, lookErr := exec.LookPath("claude")
 	if lookErr != nil {
 		logger.Warn().Err(lookErr).Msg("claude not found in PATH, chrome proxy will fail on connection")
@@ -210,50 +274,6 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 			logger.Error().Err(err).Msg("chrome proxy server failed")
 		}
 	}()
-
-	proxySrv, proxyStatus, proxyErr := buildProxyServer(proxyAddr, interactive, logger, networkStore)
-	if proxyErr != nil {
-		return proxyErr
-	}
-	if proxyStatus != "" {
-		_, _ = fmt.Fprintln(out, proxyStatus)
-	}
-
-	go func() {
-		if err := proxySrv.ListenAndServe(ctx); err != nil {
-			logger.Error().Err(err).Msg("https proxy failed")
-		}
-	}()
-
-	// Periodically write daemon stats (proxy connections + connected PIDs) for the TUI.
-	statsPath := proxy.StatsPath()
-	connectedPath := daemon.ConnectedPath()
-	go writeDaemonStats(ctx, proxySrv, connTracker, statsPath, connectedPath)
-	defer proxy.RemoveStats(statsPath)
-	defer daemon.RemoveConnected(connectedPath)
-
-	// Start FUSE .env filter (Linux only; no-op on other platforms)
-	cwd, _ := os.Getwd()
-	if unmount := fuseMount(cwd, safe, logger); unmount != nil {
-		defer unmount()
-	}
-
-	// Start Slack notifier (if configured).
-	slackNotifier, slackStatus := startSlackNotifier(logger, vaultResolver)
-	if slackStatus != "" {
-		_, _ = fmt.Fprintln(out, "Slack notifications:", slackStatus)
-	}
-
-	// Start Telegram dispatch loop (if configured).
-	telegramStatus := startTelegramDispatcher(ctx, logger, slackNotifier, vaultResolver)
-	_, _ = fmt.Fprintln(out, "Telegram dispatch:", telegramStatus)
-
-	// Auto-upgrade lifecycle hooks in ~/.claude/settings.json.
-	if err := claude.InstallHooks(out, claude.OSFileWriter{}); err != nil {
-		logger.Warn().Err(err).Msg("hook upgrade failed")
-	}
-
-	return srv.ListenAndServe(ctx)
 }
 
 // runDaemonBackground re-execs the current binary as a detached child process.

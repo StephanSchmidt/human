@@ -111,55 +111,68 @@ func detectTier(server *fuse.Server) string {
 // is intentionally broad: matching a parent directory also marks the
 // file as opaque so nothing under a credential directory leaks through
 // the non-sensitive fast path.
+// sensitiveDirs lists parent directories whose descendants always contain secrets.
+var sensitiveDirs = []string{
+	"/.aws/", "/.kube/", "/.docker/", "/.gnupg/", "/.ssh/",
+}
+
+// envFiles maps basenames to FileKindEnv for KEY=VALUE credential files.
+var envFiles = map[string]bool{
+	".npmrc": true, ".pypirc": true, ".netrc": true,
+	".authinfo": true, ".gitconfig": true, ".git-credentials": true,
+}
+
+// sshKeyFiles lists SSH private key basenames.
+var sshKeyFiles = map[string]bool{
+	"id_rsa": true, "id_ed25519": true, "id_ecdsa": true, "id_dsa": true,
+}
+
+// secretJSONFiles maps lowered basenames to FileKindJSON.
+var secretJSONFiles = map[string]bool{
+	"credentials.json": true, "service-account.json": true, "secrets.json": true,
+}
+
+// secretYAMLFiles maps lowered basenames to FileKindYAML.
+var secretYAMLFiles = map[string]bool{
+	"secrets.yml": true, "secrets.yaml": true,
+	".humanconfig": true, ".humanconfig.yaml": true, ".humanconfig.yml": true,
+}
+
+// opaqueExtensions lists file extensions that are always opaque.
+var opaqueExtensions = map[string]bool{
+	".pem": true, ".key": true, ".p12": true, ".pfx": true,
+}
+
 func IsSensitiveFile(name string) FileKind {
 	base := filepath.Base(name)
 	lower := strings.ToLower(base)
 
-	// Check the full path for parent directories that always contain
-	// secrets. Matching at the directory level means every descendant
+	// Matching at the directory level means every descendant
 	// (e.g. aws/config, kube/token, gnupg/private-keys-v1.d/*) is
 	// treated as opaque even when the basename looks innocent.
-	cleaned := filepath.ToSlash(name)
-	lowerPath := strings.ToLower(cleaned)
-	sensitiveDirs := []string{
-		"/.aws/", "/.kube/", "/.docker/", "/.gnupg/", "/.ssh/",
-	}
+	lowerPath := strings.ToLower(filepath.ToSlash(name))
 	for _, d := range sensitiveDirs {
 		if strings.Contains(lowerPath, d) {
 			return FileKindOpaque
 		}
 	}
 
-	// .env, .env.*
 	if base == ".env" || strings.HasPrefix(base, ".env.") {
 		return FileKindEnv
 	}
-
-	// KEY=VALUE style credential files.
-	switch lower {
-	case ".npmrc", ".pypirc", ".netrc", ".authinfo", ".gitconfig", ".git-credentials":
+	if envFiles[lower] {
 		return FileKindEnv
 	}
-
-	// SSH private keys by convention.
-	if base == "id_rsa" || base == "id_ed25519" || base == "id_ecdsa" || base == "id_dsa" {
+	if sshKeyFiles[base] {
 		return FileKindOpaque
 	}
-
-	// JSON files with secrets
-	if lower == "credentials.json" || lower == "service-account.json" || lower == "secrets.json" {
+	if secretJSONFiles[lower] {
 		return FileKindJSON
 	}
-
-	// YAML files with secrets (including .humanconfig with tracker credentials)
-	switch lower {
-	case "secrets.yml", "secrets.yaml", ".humanconfig", ".humanconfig.yaml", ".humanconfig.yml":
+	if secretYAMLFiles[lower] {
 		return FileKindYAML
 	}
-
-	// Opaque binary/key files — always empty
-	ext := strings.ToLower(filepath.Ext(name))
-	if ext == ".pem" || ext == ".key" || ext == ".p12" || ext == ".pfx" {
+	if opaqueExtensions[strings.ToLower(filepath.Ext(name))] {
 		return FileKindOpaque
 	}
 

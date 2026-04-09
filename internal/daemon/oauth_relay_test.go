@@ -270,7 +270,9 @@ func TestAwaitCallback_LogsParamKeysNotValues(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/callback?code=%s&state=abc", port, secret))
 	require.NoError(t, err)
-	_ = resp.Body.Close()
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 
 	select {
 	case got := <-done:

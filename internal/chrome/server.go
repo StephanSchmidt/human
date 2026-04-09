@@ -57,6 +57,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			s.Logger.Warn().Err(err).Msg("chrome proxy accept error")
 			continue
 		}
+		if conn == nil {
+			continue
+		}
 		select {
 		case sem <- struct{}{}:
 			go func() {

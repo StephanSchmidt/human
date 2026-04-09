@@ -72,51 +72,17 @@ func syncNotionInstance(ctx context.Context, store Store, inst *NotionInstance, 
 	for _, sr := range results {
 		switch sr.Type {
 		case "page":
-			md, err := inst.Client.GetPage(ctx, sr.ID)
-			if err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error fetching page %s: %v\n", sr.ID, err)
+			if err := syncNotionPage(ctx, store, inst, sr, logger); err != nil {
 				result.Errors++
-				continue
+			} else {
+				result.Pages++
 			}
-			entry := Entry{
-				Key:     sr.ID,
-				Source:  inst.Name,
-				Kind:    "notion",
-				Project: inst.Name,
-				Title:   sr.Title,
-				Status:  "page",
-				URL:     sr.URL,
-			}
-			if err := store.UpsertEntry(ctx, entry, md); err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error indexing page %s: %v\n", sr.ID, err)
-				result.Errors++
-				continue
-			}
-			result.Pages++
-
 		case "database":
-			rows, err := inst.Client.QueryDatabase(ctx, sr.ID)
-			if err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error querying database %s: %v\n", sr.ID, err)
+			if err := syncNotionDatabase(ctx, store, inst, sr, logger); err != nil {
 				result.Errors++
-				continue
+			} else {
+				result.Databases++
 			}
-			desc := flattenDatabaseRows(rows)
-			entry := Entry{
-				Key:     sr.ID,
-				Source:  inst.Name,
-				Kind:    "notion",
-				Project: inst.Name,
-				Title:   sr.Title,
-				Status:  "database",
-				URL:     sr.URL,
-			}
-			if err := store.UpsertEntry(ctx, entry, desc); err != nil {
-				_, _ = fmt.Fprintf(logger, "  Error indexing database %s: %v\n", sr.ID, err)
-				result.Errors++
-				continue
-			}
-			result.Databases++
 		}
 	}
 
@@ -136,6 +102,51 @@ func syncNotionInstance(ctx context.Context, store Store, inst *NotionInstance, 
 		}
 	}
 
+	return nil
+}
+
+func syncNotionPage(ctx context.Context, store Store, inst *NotionInstance, sr notion.SearchResult, logger io.Writer) error {
+	md, err := inst.Client.GetPage(ctx, sr.ID)
+	if err != nil {
+		_, _ = fmt.Fprintf(logger, "  Error fetching page %s: %v\n", sr.ID, err)
+		return err
+	}
+	entry := Entry{
+		Key:     sr.ID,
+		Source:  inst.Name,
+		Kind:    "notion",
+		Project: inst.Name,
+		Title:   sr.Title,
+		Status:  "page",
+		URL:     sr.URL,
+	}
+	if err := store.UpsertEntry(ctx, entry, md); err != nil {
+		_, _ = fmt.Fprintf(logger, "  Error indexing page %s: %v\n", sr.ID, err)
+		return err
+	}
+	return nil
+}
+
+func syncNotionDatabase(ctx context.Context, store Store, inst *NotionInstance, sr notion.SearchResult, logger io.Writer) error {
+	rows, err := inst.Client.QueryDatabase(ctx, sr.ID)
+	if err != nil {
+		_, _ = fmt.Fprintf(logger, "  Error querying database %s: %v\n", sr.ID, err)
+		return err
+	}
+	desc := flattenDatabaseRows(rows)
+	entry := Entry{
+		Key:     sr.ID,
+		Source:  inst.Name,
+		Kind:    "notion",
+		Project: inst.Name,
+		Title:   sr.Title,
+		Status:  "database",
+		URL:     sr.URL,
+	}
+	if err := store.UpsertEntry(ctx, entry, desc); err != nil {
+		_, _ = fmt.Fprintf(logger, "  Error indexing database %s: %v\n", sr.ID, err)
+		return err
+	}
 	return nil
 }
 

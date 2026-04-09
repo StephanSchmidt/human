@@ -62,7 +62,11 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 			"keyPath", keyPath, "keyExists", keyExists)
 	}
 
-	// Generate new CA (both files missing).
+	return generateCA(dir, certPath, keyPath)
+}
+
+// generateCA creates a new self-signed CA and writes it to disk.
+func generateCA(dir, certPath, keyPath string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, nil, errors.WrapWithDetails(err, "generating CA key")
@@ -99,23 +103,8 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 		return nil, nil, nil, errors.WrapWithDetails(err, "parsing CA certificate")
 	}
 
-	// Write PEM files.
-	certPEMBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return nil, nil, nil, errors.WrapWithDetails(err, "marshalling CA key")
-	}
-	keyPEMBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, nil, nil, errors.WrapWithDetails(err, "creating CA directory", "dir", dir)
-	}
-	if err := os.WriteFile(certPath, certPEMBlock, 0o644); err != nil { // #nosec G306 -- CA cert must be readable for trust installation
-		return nil, nil, nil, errors.WrapWithDetails(err, "writing CA cert", "path", certPath)
-	}
-	if err := os.WriteFile(keyPath, keyPEMBlock, 0o600); err != nil {
-		return nil, nil, nil, errors.WrapWithDetails(err, "writing CA key", "path", keyPath)
+	if err := writeCAFiles(dir, certPath, keyPath, certDER, key); err != nil {
+		return nil, nil, nil, err
 	}
 
 	tlsCert := &tls.Certificate{
@@ -125,6 +114,28 @@ func LoadOrCreateCA(dir string) (*x509.Certificate, *ecdsa.PrivateKey, *tls.Cert
 	}
 
 	return cert, key, tlsCert, nil
+}
+
+// writeCAFiles persists the CA certificate and key as PEM files.
+func writeCAFiles(dir, certPath, keyPath string, certDER []byte, key *ecdsa.PrivateKey) error {
+	certPEMBlock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshalling CA key")
+	}
+	keyPEMBlock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return errors.WrapWithDetails(err, "creating CA directory", "dir", dir)
+	}
+	if err := os.WriteFile(certPath, certPEMBlock, 0o644); err != nil { // #nosec G306 -- CA cert must be readable for trust installation
+		return errors.WrapWithDetails(err, "writing CA cert", "path", certPath)
+	}
+	if err := os.WriteFile(keyPath, keyPEMBlock, 0o600); err != nil {
+		return errors.WrapWithDetails(err, "writing CA key", "path", keyPath)
+	}
+	return nil
 }
 
 // parseCA parses PEM-encoded certificate and key bytes into a CA.
