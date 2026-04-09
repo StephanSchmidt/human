@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
+	"github.com/StephanSchmidt/human/cmd/cmdagent"
 	"github.com/StephanSchmidt/human/cmd/cmdamplitude"
 	"github.com/StephanSchmidt/human/cmd/cmdauto"
 	"github.com/StephanSchmidt/human/cmd/cmdbrowser"
@@ -277,6 +278,10 @@ Configure trackers and tools in .humanconfig.yaml or pass credentials via flags/
 	tuiCmd.GroupID = "utility"
 	rootCmd.AddCommand(tuiCmd)
 
+	agentCmd := cmdagent.BuildAgentCmd(deps)
+	agentCmd.GroupID = "utility"
+	rootCmd.AddCommand(agentCmd)
+
 	pingCmd := cmdping.BuildPingCmd()
 	pingCmd.GroupID = "utility"
 	rootCmd.AddCommand(pingCmd)
@@ -386,16 +391,17 @@ func buildHookRunE() func(*cobra.Command, []string) error {
 // localSubcommands lists commands that must execute locally rather than
 // being forwarded to the daemon.
 var localSubcommands = map[string]bool{
-	"daemon":       true,
+	"daemon":        true,
 	"chrome-bridge": true,
-	"install":      true,
-	"init":         true,
-	"usage":        true,
-	"index":        true,
-	"tui":          true,
-	"ping":         true,
-	"proxy":        true,
-	"hook":         true,
+	"install":       true,
+	"init":          true,
+	"usage":         true,
+	"index":         true,
+	"tui":           true,
+	"ping":          true,
+	"proxy":         true,
+	"hook":          true,
+	"agent":         true,
 }
 
 // globalValueFlags lists global persistent flags that take a value. When these
