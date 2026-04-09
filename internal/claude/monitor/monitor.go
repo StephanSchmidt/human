@@ -80,6 +80,9 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	overlayHookState(sessionByPath, hookSnaps)
 	fillMissingFromHooks(instances, sessionByPath, hookSnaps)
 
+	// Ambient network activity for the TUI domains panel.
+	snap.NetworkEvents = fetchDaemonNetworkEvents(snap.Daemon.Alive)
+
 	// Match sessions to instances, then mark daemon-connected ones.
 	snap.Instances = matchInstances(usages, sessionByPath)
 	applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
@@ -116,6 +119,7 @@ func (m *Monitor) FetchQuick(_ context.Context, prev *Snapshot) *Snapshot {
 	}
 	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.connectedPIDs = readConnectedPIDs()
+	snap.NetworkEvents = fetchDaemonNetworkEvents(snap.Daemon.Alive)
 
 	// Re-read hook events from daemon for sub-second state transitions.
 	hookSnaps := fetchDaemonHookSnapshots(snap.Daemon.Alive)
@@ -218,6 +222,25 @@ func fetchDaemonHookSnapshots(daemonAlive bool) map[string]hookevents.SessionSna
 		return nil
 	}
 	return snap
+}
+
+// fetchDaemonNetworkEvents reads the ambient network activity buffer
+// from the daemon. Returns nil when the daemon is unavailable or the
+// call fails so the renderer collapses the panel gracefully rather
+// than showing a misleading empty frame.
+func fetchDaemonNetworkEvents(daemonAlive bool) []daemon.NetworkEvent {
+	if !daemonAlive {
+		return nil
+	}
+	info, err := daemon.ReadInfo()
+	if err != nil || info.Addr == "" {
+		return nil
+	}
+	events, err := daemon.GetNetworkEvents(info.Addr, info.Token)
+	if err != nil {
+		return nil
+	}
+	return events
 }
 
 // overlayHookState updates sessions in byPath from hook snapshots.

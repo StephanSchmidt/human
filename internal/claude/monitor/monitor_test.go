@@ -263,6 +263,13 @@ func TestFetchDaemonHookSnapshots_DaemonNotAlive(t *testing.T) {
 	assert.Nil(t, snaps)
 }
 
+// --- fetchDaemonNetworkEvents tests ---
+
+func TestFetchDaemonNetworkEvents_DaemonNotAlive(t *testing.T) {
+	events := fetchDaemonNetworkEvents(false)
+	assert.Nil(t, events)
+}
+
 // --- FetchFull integration test ---
 
 func TestFetchFull_NoInstances(t *testing.T) {

@@ -191,6 +191,21 @@ func GetHookSnapshot(addr, token string) (map[string]hookevents.SessionSnapshot,
 	return snap, nil
 }
 
+// GetNetworkEvents fetches the current ambient network activity buffer
+// from the daemon. Returns a nil slice (not a nil error) when the daemon
+// replies with an empty list so the TUI can collapse the panel.
+func GetNetworkEvents(addr, token string) ([]NetworkEvent, error) {
+	out, err := RunRemoteCapture(addr, token, []string{"network-events"})
+	if err != nil {
+		return nil, err
+	}
+	var events []NetworkEvent
+	if err := json.Unmarshal(out, &events); err != nil {
+		return nil, errors.WrapWithDetails(err, "invalid network events JSON")
+	}
+	return events, nil
+}
+
 // GetTrackerDiagnose fetches tracker credential status from the daemon.
 func GetTrackerDiagnose(addr, token string) ([]tracker.TrackerStatus, error) {
 	out, err := RunRemoteCapture(addr, token, []string{"tracker-diagnose"})

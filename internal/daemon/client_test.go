@@ -74,6 +74,44 @@ func TestRunRemote_NonZeroExit(t *testing.T) {
 	assert.Equal(t, 1, exitCode)
 }
 
+func TestGetNetworkEvents_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"network-events"}, req.Args)
+		// Two-event payload mirrors the handleNetworkEvents wire format.
+		data := `[{"source":"proxy","status":"forward","host":"github.com","count":3,"last_seen":"2024-01-01T00:00:00Z"},` +
+			`{"source":"fail","status":"dial-fail","host":"broken.example.com","count":1,"last_seen":"2024-01-01T00:00:05Z"}]` + "\n"
+		return Response{Stdout: data}
+	})
+
+	events, err := GetNetworkEvents(addr, "tok")
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "github.com", events[0].Host)
+	assert.Equal(t, 3, events[0].Count)
+	assert.Equal(t, "broken.example.com", events[1].Host)
+	assert.Equal(t, "dial-fail", events[1].Status)
+}
+
+func TestGetNetworkEvents_Empty(t *testing.T) {
+	addr := startMockDaemon(t, func(_ Request) Response {
+		return Response{Stdout: "[]\n"}
+	})
+
+	events, err := GetNetworkEvents(addr, "tok")
+	require.NoError(t, err)
+	assert.Empty(t, events)
+}
+
+func TestGetNetworkEvents_InvalidJSON(t *testing.T) {
+	addr := startMockDaemon(t, func(_ Request) Response {
+		return Response{Stdout: "not json\n"}
+	})
+
+	_, err := GetNetworkEvents(addr, "tok")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid network events JSON")
+}
+
 func TestRunRemote_ConnectionRefused(t *testing.T) {
 	exitCode, err := RunRemote("127.0.0.1:1", "tok", []string{"echo"}, "dev")
 	require.Error(t, err)

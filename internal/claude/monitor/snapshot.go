@@ -5,6 +5,7 @@ import (
 
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
+	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -19,6 +20,11 @@ type Snapshot struct {
 	Instances  []InstanceView
 	Panes      []claude.TmuxPane
 	TotalUsage *claude.UsageSummary
+
+	// NetworkEvents is the deduplicated ambient network activity list
+	// from the daemon store, in insertion order (oldest first). The
+	// renderer reverses this for newest-on-top display.
+	NetworkEvents []daemon.NetworkEvent
 
 	// internal — carried forward between fetches, not used by renderers.
 	sessionByPath map[string]logparser.SessionState
