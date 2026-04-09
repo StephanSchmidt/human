@@ -40,7 +40,8 @@ type Server struct {
 	Opener        BrowserOpener  // used for OAuth relay; defaults to browser.DefaultOpener
 	Logger        zerolog.Logger
 	ConnectedPIDs *ConnectedTracker // tracks client PIDs that have pinged; nil disables tracking
-	HookEvents    *HookEventStore   // in-memory hook event buffer; nil disables hook event tracking
+	HookEvents    *HookEventStore    // in-memory hook event buffer; nil disables hook event tracking
+	NetworkEvents *NetworkEventStore // in-memory ambient network activity buffer; nil disables
 	IssueFetcher     func() ([]TrackerIssuesResult, error)    // injected; fetches issues from configured trackers
 	TrackerDiagnoser func(dir string) []tracker.TrackerStatus // injected; diagnoses tracker status with vault resolution
 	Projects        *ProjectRegistry                      // multi-project routing; nil means single-project mode
@@ -250,6 +251,9 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 	case "hook-snapshot":
 		s.handleHookSnapshot(conn)
 		return true
+	case "network-events":
+		s.handleNetworkEvents(conn)
+		return true
 	case "tracker-diagnose":
 		s.handleTrackerDiagnose(conn, projectDir)
 		return true
@@ -302,6 +306,28 @@ func (s *Server) handleHookSnapshot(conn net.Conn) {
 		out = string(data) + "\n"
 	} else {
 		out = "{}\n"
+	}
+	resp := Response{Stdout: out}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleNetworkEvents returns the current deduplicated ambient network
+// activity buffer as JSON. Empty array when the store is unset, matching
+// the hook-snapshot convention so a missing daemon feature looks like
+// an empty result to the client.
+func (s *Server) handleNetworkEvents(conn net.Conn) {
+	var out string
+	if s.NetworkEvents != nil {
+		events := s.NetworkEvents.Snapshot()
+		data, err := json.Marshal(events)
+		if err != nil {
+			s.writeError(conn, err.Error(), 1)
+			return
+		}
+		out = string(data) + "\n"
+	} else {
+		out = "[]\n"
 	}
 	resp := Response{Stdout: out}
 	enc := json.NewEncoder(conn)
