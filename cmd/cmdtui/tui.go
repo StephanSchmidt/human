@@ -582,7 +582,7 @@ func spawnAgentCmd(name, projectDir string) tea.Cmd {
 			return spawnAgentMsg{name: name, err: fmt.Errorf("cannot find executable: %w", err)}
 		}
 
-		cmd := fmt.Sprintf("%s agent start %s --interactive", humanExe, name)
+		cmd := fmt.Sprintf("%s agent start %s --interactive --skip-permissions", humanExe, name)
 		paneDir, _ := os.Getwd()
 		if projectDir != "" {
 			cmd += fmt.Sprintf(" --workspace %s", projectDir)
