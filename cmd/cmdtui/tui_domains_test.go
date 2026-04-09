@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/StephanSchmidt/human/internal/claude/monitor"
 	"github.com/StephanSchmidt/human/internal/daemon"
 )
 
@@ -143,6 +144,34 @@ func TestRenderDomainsPanel_longHostTruncated(t *testing.T) {
 	// Overall output width per row should stay bounded — we only check
 	// that the output does not contain the full 500-byte host.
 	assert.NotContains(t, out, strings.Repeat("a", 500))
+}
+
+// TestRenderDomainsPanel_noOverlapWithFooter is the HUM-59 end-to-end
+// guard on the bottom-anchored layout math in View() (tui.go:913-916).
+// The domains panel must yield space to the footer when the terminal
+// is too short, so a full View() render for an m.height=10 model with
+// many queued network events must emit at most m.height newlines.
+func TestRenderDomainsPanel_noOverlapWithFooter(t *testing.T) {
+	const terminalHeight = 10
+
+	// Populate far more events than can fit so the panel has to truncate
+	// itself rather than push the footer off-screen.
+	hosts := make([]string, 0, 30)
+	for i := 0; i < 30; i++ {
+		hosts = append(hosts, "host-"+strings.Repeat("x", i%5)+".example.com")
+	}
+
+	m := testModel()
+	m.width = 120
+	m.height = terminalHeight
+	m.snap = testSnapshot(func(s *monitor.Snapshot) {
+		s.NetworkEvents = makeEvents(hosts...)
+	})
+
+	view := m.View()
+	lineCount := strings.Count(view, "\n")
+	assert.LessOrEqual(t, lineCount, terminalHeight,
+		"View() must not emit more newlines than m.height — footer would be clipped")
 }
 
 func TestDomainSourceStyle(t *testing.T) {
