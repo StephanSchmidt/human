@@ -114,7 +114,7 @@ Task(subagent_type="plan-verify-docs", prompt="Verify all library, framework, an
 
 ### Step 4c: Finalize and create ticket
 
-If verification found issues, fix `<PLAN_CONTENT>` accordingly. Then create the engineering ticket with the plan as the description:
+If verification found issues, fix `<PLAN_CONTENT>` accordingly. Confirm the plan header contains a `**PM ticket**: <PM_TICKET_KEY>` line so the executor can reference both tickets in commits — add it if missing. Then create the engineering ticket with the plan as the description:
 
 ```bash
 human <ENG_TRACKER> issue create --project=<ENG_PROJECT> "Short title from plan" --description "$(cat <<'PLAN_EOF'
@@ -123,7 +123,7 @@ PLAN_EOF
 )"
 ```
 
-Store the engineering ticket key as `<ENG_TICKET_KEY>`.
+Store the engineering ticket key as `<ENG_TICKET_KEY>`. Then update the ticket description so the `**Engineering ticket**:` line in the plan header contains `<ENG_TICKET_KEY>` (replacing `TBD`). This gives the executor both keys from a single source.
 
 **If `<pipeline_depth>` is "Tickets only":** Stop here. Tell the user:
 - PM ticket created: `<PM_TRACKER> #<PM_TICKET_KEY>`

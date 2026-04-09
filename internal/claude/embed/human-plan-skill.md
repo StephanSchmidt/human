@@ -49,7 +49,9 @@ Then ask the user which tracker and project to create the engineering ticket on:
 1. Ask via `AskUserQuestion`: "Which tracker should the engineering ticket be created on? (e.g. linear, jira, github, gitlab, azuredevops, shortcut)"
 2. Ask via `AskUserQuestion`: "What project should the ticket be created in? (e.g. 'HUM' for Linear, 'myorg/myrepo' for GitHub)"
 
-Create the engineering ticket with the plan as the description. Use a heredoc to handle special characters:
+Confirm the plan has a `**PM ticket**:` line in its header referencing the original PM ticket key. If it is missing, add it before creating the engineering ticket so the executor can reference both tickets in commits.
+
+Create the engineering ticket with the plan as the description. The ticket description **must be a 1:1 verbatim copy** of `<FINAL_PLAN_CONTENT>` — do not summarize, reformat, truncate, reorder, or rewrite any part of the plan. Every section, bullet, code block, and line must appear in the ticket exactly as in the final plan. Use a heredoc to preserve special characters and formatting:
 
 ```bash
 human <tracker> issue create --project=<PROJECT> "Short title from plan" --description "$(cat <<'PLAN_EOF'
@@ -57,6 +59,10 @@ human <tracker> issue create --project=<PROJECT> "Short title from plan" --descr
 PLAN_EOF
 )"
 ```
+
+After creating the ticket, capture the returned engineering ticket key and update the ticket description so the `**Engineering ticket**:` line in the plan header contains the actual key (replacing `TBD`). This gives the executor both the PM and engineering ticket keys from the plan header so every commit can reference both.
+
+Then fetch the ticket back and verify the description matches the updated plan content byte-for-byte. If it does not match, update the ticket until it does.
 
 ## After completion
 

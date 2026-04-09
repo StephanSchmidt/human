@@ -33,20 +33,24 @@ human <TRACKER> issue comment list <TICKET_KEY>
 ## Execution process
 
 1. **Fetch ticket** using `human <tracker> issue get <key>` (use `human tracker list` to find the right tracker; or `human get <key>` if only one tracker type is configured). The ticket description IS the implementation plan. If the description does not contain a structured plan (no `## Changes` section), fall back to `.human/bugs/<key>.md` (a bug analysis with a fix plan). If neither source provides a plan, stop and report that a plan must be created first with `/human-plan` or `/human-bug-plan`.
-2. **Parse** the plan's changes section into ordered tasks
-3. **Execute** each task sequentially:
+2. **Parse ticket keys** from the plan header. The plan has two lines:
+   - `**PM ticket**: <PM_KEY>` — the original PM ticket (e.g. `SC-79`)
+   - `**Engineering ticket**: <ENG_KEY>` — the ticket you are executing (e.g. `HUM-59`)
+   Record both keys. Every commit message must reference **both** so the full PM → engineering → commit trail is preserved. If the PM ticket line is missing, the plan is incomplete — stop and ask the user for the PM ticket key before making commits.
+3. **Parse** the plan's changes section into ordered tasks
+4. **Execute** each task sequentially:
    - Read the target file before modifying it
    - Make the change described in the plan
    - Verify the change compiles/parses correctly where applicable
-4. **Review checkpoint** — after all tasks, invoke the **human-reviewer** agent via the Task tool to verify the implementation against the ticket:
+5. **Review checkpoint** — after all tasks, invoke the **human-reviewer** agent via the Task tool to verify the implementation against the ticket:
    ```
-   Task(subagent_type="human-reviewer", prompt="Review changes for ticket <KEY>")
+   Task(subagent_type="human-reviewer", prompt="Review changes for ticket <ENG_KEY>")
    ```
-5. **Done checkpoint** — invoke the **human-done** agent via the Task tool to produce a Definition of Done report:
+6. **Done checkpoint** — invoke the **human-done** agent via the Task tool to produce a Definition of Done report:
    ```
-   Task(subagent_type="human-done", prompt="Evaluate whether ticket <KEY> is done")
+   Task(subagent_type="human-done", prompt="Evaluate whether ticket <ENG_KEY> is done")
    ```
-6. **Summarize** what was done: files created, files modified, review outcome, done verdict
+7. **Summarize** what was done: files created, files modified, review outcome, done verdict
 
 ## Principles
 
@@ -54,7 +58,7 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - Follow the plan's order. Do not skip steps or reorder without cause.
 - If a plan step is ambiguous, read the surrounding code to resolve the ambiguity rather than guessing.
 - Run tests after completing all changes to catch regressions early.
-- Preserve the original ticket key throughout. Include it in git commit messages (e.g. `KAN-1: Add validation for email field`).
+- Preserve both ticket keys throughout. Every commit message must reference **both** the PM ticket and the engineering ticket so there is one trail from PM → engineering → commit (e.g. `[SC-79] [HUM-59] Add validation for email field`). The two keys usually live on different trackers (e.g. Shortcut PM + Linear engineering, Jira PM + GitHub engineering) — the format is the same regardless.
 - **Boil the Lake**: When the complete implementation costs minutes more than a partial one, do the complete thing. Handle all edge cases, all error paths, all related tests. Completeness is cheap with AI — do not leave known gaps for follow-up tickets.
 - **User Sovereignty**: Recommend, do not decide. When a plan step has multiple valid approaches or a judgment call, present both sides with trade-offs and let the user choose. Never silently make opinionated choices on the user's behalf.
 

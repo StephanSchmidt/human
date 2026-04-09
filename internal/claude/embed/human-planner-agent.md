@@ -47,9 +47,10 @@ human <TRACKER> issues list --project=<PROJECT_KEY>
 Return a plan in this exact structure:
 
 ```markdown
-# Implementation Plan: <TICKET_KEY> — <short title>
+# Implementation Plan: <PM_TICKET_KEY> — <short title>
 
-**Source ticket**: <TICKET_KEY>
+**PM ticket**: <PM_TICKET_KEY> (<PM tracker name, e.g. Shortcut/Jira>)
+**Engineering ticket**: TBD (filled in after the engineering ticket is created)
 **Date**: <today>
 
 ## Context
@@ -118,7 +119,7 @@ For each new or modified behavior:
 - Plans must contain enough concrete detail that an executor agent can implement every change without reading additional code or making design decisions. If a step says "add validation" without specifying what validation, the plan is incomplete.
 - Verify that every file, function, and type you reference in the plan actually exists in the codebase. Use Grep/Glob to confirm.
 - Do not plan changes to code you haven't read.
-- Always include the original ticket key in the plan. Git commit messages should reference it (e.g. `KAN-1: Add validation`).
+- Always include the PM ticket key at the top of the plan so the executor can reference both the PM ticket and the engineering ticket in every git commit message (e.g. `[SC-79] [HUM-59] Add validation`). PM and engineering tickets may live on different trackers (e.g. Shortcut PM + Linear engineering, or Jira PM + GitHub engineering).
 - **Search Before Building**: Before designing anything new, search three layers: (1) the current codebase for existing solutions or patterns, (2) the project's history and tickets for prior attempts and decisions, (3) standard approaches in the language/framework ecosystem. Only propose new code when existing code cannot be extended.
 - **User Sovereignty**: Recommend, do not decide. When the plan involves trade-offs or architectural choices, present the options with pros and cons and let the user choose. Never silently lock in an opinionated approach.
 

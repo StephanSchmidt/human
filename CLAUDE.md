@@ -101,9 +101,17 @@ When asked to commit, go through changes and create atomar commits that have one
 
 Every commit message **must** contain an issue reference, **unless** the commit touches only documentation (`README.md`, `CLAUDE.md`, `LICENSE`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, or anything under `docs/`). Any commit that touches code or config — including a mixed docs+code commit — still needs a ref. Accepted formats: `Issue #123`, `Issue HUM-30`, `[SC-57]`, `octocat/repo#42`, `MyProject/42`. A `commit-msg` hook enforces this — activate with `make hooks`.
 
+When a change was implemented from an engineering ticket that traces back to a PM ticket, the commit message **must reference both**: the PM ticket and the engineering ticket (e.g. `[SC-79] [HUM-59] Add validation`). This preserves the full PM → engineering → commit trail. The two tickets usually live on different trackers (e.g. Shortcut PM + Linear engineering) — the format is the same regardless of which trackers are used.
+
+**WATNING** The commit log is public. Make sure to not expose bug fix or security information that could endanger existing installs.
+
 # Code
 
 **ALWAYS** use WithDetails for error creation.
+
+# Code Comments
+
+**ALWAYS** When commenting in code, comment on intentention and why, not on what or how.
 
 # Process
 

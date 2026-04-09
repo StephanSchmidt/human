@@ -46,7 +46,7 @@ human <TRACKER> issue comment list <TICKET_KEY>
 - [ ] No unrelated changes (scope check)
 - [ ] Edge cases from the ticket handled
 - [ ] Plan tasks completed (if plan exists)
-- [ ] Ticket key referenced in commit messages
+- [ ] Every commit message references **both** the PM ticket key and the engineering ticket key (e.g. `[SC-79] [HUM-59] ...`), preserving the PM → engineering → commit trail
 
 ## Principles
 
