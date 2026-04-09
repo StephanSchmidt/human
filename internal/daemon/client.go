@@ -132,9 +132,10 @@ func RunRemoteCapture(addr, token string, args []string) ([]byte, error) {
 
 	cwd, _ := os.Getwd()
 	req := Request{
-		Token: token,
-		Args:  args,
-		Cwd:   cwd,
+		Token:     token,
+		Args:      args,
+		ClientPID: os.Getpid(),
+		Cwd:       cwd,
 	}
 
 	enc := json.NewEncoder(conn)
