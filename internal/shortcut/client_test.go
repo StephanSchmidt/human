@@ -949,15 +949,18 @@ func TestListIssues_searchStories(t *testing.T) {
 
 func TestListIssues_searchAllStories(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/v3/groups":
+		switch r.URL.Path {
+		case "/api/v3/groups":
 			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"},{"id":"grp-uuid-2","name":"Other"}]`)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/stories/search":
+		case "/api/v3/groups/grp-uuid-1/stories":
 			_, _ = fmt.Fprint(w, `[
-				{"id":1,"name":"Story A","story_type":"feature","workflow_state_id":500,"group_id":"grp-uuid-1","owner_ids":[],"requested_by_id":""},
+				{"id":1,"name":"Story A","story_type":"feature","workflow_state_id":500,"group_id":"grp-uuid-1","owner_ids":[],"requested_by_id":""}
+			]`)
+		case "/api/v3/groups/grp-uuid-2/stories":
+			_, _ = fmt.Fprint(w, `[
 				{"id":2,"name":"Story B","story_type":"bug","workflow_state_id":500,"group_id":"grp-uuid-2","owner_ids":[],"requested_by_id":""}
 			]`)
-		case r.URL.Path == "/api/v3/workflows":
+		case "/api/v3/workflows":
 			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[{"id":500,"name":"To Do","type":"unstarted"}]}]`)
 		default:
 			w.WriteHeader(http.StatusNotFound)

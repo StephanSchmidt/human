@@ -77,8 +77,12 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 			stories, err = c.listGroupStories(ctx, groupID)
 		}
 	} else {
-		// Search across all groups.
-		stories, err = c.searchAllStories(ctx, opts.UpdatedSince)
+		// Fetch stories across all groups.
+		if !opts.UpdatedSince.IsZero() {
+			stories, err = c.searchAllStories(ctx, opts.UpdatedSince)
+		} else {
+			stories, err = c.listAllGroupStories(ctx)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -121,6 +125,31 @@ func (c *Client) listGroupStories(ctx context.Context, groupID string) ([]scStor
 		return nil, err
 	}
 	return stories, nil
+}
+
+// listAllGroupStories fetches stories from every group via the group endpoint.
+// This avoids POST /api/v3/stories/search with an empty body, which returns
+// no results on some Shortcut workspaces.
+func (c *Client) listAllGroupStories(ctx context.Context) ([]scStory, error) {
+	if _, err := c.resolveGroupID(ctx, ""); err != nil {
+		return nil, err
+	}
+	c.groupsMu.Lock()
+	groups := make(map[string]string, len(c.groups))
+	for name, id := range c.groups {
+		groups[name] = id
+	}
+	c.groupsMu.Unlock()
+
+	var all []scStory
+	for _, gid := range groups {
+		stories, err := c.listGroupStories(ctx, gid)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, stories...)
+	}
+	return all, nil
 }
 
 // searchStories uses POST /api/v3/stories/search with updated_at_start filter.
