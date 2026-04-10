@@ -124,6 +124,15 @@ func (s *HookEventStore) Snapshot() map[string]hookevents.SessionSnapshot {
 	return sessions
 }
 
+// RecentEvents returns a copy of all stored events.
+func (s *HookEventStore) RecentEvents() []hookevents.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]hookevents.Event, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
 // hookFieldMaxLen bounds every captured hook event field. Without a
 // bound a misbehaving client could swamp the in-memory store with
 // multi-megabyte strings.
@@ -138,7 +147,7 @@ func clampField(s string) string {
 }
 
 // ParseHookEventArgs converts daemon request args into a hook event.
-// Expected args: [event, session_id, cwd, notification_type, tool_name, error_type].
+// Expected args: [event, session_id, cwd, notification_type, tool_name, error_type, agent_name].
 //
 // Every field is length-capped and Cwd must be absolute — both as
 // defence against abusive clients that could otherwise poison the
@@ -171,6 +180,9 @@ func ParseHookEventArgs(args []string) hookevents.Event {
 	}
 	if len(args) > 5 {
 		evt.ErrorType = clampField(args[5])
+	}
+	if len(args) > 6 {
+		evt.AgentName = clampField(args[6])
 	}
 	return evt
 }

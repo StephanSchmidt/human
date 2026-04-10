@@ -382,7 +382,8 @@ func buildHookRunE() func(*cobra.Command, []string) error {
 			return nil // no daemon — silently ignore
 		}
 
-		args := []string{"hook-event", input.EventName, input.SessionID, input.Cwd, input.NotificationType, input.ToolName, input.ErrorType}
+		agentName := os.Getenv("HUMAN_AGENT_NAME")
+		args := []string{"hook-event", input.EventName, input.SessionID, input.Cwd, input.NotificationType, input.ToolName, input.ErrorType, agentName}
 		_, _ = daemon.RunRemote(addr, token, args, version)
 		return nil
 	}

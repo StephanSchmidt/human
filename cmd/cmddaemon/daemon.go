@@ -22,7 +22,9 @@ import (
 	"github.com/StephanSchmidt/human/internal/chrome"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/config"
+	"github.com/StephanSchmidt/human/internal/agent"
 	"github.com/StephanSchmidt/human/internal/daemon"
+	"github.com/StephanSchmidt/human/internal/devcontainer"
 	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/slack"
@@ -270,6 +272,8 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	if err := claude.InstallHooks(out, claude.OSFileWriter{}); err != nil {
 		logger.Warn().Err(err).Msg("hook upgrade failed")
 	}
+
+	go daemon.RunAgentCleanup(ctx, ds.srv.HookEvents, &dockerAgentCleaner{}, logger)
 
 	return ds.srv.ListenAndServe(ctx)
 }
@@ -926,4 +930,18 @@ func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolve
 		}
 		return results, nil
 	}
+}
+
+// dockerAgentCleaner implements daemon.AgentCleaner using a real Docker client.
+type dockerAgentCleaner struct{}
+
+func (c *dockerAgentCleaner) DeleteAgent(ctx context.Context, name string) error {
+	docker, err := devcontainer.NewDockerClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = docker.Close() }()
+
+	mgr := &agent.Manager{Docker: docker}
+	return mgr.Delete(ctx, name)
 }

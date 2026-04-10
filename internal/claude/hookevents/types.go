@@ -15,6 +15,7 @@ type Event struct {
 	NotificationType string    `json:"notification_type,omitempty"`
 	ToolName         string    `json:"tool_name,omitempty"`
 	ErrorType        string    `json:"error_type,omitempty"`
+	AgentName        string    `json:"agent_name,omitempty"`
 }
 
 // SessionSnapshot holds the derived working/idle state for one session.
