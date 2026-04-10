@@ -343,6 +343,7 @@ Credentials are never stored in the config file — the wizard prints
 the environment variables you need to set.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			steps := []initpkg.WizardStep{
+				initpkg.NewPrerequisitesStep(initpkg.OSPathLooker{}),
 				initpkg.NewServicesStep(huhPrompter{}),
 				initpkg.NewDevcontainerStep(huhPrompter{}),
 				initpkg.NewClaudeMigrateStep(huhPrompter{}),
