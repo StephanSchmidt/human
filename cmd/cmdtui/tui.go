@@ -2043,6 +2043,96 @@ func domainSourceStyle(source, status string) lipgloss.Style {
 	return subtleStyle
 }
 
+// sparkline renders a Unicode sparkline from values, scaled to fit width
+// characters. Each output character maps to one value. When len(values)
+// exceeds width, values are down-sampled by averaging buckets; when
+// len(values) is less than width, one character per value is used (no
+// stretching). Returns an empty string when values is empty or width < 1.
+func sparkline(values []int, width int) string {
+	if len(values) == 0 || width < 1 {
+		return ""
+	}
+
+	blocks := []rune("▁▂▃▄▅▆▇█")
+	levels := len(blocks) // 8
+
+	// Down-sample if we have more values than width.
+	display := values
+	if len(values) > width {
+		display = make([]int, width)
+		for i := range display {
+			start := i * len(values) / width
+			end := (i + 1) * len(values) / width
+			if end > len(values) {
+				end = len(values)
+			}
+			sum := 0
+			for _, v := range values[start:end] {
+				sum += v
+			}
+			count := end - start
+			if count > 0 {
+				display[i] = sum / count
+			}
+		}
+	}
+
+	// Find max for scaling.
+	maxVal := 0
+	for _, v := range display {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(display) * 4) // UTF-8 block chars are up to 3 bytes
+	for _, v := range display {
+		if maxVal == 0 {
+			sb.WriteRune(blocks[0])
+			continue
+		}
+		idx := (v * (levels - 1)) / maxVal
+		if idx >= levels {
+			idx = levels - 1
+		}
+		sb.WriteRune(blocks[idx])
+	}
+	return sb.String()
+}
+
+// byHourToValues expands sparse TimeBucket data into a dense slice
+// covering the window from since to until. Hours not present in
+// buckets are filled with zero. The bucket format is "2006-01-02 15:00".
+func byHourToValues(buckets []stats.TimeBucket, since, until time.Time) []int {
+	// Compute the number of hour slots in the window.
+	sinceHour := since.UTC().Truncate(time.Hour)
+	untilHour := until.UTC().Truncate(time.Hour)
+	hours := int(untilHour.Sub(sinceHour)/time.Hour) + 1
+	if hours < 1 {
+		hours = 1
+	}
+	if hours > 168 { // safety cap at 1 week
+		hours = 168
+	}
+
+	values := make([]int, hours)
+
+	// Build a lookup from bucket label to count.
+	lookup := make(map[string]int, len(buckets))
+	for _, b := range buckets {
+		lookup[b.Bucket] = b.Count
+	}
+
+	// Fill the dense array.
+	for i := 0; i < hours; i++ {
+		label := sinceHour.Add(time.Duration(i) * time.Hour).Format("2006-01-02 15:00")
+		values[i] = lookup[label]
+	}
+
+	return values
+}
+
 // renderToolStatsPanel renders the historical tool call statistics panel.
 // It shows tool call distribution from the pre-aggregated ToolStats in
 // the snapshot. Returns empty string when there are no events.
@@ -2059,6 +2149,18 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 	b.WriteString(header)
 	b.WriteByte('\n')
 
+	// Sparkline from hourly data — omitted when empty.
+	if len(ts.ByHour) > 0 {
+		values := byHourToValues(ts.ByHour, ts.Since, ts.Until)
+		sparkWidth := w - 6 // 4-char indent + 2-char margin
+		if sparkWidth < 10 {
+			sparkWidth = 10
+		}
+		if line := sparkline(values, sparkWidth); line != "" {
+			_, _ = fmt.Fprintf(&b, "    %s\n", subtleStyle.Render(line))
+		}
+	}
+
 	// Tool distribution: show up to 8 tools with a simple bar.
 	maxTools := 8
 	if len(ts.ByTool) < maxTools {
@@ -2073,7 +2175,7 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 		}
 	}
 
-	barWidth := w - 30
+	barWidth := w - 40 // narrower to accommodate percentage suffix
 	if barWidth < 10 {
 		barWidth = 10
 	}
@@ -2087,13 +2189,18 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 			}
 		}
 		bar := strings.Repeat("=", barLen)
-		_, _ = fmt.Fprintf(&b, "    %-10s %s %d\n",
+		pct := 0
+		if ts.TotalEvents > 0 {
+			pct = (tc.Count * 100) / ts.TotalEvents
+		}
+		_, _ = fmt.Fprintf(&b, "    %-10s %s %d  (%d%%)\n",
 			titleStyle.Render(tc.ToolName),
 			specialStyle.Render(bar),
-			tc.Count)
+			tc.Count,
+			pct)
 	}
 
-	// Success/failure summary from event names.
+	// Success/failure summary from event names, now with error rate.
 	var successes, failures int
 	for _, enc := range ts.ByEventName {
 		switch enc.EventName {
@@ -2104,9 +2211,11 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 		}
 	}
 	if successes+failures > 0 {
-		_, _ = fmt.Fprintf(&b, "    %s %d ok, %d failed",
+		total := successes + failures
+		errorRate := float64(failures) * 100.0 / float64(total)
+		_, _ = fmt.Fprintf(&b, "    %s %d ok, %d failed (%.1f%% error rate)",
 			subtleStyle.Render("Outcomes:"),
-			successes, failures)
+			successes, failures, errorRate)
 	}
 
 	return b.String()

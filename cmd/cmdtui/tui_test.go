@@ -14,6 +14,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
+	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 
 	"github.com/StephanSchmidt/human/internal/daemon"
@@ -1270,4 +1271,239 @@ func TestHandleSpawnAgentResult_Error(t *testing.T) {
 func TestFooterContainsAgentHint(t *testing.T) {
 	footer := renderFooter(80, "", "", false)
 	assert.Contains(t, footer, "a agent")
+}
+
+// --- sparkline tests ---
+
+func TestSparkline_basic(t *testing.T) {
+	// Linear ramp 0..7 should produce all 8 block levels.
+	vals := []int{0, 1, 2, 3, 4, 5, 6, 7}
+	got := sparkline(vals, 80)
+	assert.Equal(t, "▁▂▃▄▅▆▇█", got)
+}
+
+func TestSparkline_allZeros(t *testing.T) {
+	vals := []int{0, 0, 0, 0}
+	got := sparkline(vals, 80)
+	assert.Equal(t, "▁▁▁▁", got)
+}
+
+func TestSparkline_singleValue(t *testing.T) {
+	vals := []int{10}
+	got := sparkline(vals, 80)
+	assert.Equal(t, "█", got)
+}
+
+func TestSparkline_emptyValues(t *testing.T) {
+	assert.Equal(t, "", sparkline(nil, 80))
+	assert.Equal(t, "", sparkline([]int{}, 80))
+}
+
+func TestSparkline_zeroWidth(t *testing.T) {
+	assert.Equal(t, "", sparkline([]int{1, 2, 3}, 0))
+	assert.Equal(t, "", sparkline([]int{1, 2, 3}, -1))
+}
+
+func TestSparkline_downSample(t *testing.T) {
+	// 24 values into width 12 — should produce 12 characters.
+	vals := make([]int, 24)
+	for i := range vals {
+		vals[i] = i
+	}
+	got := sparkline(vals, 12)
+	assert.Len(t, []rune(got), 12)
+}
+
+func TestSparkline_uniform(t *testing.T) {
+	// All same value should produce all max-level blocks.
+	vals := []int{5, 5, 5, 5}
+	got := sparkline(vals, 80)
+	assert.Equal(t, "████", got)
+}
+
+// --- byHourToValues tests ---
+
+func TestByHourToValues_basic(t *testing.T) {
+	since := time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC)
+	buckets := []stats.TimeBucket{
+		{Bucket: "2026-04-09 00:00", Count: 5},
+		{Bucket: "2026-04-09 12:00", Count: 10},
+		{Bucket: "2026-04-09 23:00", Count: 3},
+	}
+	values := byHourToValues(buckets, since, until)
+	assert.Len(t, values, 24)
+	assert.Equal(t, 5, values[0])
+	assert.Equal(t, 0, values[1])
+	assert.Equal(t, 10, values[12])
+	assert.Equal(t, 3, values[23])
+}
+
+func TestByHourToValues_empty(t *testing.T) {
+	since := time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC)
+	values := byHourToValues(nil, since, until)
+	assert.Len(t, values, 24)
+	for _, v := range values {
+		assert.Equal(t, 0, v)
+	}
+}
+
+func TestByHourToValues_singleHour(t *testing.T) {
+	since := time.Date(2026, 4, 9, 10, 0, 0, 0, time.UTC)
+	until := time.Date(2026, 4, 9, 10, 59, 59, 0, time.UTC)
+	buckets := []stats.TimeBucket{
+		{Bucket: "2026-04-09 10:00", Count: 7},
+	}
+	values := byHourToValues(buckets, since, until)
+	assert.Len(t, values, 1)
+	assert.Equal(t, 7, values[0])
+}
+
+// --- renderToolStatsPanel tests ---
+
+func TestRenderToolStatsPanel_nil(t *testing.T) {
+	assert.Equal(t, "", renderToolStatsPanel(nil, 80))
+}
+
+func TestRenderToolStatsPanel_zeroEvents(t *testing.T) {
+	ts := &stats.ToolStats{TotalEvents: 0}
+	assert.Equal(t, "", renderToolStatsPanel(ts, 80))
+}
+
+func TestRenderToolStatsPanel_withPercentage(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 100,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 60},
+			{ToolName: "Read", Count: 40},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 95},
+			{EventName: "PostToolUseFailure", Count: 5},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	assert.Contains(t, out, "(60%)")
+	assert.Contains(t, out, "(40%)")
+	assert.Contains(t, out, "100")
+	assert.Contains(t, out, "events")
+}
+
+func TestRenderToolStatsPanel_errorRate(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 100,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 100},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 95},
+			{EventName: "PostToolUseFailure", Count: 5},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	assert.Contains(t, out, "95 ok")
+	assert.Contains(t, out, "5 failed")
+	assert.Contains(t, out, "5.0% error rate")
+}
+
+func TestRenderToolStatsPanel_allFailures(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 10,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 10},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUseFailure", Count: 10},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	assert.Contains(t, out, "0 ok")
+	assert.Contains(t, out, "10 failed")
+	assert.Contains(t, out, "100.0% error rate")
+}
+
+func TestRenderToolStatsPanel_withSparkline(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 3,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 3},
+		},
+		ByHour: []stats.TimeBucket{
+			{Bucket: "2026-04-09 10:00", Count: 2},
+			{Bucket: "2026-04-09 11:00", Count: 1},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 3},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	// The sparkline should contain block characters.
+	assert.Contains(t, out, "▁")
+	assert.Contains(t, out, "█")
+}
+
+func TestRenderToolStatsPanel_noSparklineWhenByHourEmpty(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 5,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 5},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 5},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	// No block characters should appear.
+	for _, r := range "▁▂▃▄▅▆▇█" {
+		assert.NotContains(t, out, string(r))
+	}
+}
+
+func TestRenderToolStatsPanel_narrowWidth(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 10,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Bash", Count: 10},
+		},
+		ByHour: []stats.TimeBucket{
+			{Bucket: "2026-04-09 10:00", Count: 10},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 10},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	// Should not panic at narrow widths.
+	out := renderToolStatsPanel(ts, 40)
+	assert.Contains(t, out, "Bash")
+	assert.Contains(t, out, "10")
+}
+
+func TestRenderToolStatsPanel_singleTool(t *testing.T) {
+	ts := &stats.ToolStats{
+		TotalEvents: 1,
+		ByTool: []stats.ToolCount{
+			{ToolName: "Grep", Count: 1},
+		},
+		ByEventName: []stats.EventNameCount{
+			{EventName: "PostToolUse", Count: 1},
+		},
+		Since: time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC),
+		Until: time.Date(2026, 4, 9, 23, 59, 59, 0, time.UTC),
+	}
+	out := renderToolStatsPanel(ts, 80)
+	assert.Contains(t, out, "(100%)")
+	assert.Contains(t, out, "0.0% error rate")
 }
