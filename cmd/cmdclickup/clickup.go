@@ -13,14 +13,12 @@ import (
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/clickup"
 	"github.com/StephanSchmidt/human/internal/config"
-	"github.com/StephanSchmidt/human/internal/githelper"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 // BuildClickUpCommands returns ClickUp-specific commands (hierarchy browsing,
 // custom fields, members, linking) that are not part of the generic tracker interface.
 func BuildClickUpCommands(deps cmdutil.Deps) []*cobra.Command {
-	gh := &githelper.Helper{Runner: githelper.OSCommandRunner{}}
 	return []*cobra.Command{
 		buildSpacesCmd(deps),
 		buildFoldersCmd(deps),
@@ -28,7 +26,6 @@ func BuildClickUpCommands(deps cmdutil.Deps) []*cobra.Command {
 		buildMembersCmd(deps),
 		buildFieldsCmd(deps),
 		buildFieldSetCmd(deps),
-		buildLinkCmd(deps, gh),
 	}
 }
 
