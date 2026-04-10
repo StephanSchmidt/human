@@ -279,17 +279,28 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, contai
 
 	// Mount CA cert if it exists.
 	home, _ := os.UserHomeDir()
+	targetHome := remoteHome(cfg)
+
 	caCert := filepath.Join(home, ".human", "ca.crt")
 	if _, err := os.Stat(caCert); err == nil {
-		remoteUser := cfg.RemoteUser
-		if remoteUser == "" {
-			remoteUser = "root"
-		}
-		targetHome := "/root"
-		if remoteUser != "root" {
-			targetHome = "/home/" + remoteUser
-		}
 		binds = append(binds, caCert+":"+targetHome+"/.human/ca.crt:ro")
+	}
+
+	// Mount host Claude config so auth tokens persist across containers.
+	claudeDir := filepath.Join(home, ".claude")
+	if _, statErr := os.Stat(claudeDir); statErr == nil {
+		binds = append(binds, claudeDir+":"+targetHome+"/.claude")
+
+		// Mount .claude.json (Claude Code config) if it exists.
+		claudeJSON := filepath.Join(home, ".claude.json")
+		if _, jsonErr := os.Stat(claudeJSON); jsonErr == nil {
+			binds = append(binds, claudeJSON+":"+targetHome+"/.claude.json")
+		}
+	}
+
+	// Mount host human binary so the container always uses the same version.
+	if humanBin, exeErr := os.Executable(); exeErr == nil {
+		binds = append(binds, humanBin+":/usr/local/bin/human:ro")
 	}
 
 	// Parse config mount strings. Devcontainer.json uses the Docker --mount
@@ -304,6 +315,10 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, contai
 			binds = append(binds, bind)
 		}
 	}
+
+	// Deduplicate mounts by target path. Later entries (from config) win
+	// over earlier programmatic ones to avoid Docker "Duplicate mount point" errors.
+	binds = deduplicateBinds(binds)
 
 	labels := ManagedLabels(projectDir, containerName, hash)
 
@@ -367,6 +382,35 @@ func parseMountString(s string) string {
 		bind += ":ro"
 	}
 	return bind
+}
+
+// deduplicateBinds removes duplicate bind mounts by target path,
+// keeping the last entry for each target.
+func deduplicateBinds(binds []string) []string {
+	seen := make(map[string]int, len(binds))
+	for i, b := range binds {
+		parts := strings.SplitN(b, ":", 3)
+		if len(parts) >= 2 {
+			seen[parts[1]] = i
+		}
+	}
+	result := make([]string, 0, len(seen))
+	for i, b := range binds {
+		parts := strings.SplitN(b, ":", 3)
+		if len(parts) >= 2 && seen[parts[1]] == i {
+			result = append(result, b)
+		}
+	}
+	return result
+}
+
+// remoteHome returns the home directory path for the devcontainer's remote user.
+func remoteHome(cfg *DevcontainerConfig) string {
+	user := cfg.RemoteUser
+	if user == "" || user == "root" {
+		return "/root"
+	}
+	return "/home/" + user
 }
 
 // Exec runs a command inside a running devcontainer.

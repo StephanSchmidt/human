@@ -78,7 +78,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 	}
 
 	if !opts.Interactive && opts.Prompt != "" {
-		m.execClaudeDetached(ctx, dcMeta.ContainerID, opts)
+		m.execClaudeDetached(ctx, dcMeta.ContainerID, dcMeta.RemoteUser, opts)
 	}
 
 	meta := Meta{
@@ -86,6 +86,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 		WorktreeDir: worktreeDir, Cwd: workspace, Prompt: opts.Prompt,
 		Status: StatusRunning, CreatedAt: time.Now(), SkipPerms: opts.SkipPerms,
 		Model: opts.Model, ConfigDir: configDir, ImageName: dcMeta.ImageName,
+		RemoteUser: dcMeta.RemoteUser,
 	}
 	if err := WriteMeta(meta); err != nil {
 		return Meta{}, err
@@ -148,12 +149,13 @@ func (m *Manager) startDevcontainer(ctx context.Context, containerName, configDi
 	})
 }
 
-func (m *Manager) execClaudeDetached(ctx context.Context, containerID string, opts StartOpts) {
+func (m *Manager) execClaudeDetached(ctx context.Context, containerID, remoteUser string, opts StartOpts) {
 	claudeArgs := m.BuildClaudeArgs(opts)
 	claudeArgs = append(claudeArgs, "-p", opts.Prompt)
 	cmd := []string{"/bin/sh", "-c", "claude " + strings.Join(claudeArgs, " ")}
 	execID, execErr := m.Docker.ExecCreate(ctx, containerID, cmd, devcontainer.ExecOptions{
-		User: "root", AttachStdout: true, AttachStderr: true,
+		User: remoteUser, AttachStdout: true, AttachStderr: true,
+		Env: []string{"HUMAN_AGENT_NAME=" + opts.Name},
 	})
 	if execErr == nil {
 		if attach, attachErr := m.Docker.ExecAttach(ctx, execID); attachErr == nil {
@@ -168,7 +170,7 @@ func (m *Manager) cleanupWorktree(ctx context.Context, worktreeDir string) {
 	}
 	repoRoot, err := m.gitRepoRoot(ctx)
 	if err == nil {
-		_ = m.removeWorktree(ctx, repoRoot, worktreeDir)
+		_ = m.removeWorktree(ctx, repoRoot, worktreeDir, "")
 	}
 }
 
@@ -190,7 +192,7 @@ func (m *Manager) Stop(ctx context.Context, name string, cleanWorktree bool) err
 	if cleanWorktree && meta.WorktreeDir != "" && m.GitRunner != nil {
 		repoRoot, rootErr := m.gitRepoRoot(ctx)
 		if rootErr == nil {
-			_ = m.removeWorktree(ctx, repoRoot, meta.WorktreeDir)
+			_ = m.removeWorktree(ctx, repoRoot, meta.WorktreeDir, "agent/"+name)
 		}
 	}
 
@@ -199,16 +201,24 @@ func (m *Manager) Stop(ctx context.Context, name string, cleanWorktree bool) err
 	return WriteMeta(meta)
 }
 
+// Delete stops the container, removes the worktree and branch, and deletes
+// the agent metadata so no trace remains. Best-effort: always deletes
+// metadata even if container/worktree cleanup fails.
+func (m *Manager) Delete(ctx context.Context, name string) error {
+	_ = m.Stop(ctx, name, true)
+	return DeleteMeta(name)
+}
+
 // Attach returns the container name for docker exec -it.
-func (m *Manager) Attach(_ context.Context, name string) (string, error) {
+func (m *Manager) Attach(_ context.Context, name string) (Meta, error) {
 	meta, err := ReadMeta(name)
 	if err != nil {
-		return "", err
+		return Meta{}, err
 	}
 	if meta.ContainerName == "" {
-		return "", errors.WithDetails("agent has no container", "name", name)
+		return Meta{}, errors.WithDetails("agent has no container", "name", name)
 	}
-	return meta.ContainerName, nil
+	return meta, nil
 }
 
 // Refresh syncs metadata with actual container state.
@@ -335,11 +345,14 @@ func (m *Manager) createWorktree(ctx context.Context, repoRoot, name, branch str
 	return worktreeDir, nil
 }
 
-func (m *Manager) removeWorktree(ctx context.Context, repoRoot, worktreeDir string) error {
+func (m *Manager) removeWorktree(ctx context.Context, repoRoot, worktreeDir, branch string) error {
 	_, err := m.GitRunner.Run(ctx, "git", "-C", repoRoot, "worktree", "remove", "--force", worktreeDir)
 	if err != nil {
 		return errors.WrapWithDetails(err, "removing git worktree", "dir", worktreeDir)
 	}
 	_, _ = m.GitRunner.Run(ctx, "git", "-C", repoRoot, "worktree", "prune")
+	if branch != "" {
+		_, _ = m.GitRunner.Run(ctx, "git", "-C", repoRoot, "branch", "-D", branch)
+	}
 	return nil
 }

@@ -41,6 +41,7 @@ type Meta struct {
 	Model         string    `json:"model,omitempty"`
 	ConfigDir     string    `json:"config_dir,omitempty"`
 	ImageName     string    `json:"image_name,omitempty"`
+	RemoteUser    string    `json:"remote_user,omitempty"`
 }
 
 // ContainerName returns the Docker container name for an agent.

@@ -1,6 +1,7 @@
 {
   "name": "human secure container",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "remoteUser": "vscode",
   "features": {
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
     "ghcr.io/devcontainers/features/go:1": {},

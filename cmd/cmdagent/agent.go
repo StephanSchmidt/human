@@ -121,7 +121,12 @@ Examples:
 					return errors.WithDetails("docker not found in PATH")
 				}
 				claudeFlags := mgr.BuildClaudeArgs(opts)
-				dockerArgs := append([]string{"docker", "exec", dockerExecFlag(), meta.ContainerName, "claude"}, claudeFlags...)
+				dockerArgs := []string{"docker", "exec", dockerExecFlag(), "-e", "HUMAN_AGENT_NAME=" + name}
+				if meta.RemoteUser != "" {
+					dockerArgs = append(dockerArgs, "--user", meta.RemoteUser)
+				}
+				dockerArgs = append(dockerArgs, meta.ContainerName, "claude")
+				dockerArgs = append(dockerArgs, claudeFlags...)
 				return syscallExec(dockerPath, dockerArgs, os.Environ())
 			}
 
@@ -226,7 +231,7 @@ func buildAttachCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			containerName, err := mgr.Attach(cmd.Context(), args[0])
+			meta, err := mgr.Attach(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
@@ -236,7 +241,12 @@ func buildAttachCmd() *cobra.Command {
 				return errors.WithDetails("docker not found in PATH")
 			}
 
-			return syscallExec(dockerPath, []string{"docker", "exec", dockerExecFlag(), containerName, "bash"}, os.Environ())
+			dockerArgs := []string{"docker", "exec", dockerExecFlag()}
+			if meta.RemoteUser != "" {
+				dockerArgs = append(dockerArgs, "--user", meta.RemoteUser)
+			}
+			dockerArgs = append(dockerArgs, meta.ContainerName, "bash")
+			return syscallExec(dockerPath, dockerArgs, os.Environ())
 		},
 	}
 }
