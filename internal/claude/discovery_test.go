@@ -1179,6 +1179,7 @@ func TestShortProjectName(t *testing.T) {
 		{"/home/user/dev/myproject", "dev/myproject"},
 		{"/home/user", "home/user"},
 		{"/single", "/single"},
+		{"solo", "solo"},
 	}
 	for _, tt := range tests {
 		got := ShortProjectName(tt.cwd)

@@ -154,6 +154,171 @@ func TestRunRemote_ClientPIDForwarded(t *testing.T) {
 	assert.Equal(t, 0, exitCode)
 }
 
+func TestGetLogMode_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"log-mode"}, req.Args)
+		return Response{Stdout: "full\n"}
+	})
+
+	mode, err := GetLogMode(addr, "tok")
+	require.NoError(t, err)
+	assert.Equal(t, "full", mode)
+}
+
+func TestSetLogMode_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"log-mode", "off"}, req.Args)
+		return Response{Stdout: "off\n"}
+	})
+
+	mode, err := SetLogMode(addr, "tok", "off")
+	require.NoError(t, err)
+	assert.Equal(t, "off", mode)
+}
+
+func TestGetHookSnapshot_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"hook-snapshot"}, req.Args)
+		return Response{Stdout: `{"session-1":{"session_id":"session-1","cwd":"/proj","status":1}}` + "\n"}
+	})
+
+	snap, err := GetHookSnapshot(addr, "tok")
+	require.NoError(t, err)
+	require.Contains(t, snap, "session-1")
+	assert.Equal(t, "/proj", snap["session-1"].Cwd)
+}
+
+func TestGetHookSnapshot_InvalidJSON(t *testing.T) {
+	addr := startMockDaemon(t, func(_ Request) Response {
+		return Response{Stdout: "bad json\n"}
+	})
+
+	_, err := GetHookSnapshot(addr, "tok")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid hook snapshot JSON")
+}
+
+func TestGetTrackerDiagnose_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"tracker-diagnose"}, req.Args)
+		return Response{Stdout: `[{"name":"jira","ok":true}]` + "\n"}
+	})
+
+	statuses, err := GetTrackerDiagnose(addr, "tok")
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "jira", statuses[0].Name)
+}
+
+func TestGetTrackerIssues_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"tracker-issues"}, req.Args)
+		return Response{Stdout: `[{"tracker_name":"jira","tracker_kind":"jira","project":"PROJ","issues":[]}]` + "\n"}
+	})
+
+	results, err := GetTrackerIssues(addr, "tok")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "jira", results[0].TrackerName)
+}
+
+func TestGetPendingConfirms_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"pending-confirms"}, req.Args)
+		return Response{Stdout: `[{"id":"abc","prompt":"delete?"}]` + "\n"}
+	})
+
+	confirms, err := GetPendingConfirms(addr, "tok")
+	require.NoError(t, err)
+	require.Len(t, confirms, 1)
+	assert.Equal(t, "abc", confirms[0].ID)
+}
+
+func TestGetToolStats_Success(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"tool-stats"}, req.Args)
+		return Response{Stdout: `{"total_events":5,"by_tool":[],"by_event_name":[],"by_hour":[]}` + "\n"}
+	})
+
+	ts, err := GetToolStats(addr, "tok")
+	require.NoError(t, err)
+	assert.Equal(t, 5, ts.TotalEvents)
+}
+
+func TestSendConfirmDecision_Approved(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"confirm-op", "abc", "yes"}, req.Args)
+		return Response{ExitCode: 0}
+	})
+
+	err := SendConfirmDecision(addr, "tok", "abc", true)
+	require.NoError(t, err)
+}
+
+func TestSendConfirmDecision_Denied(t *testing.T) {
+	addr := startMockDaemon(t, func(req Request) Response {
+		assert.Equal(t, []string{"confirm-op", "abc", "no"}, req.Args)
+		return Response{ExitCode: 0}
+	})
+
+	err := SendConfirmDecision(addr, "tok", "abc", false)
+	require.NoError(t, err)
+}
+
+func TestRunRemoteCapture_DaemonError(t *testing.T) {
+	addr := startMockDaemon(t, func(_ Request) Response {
+		return Response{ExitCode: 1, Stderr: "some error"}
+	})
+
+	_, err := RunRemoteCapture(addr, "tok", []string{"bad-cmd"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "daemon command failed")
+}
+
+func TestSelectedEnv(t *testing.T) {
+	// With env vars set.
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "xterm")
+	env := selectedEnv()
+	assert.Equal(t, "1", env["NO_COLOR"])
+	assert.Equal(t, "xterm", env["TERM"])
+}
+
+func TestHandleOAuthCallback(t *testing.T) {
+	// Simulate the two-line OAuth protocol.
+	callbackResp := Response{Callback: ""}
+	data, _ := json.Marshal(callbackResp)
+
+	reader := bufio.NewReader(strings.NewReader(string(data) + "\n"))
+	code, err := handleOAuthCallback(reader)
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+}
+
+func TestHandleOAuthCallback_ReadError(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader(""))
+	_, err := handleOAuthCallback(reader)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read callback response")
+}
+
+func TestHandleConfirmWait(t *testing.T) {
+	resp2 := Response{Stdout: "confirmed\n", ExitCode: 0}
+	data, _ := json.Marshal(resp2)
+
+	reader := bufio.NewReader(strings.NewReader(string(data) + "\n"))
+	code, err := handleConfirmWait(reader, "delete file?")
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+}
+
+func TestHandleConfirmWait_ReadError(t *testing.T) {
+	reader := bufio.NewReader(strings.NewReader(""))
+	_, err := handleConfirmWait(reader, "prompt")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read confirmation response")
+}
+
 func TestRunRemote_DaemonClosesImmediately(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

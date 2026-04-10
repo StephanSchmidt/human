@@ -412,3 +412,244 @@ func (r *memoryReader) ReadFrom(_ string, offset int64) ([]byte, int64, error) {
 	d := r.data[offset:]
 	return d, int64(len(r.data)), nil
 }
+
+func TestFileParser_State(t *testing.T) {
+	p := NewFileParser()
+	data := joinLines(
+		makeUserEntry(t, "sess-1", "/project", "my-slug", "hello", "2026-03-25T10:00:00.000Z"),
+	)
+	_, _ = p.UpdateBytes(data)
+
+	state := p.State()
+	assert.Equal(t, "sess-1", state.SessionID)
+	assert.Equal(t, "/project", state.Cwd)
+	assert.Equal(t, "my-slug", state.Slug)
+	assert.Equal(t, StatusWorking, state.Status)
+}
+
+func TestFileParser_AssistantNoMessage(t *testing.T) {
+	p := NewFileParser()
+	// Assistant entry with no message field at all should not crash.
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "assistant",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Equal(t, "sess-1", state.SessionID)
+}
+
+func TestFileParser_AssistantNoStopReason(t *testing.T) {
+	p := NewFileParser()
+	// Assistant with message but no stop_reason means it's streaming (working).
+	data := joinLines(makeAssistantEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", nil, []map[string]interface{}{
+		{"type": "text", "text": "thinking..."},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Equal(t, StatusWorking, state.Status)
+}
+
+func TestFileParser_ProgressNonAgentIgnored(t *testing.T) {
+	p := NewFileParser()
+	// Progress entry with a non-agent_progress type should be ignored.
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "progress",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+		"data": map[string]interface{}{
+			"type": "other_progress",
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Subagents)
+}
+
+func TestFileParser_ProgressWithoutActiveSubagent(t *testing.T) {
+	p := NewFileParser()
+	// Progress entry for a non-existent subagent toolUseID should not crash.
+	data := joinLines(makeProgressEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", "nonexistent-id", "agent-xyz"))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Subagents)
+}
+
+func TestFileParser_UserMessageNoContent(t *testing.T) {
+	p := NewFileParser()
+	// User entry with nil message should not crash.
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "user",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Equal(t, "sess-1", state.SessionID)
+}
+
+func TestFileParser_TaskUpdateUnknownTaskID(t *testing.T) {
+	p := NewFileParser()
+	toolUse := strPtr("tool_use")
+	// TaskUpdate referencing a task that was never created.
+	data := joinLines(makeAssistantEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", toolUse, []map[string]interface{}{
+		{
+			"type": "tool_use",
+			"id":   "toolu_update_unknown",
+			"name": "TaskUpdate",
+			"input": map[string]interface{}{
+				"taskId": "nonexistent-task",
+				"status": "completed",
+			},
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Tasks) // no task was created, update should be a no-op
+}
+
+func TestFileParser_ToolResultForUnknownToolUse(t *testing.T) {
+	p := NewFileParser()
+	// Tool result for a toolUseID that's not tracked as agent or task.
+	data := joinLines(makeToolResultEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", "unknown-tool-use", nil))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Subagents)
+	assert.Empty(t, state.Tasks)
+}
+
+func TestFileParser_ExitPlanModeIsWaiting(t *testing.T) {
+	p := NewFileParser()
+	toolUse := strPtr("tool_use")
+	// ExitPlanMode is a user-blocking tool, should set StatusWaiting.
+	data := joinLines(makeAssistantEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", toolUse, []map[string]interface{}{
+		{
+			"type":  "tool_use",
+			"id":    "toolu_exit",
+			"name":  "ExitPlanMode",
+			"input": map[string]interface{}{},
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Equal(t, StatusWaiting, state.Status)
+}
+
+func TestFileParser_MixedBlockingAndNonBlockingTools(t *testing.T) {
+	p := NewFileParser()
+	toolUse := strPtr("tool_use")
+	// When both a blocking tool and a non-blocking tool are present,
+	// status should be Working (not Waiting).
+	data := joinLines(makeAssistantEntry(t, "sess-1", "2026-03-25T10:00:00.000Z", toolUse, []map[string]interface{}{
+		{
+			"type":  "tool_use",
+			"id":    "toolu_ask",
+			"name":  "AskUserQuestion",
+			"input": map[string]interface{}{"question": "which?"},
+		},
+		{
+			"type":  "tool_use",
+			"id":    "toolu_read",
+			"name":  "Read",
+			"input": map[string]interface{}{"path": "/tmp/foo"},
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Equal(t, StatusWorking, state.Status)
+}
+
+func TestFileParser_OversizedLine(t *testing.T) {
+	p := NewFileParser()
+	// Create a valid line followed by an oversized line (>1 MiB).
+	validLine := makeUserEntry(t, "sess-1", "/project", "", "hello", "2026-03-25T10:00:00.000Z")
+	// Build a line that exceeds the scanner buffer (1 MiB).
+	oversized := make([]byte, 2*1024*1024)
+	for i := range oversized {
+		oversized[i] = 'A'
+	}
+	data := append(validLine, '\n')
+	data = append(data, oversized...)
+	data = append(data, '\n')
+
+	consumed := p.parseBytes(data)
+	// Should consume past the oversized line (all data).
+	assert.Equal(t, len(data), consumed)
+	assert.Equal(t, "sess-1", p.state.SessionID) // valid line was processed
+}
+
+func TestFileParser_BadAgentInput(t *testing.T) {
+	p := NewFileParser()
+	toolUse := strPtr("tool_use")
+	// Agent tool_use with invalid JSON input.
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "assistant",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+		"message": map[string]interface{}{
+			"role":        "assistant",
+			"stop_reason": "tool_use",
+			"content": []map[string]interface{}{
+				{
+					"type":  "tool_use",
+					"id":    "toolu_bad_agent",
+					"name":  "Agent",
+					"input": "not-a-json-object", // invalid
+				},
+			},
+		},
+	}))
+	_ = toolUse
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Subagents) // should not crash, just skip
+}
+
+func TestFileParser_BadTaskCreateInput(t *testing.T) {
+	p := NewFileParser()
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "assistant",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+		"message": map[string]interface{}{
+			"role":        "assistant",
+			"stop_reason": "tool_use",
+			"content": []map[string]interface{}{
+				{
+					"type":  "tool_use",
+					"id":    "toolu_bad_task",
+					"name":  "TaskCreate",
+					"input": "not-a-json-object",
+				},
+			},
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Tasks)
+}
+
+func TestFileParser_BadTaskUpdateInput(t *testing.T) {
+	p := NewFileParser()
+	data := joinLines(marshalLine(t, map[string]interface{}{
+		"type":      "assistant",
+		"sessionId": "sess-1",
+		"timestamp": "2026-03-25T10:00:00.000Z",
+		"message": map[string]interface{}{
+			"role":        "assistant",
+			"stop_reason": "tool_use",
+			"content": []map[string]interface{}{
+				{
+					"type":  "tool_use",
+					"id":    "toolu_bad_update",
+					"name":  "TaskUpdate",
+					"input": "not-a-json-object",
+				},
+			},
+		},
+	}))
+	state, err := p.UpdateBytes(data)
+	require.NoError(t, err)
+	assert.Empty(t, state.Tasks)
+}

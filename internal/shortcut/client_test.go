@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/StephanSchmidt/human/internal/tracker"
 
@@ -913,6 +914,152 @@ func TestListStatuses_emptyStates(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Empty(t, statuses)
+}
+
+func TestListIssues_searchStories(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/stories/search":
+			body, _ := io.ReadAll(r.Body)
+			var req map[string]any
+			_ = json.Unmarshal(body, &req)
+			assert.Contains(t, req, "group_ids")
+			assert.Contains(t, req, "updated_at_start")
+			_, _ = fmt.Fprint(w, `[{"id":10,"name":"Recent","story_type":"feature","workflow_state_id":500,"owner_ids":[],"requested_by_id":""}]`)
+		case r.URL.Path == "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[{"id":500,"name":"To Do","type":"unstarted"}]}]`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	since := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:      "Human",
+		UpdatedSince: since,
+	})
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "Recent", issues[0].Title)
+}
+
+func TestListIssues_searchAllStories(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v3/groups":
+			_, _ = fmt.Fprint(w, `[{"id":"grp-uuid-1","name":"Human"},{"id":"grp-uuid-2","name":"Other"}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/stories/search":
+			_, _ = fmt.Fprint(w, `[
+				{"id":1,"name":"Story A","story_type":"feature","workflow_state_id":500,"group_id":"grp-uuid-1","owner_ids":[],"requested_by_id":""},
+				{"id":2,"name":"Story B","story_type":"bug","workflow_state_id":500,"group_id":"grp-uuid-2","owner_ids":[],"requested_by_id":""}
+			]`)
+		case r.URL.Path == "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[{"id":500,"name":"To Do","type":"unstarted"}]}]`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project: "", // empty = search all groups
+	})
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "Human", issues[0].Project)
+	assert.Equal(t, "Other", issues[1].Project)
+}
+
+func TestResolveStateByName_caseInsensitive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/workflows" {
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[
+				{"id":500,"name":"To Do","type":"unstarted"},
+				{"id":501,"name":"In Progress","type":"started"},
+				{"id":502,"name":"Done","type":"done"}
+			]}]`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+
+	// Case-insensitive exact match.
+	id, err := client.resolveStateByName(context.Background(), "in progress")
+	require.NoError(t, err)
+	assert.Equal(t, int64(501), id)
+
+	// Type-based fallback: "started" matches the type, not the name.
+	id2, err := client.resolveStateByName(context.Background(), "started")
+	require.NoError(t, err)
+	assert.Equal(t, int64(501), id2)
+
+	// Not found.
+	_, err = client.resolveStateByName(context.Background(), "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow state not found")
+}
+
+func TestCacheMember_noDuplicate(t *testing.T) {
+	client := New("http://unused", "tok-test")
+	client.cacheMember("uuid-1", "Alice")
+	client.cacheMember("uuid-1", "Bob") // should not overwrite
+	assert.Equal(t, "Alice", client.members["uuid-1"])
+}
+
+func TestResolveMemberName_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	name, err := client.resolveMemberName(context.Background(), "uuid-fail")
+	require.NoError(t, err) // errors are swallowed, name is empty
+	assert.Equal(t, "", name)
+
+	// Verify negative cache: second call should not hit server.
+	name2, err := client.resolveMemberName(context.Background(), "uuid-fail")
+	require.NoError(t, err)
+	assert.Equal(t, "", name2)
+}
+
+func TestSetHTTPDoer_shortcut(t *testing.T) {
+	client := New("http://unused", "tok-test")
+	client.SetHTTPDoer(http.DefaultClient)
+}
+
+func TestCreateIssue_withStoryType(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/workflows":
+			_, _ = fmt.Fprint(w, `[{"id":1,"name":"Default","states":[{"id":500,"name":"To Do","type":"unstarted"}]}]`)
+		case "/api/v3/stories":
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &gotBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = fmt.Fprint(w, `{"id":50,"name":"Bug","story_type":"bug","workflow_state_id":500}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Title: "Bug",
+		Type:  "bug",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "bug", gotBody["story_type"])
 }
 
 func TestListStatuses_caching(t *testing.T) {

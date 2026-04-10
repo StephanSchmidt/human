@@ -249,6 +249,62 @@ func TestRunHook_UnsupportedType(t *testing.T) {
 	}
 }
 
+func TestRunHook_EmptyArray(t *testing.T) {
+	mock := &mockDockerClient{}
+	cmd := []interface{}{}
+	err := RunHook(context.Background(), mock, "cid", "user", cmd, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.execCalls) != 0 {
+		t.Errorf("expected 0 exec calls for empty array, got %d", len(mock.execCalls))
+	}
+}
+
+func TestRunHook_ArrayWithNonString(t *testing.T) {
+	mock := &mockDockerClient{}
+	cmd := []interface{}{"echo", 42}
+	err := RunHook(context.Background(), mock, "cid", "user", cmd, testLogger())
+	if err == nil {
+		t.Error("expected error for non-string element in array")
+	}
+}
+
+func TestExecAttachResponse_Close_NilConn(t *testing.T) {
+	resp := ExecAttachResponse{
+		Reader: strings.NewReader("output"),
+		Conn:   nil,
+	}
+	err := resp.Close()
+	if err != nil {
+		t.Errorf("Close with nil Conn should return nil, got %v", err)
+	}
+}
+
+func TestExecAttachResponse_Close_WithConn(t *testing.T) {
+	resp := ExecAttachResponse{
+		Reader: strings.NewReader("output"),
+		Conn:   io.NopCloser(strings.NewReader("")),
+	}
+	err := resp.Close()
+	if err != nil {
+		t.Errorf("Close should return nil, got %v", err)
+	}
+}
+
+func TestRunLifecycleHooks_AllNil(t *testing.T) {
+	mock := &mockDockerClient{}
+	cfg := &DevcontainerConfig{} // all hooks nil
+	var buf strings.Builder
+	err := RunLifecycleHooks(context.Background(), mock, "cid", "user", cfg, testLogger(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.execCalls) != 0 {
+		t.Errorf("expected 0 exec calls when all hooks are nil, got %d", len(mock.execCalls))
+	}
+}
+
 func TestRunLifecycleHooks(t *testing.T) {
 	mock := &mockDockerClient{}
 	cfg := &DevcontainerConfig{

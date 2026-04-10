@@ -248,6 +248,188 @@ func TestResolveVariables_MountStrings(t *testing.T) {
 	}
 }
 
+func TestStripJSONC_UnterminatedBlockComment(t *testing.T) {
+	input := []byte(`{
+  /* unterminated block comment
+  "name": "test"
+}`)
+	got := string(StripJSONC(input))
+	// Everything after /* should be consumed.
+	if containsStr(got, "unterminated") {
+		t.Errorf("unterminated block comment not consumed: %s", got)
+	}
+	if containsStr(got, `"name"`) {
+		t.Errorf("content after unterminated comment should be consumed: %s", got)
+	}
+}
+
+func TestStripJSONC_UnterminatedString(t *testing.T) {
+	// A string that never closes should be copied to end of input.
+	input := []byte(`{"key": "unclosed string`)
+	got := string(StripJSONC(input))
+	if !containsStr(got, "unclosed string") {
+		t.Errorf("unclosed string content should be preserved: %s", got)
+	}
+}
+
+func TestStripJSONC_MultipleCommentTypes(t *testing.T) {
+	input := []byte(`{
+  // line comment 1
+  "a": 1, /* block comment */
+  // line comment 2
+  "b": 2
+}`)
+	got := string(StripJSONC(input))
+	if containsStr(got, "//") || containsStr(got, "/*") || containsStr(got, "*/") {
+		t.Errorf("comments not fully stripped: %s", got)
+	}
+	if !containsStr(got, `"a"`) || !containsStr(got, `"b"`) {
+		t.Errorf("content lost: %s", got)
+	}
+}
+
+func TestStripJSONC_TrailingCommas(t *testing.T) {
+	input := []byte(`{
+  "a": 1, // trailing comma is fine in JSONC
+  "b": 2,
+}`)
+	got := string(StripJSONC(input))
+	// Comments should be removed but trailing commas preserved (they are
+	// not part of JSONC stripping, just comment removal).
+	if containsStr(got, "//") {
+		t.Errorf("comment not stripped: %s", got)
+	}
+}
+
+func TestReplaceLocalEnv_NoClosingBrace(t *testing.T) {
+	// If there's no closing }, replaceLocalEnv should return what it has.
+	input := "${localEnv:MISSING_BRACE"
+	got := replaceLocalEnv(input)
+	if got != input {
+		t.Errorf("replaceLocalEnv(%q) = %q, want input unchanged", input, got)
+	}
+}
+
+func TestReplaceLocalEnv_Multiple(t *testing.T) {
+	t.Setenv("VAR_A", "hello")
+	t.Setenv("VAR_B", "world")
+
+	input := "${localEnv:VAR_A} ${localEnv:VAR_B}"
+	got := replaceLocalEnv(input)
+	if got != "hello world" {
+		t.Errorf("replaceLocalEnv(%q) = %q, want %q", input, got, "hello world")
+	}
+}
+
+func TestReplaceLocalEnv_UnsetNoDefault(t *testing.T) {
+	os.Unsetenv("TOTALLY_UNSET_VAR_XYZ") //nolint:errcheck
+	input := "prefix-${localEnv:TOTALLY_UNSET_VAR_XYZ}-suffix"
+	got := replaceLocalEnv(input)
+	if got != "prefix--suffix" {
+		t.Errorf("replaceLocalEnv(%q) = %q, want %q", input, got, "prefix--suffix")
+	}
+}
+
+func TestResolveVariables_Image(t *testing.T) {
+	t.Setenv("MY_REGISTRY", "ghcr.io")
+	cfg := &DevcontainerConfig{
+		Image: "${localEnv:MY_REGISTRY}/myimage:latest",
+	}
+	resolved := ResolveVariables(cfg, "/tmp/project")
+	if resolved.Image != "ghcr.io/myimage:latest" {
+		t.Errorf("Image = %q, want %q", resolved.Image, "ghcr.io/myimage:latest")
+	}
+}
+
+func TestResolveVariables_LocalWorkspaceFolder(t *testing.T) {
+	cfg := &DevcontainerConfig{
+		ContainerEnv: map[string]string{
+			"PROJECT": "${localWorkspaceFolder}",
+		},
+	}
+	resolved := ResolveVariables(cfg, "/home/user/my-project")
+	absDir, _ := filepath.Abs("/home/user/my-project")
+	if resolved.ContainerEnv["PROJECT"] != absDir {
+		t.Errorf("PROJECT = %q, want %q", resolved.ContainerEnv["PROJECT"], absDir)
+	}
+}
+
+func TestResolveVariables_NilMaps(t *testing.T) {
+	cfg := &DevcontainerConfig{}
+	resolved := ResolveVariables(cfg, "/tmp")
+	if resolved.RemoteEnv != nil {
+		t.Errorf("RemoteEnv should remain nil, got %v", resolved.RemoteEnv)
+	}
+	if resolved.ContainerEnv != nil {
+		t.Errorf("ContainerEnv should remain nil, got %v", resolved.ContainerEnv)
+	}
+}
+
+func TestParseConfig_AllFields(t *testing.T) {
+	data := []byte(`{
+  "name": "full",
+  "image": "ubuntu",
+  "remoteUser": "dev",
+  "containerUser": "root",
+  "workspaceFolder": "/workspace",
+  "capAdd": ["SYS_PTRACE"],
+  "securityOpt": ["seccomp=unconfined"],
+  "privileged": true,
+  "runArgs": ["--network=host"],
+  "forwardPorts": [8080, "9090:9090"],
+  "mounts": ["source=/tmp,target=/mnt,type=bind"]
+}`)
+	cfg, err := ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ContainerUser != "root" {
+		t.Errorf("containerUser = %q", cfg.ContainerUser)
+	}
+	if cfg.WorkspaceFolder != "/workspace" {
+		t.Errorf("workspaceFolder = %q", cfg.WorkspaceFolder)
+	}
+	if len(cfg.CapAdd) != 1 || cfg.CapAdd[0] != "SYS_PTRACE" {
+		t.Errorf("capAdd = %v", cfg.CapAdd)
+	}
+	if !cfg.Privileged {
+		t.Error("expected Privileged = true")
+	}
+	if len(cfg.RunArgs) != 1 {
+		t.Errorf("runArgs = %v", cfg.RunArgs)
+	}
+	if len(cfg.ForwardPorts) != 2 {
+		t.Errorf("forwardPorts = %v", cfg.ForwardPorts)
+	}
+	if len(cfg.Mounts) != 1 {
+		t.Errorf("mounts = %v", cfg.Mounts)
+	}
+}
+
+func TestFindConfig_PrefersStandardOverRoot(t *testing.T) {
+	dir := t.TempDir()
+	// Create both .devcontainer/devcontainer.json and .devcontainer.json
+	dcDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".devcontainer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := FindConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should prefer .devcontainer/devcontainer.json.
+	if filepath.Base(filepath.Dir(path)) != ".devcontainer" {
+		t.Errorf("expected .devcontainer/devcontainer.json to be preferred, got %s", path)
+	}
+}
+
 func contains(haystack, needle string) bool {
 	return len(haystack) >= len(needle) && containsStr(haystack, needle)
 }

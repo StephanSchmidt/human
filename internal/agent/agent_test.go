@@ -153,3 +153,141 @@ func TestFormatDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestListMetas_SkipsCorruptFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Write a valid agent.
+	if err := WriteMeta(Meta{
+		Name:          "valid-agent",
+		ContainerName: ContainerName("valid-agent"),
+		Status:        StatusRunning,
+		CreatedAt:     time.Now(),
+	}); err != nil {
+		t.Fatalf("WriteMeta: %v", err)
+	}
+
+	// Write a corrupt JSON file directly.
+	corruptPath := filepath.Join(AgentsDir(), "corrupt-agent.json")
+	if err := os.WriteFile(corruptPath, []byte("not valid json{{{"), 0o600); err != nil {
+		t.Fatalf("writing corrupt file: %v", err)
+	}
+
+	metas, err := ListMetas()
+	if err != nil {
+		t.Fatalf("ListMetas: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Errorf("expected 1 valid meta (skipping corrupt), got %d", len(metas))
+	}
+	if len(metas) > 0 && metas[0].Name != "valid-agent" {
+		t.Errorf("expected valid-agent, got %q", metas[0].Name)
+	}
+}
+
+func TestListMetas_SkipsDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create the agents directory.
+	agentsDir := AgentsDir()
+	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// Create a subdirectory that should be skipped.
+	if err := os.MkdirAll(filepath.Join(agentsDir, "subdir"), 0o700); err != nil {
+		t.Fatalf("creating subdir: %v", err)
+	}
+
+	// Create a non-JSON file that should be skipped.
+	if err := os.WriteFile(filepath.Join(agentsDir, "notes.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("writing txt file: %v", err)
+	}
+
+	metas, err := ListMetas()
+	if err != nil {
+		t.Fatalf("ListMetas: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("expected 0 metas, got %d", len(metas))
+	}
+}
+
+func TestDeleteMeta_NonExistent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	err := DeleteMeta("does-not-exist")
+	if err == nil {
+		t.Fatal("expected error deleting non-existent meta")
+	}
+}
+
+func TestReadMeta_InvalidJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Create agents dir and write corrupt JSON.
+	agentsDir := AgentsDir()
+	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := MetaPath("bad-json")
+	if err := os.WriteFile(path, []byte("{invalid json}"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := ReadMeta("bad-json")
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestContainerName_Various(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"agent1", "human-agent-agent1"},
+		{"my-agent", "human-agent-my-agent"},
+		{"a", "human-agent-a"},
+		{"", "human-agent-"},
+	}
+	for _, tt := range tests {
+		got := ContainerName(tt.input)
+		if got != tt.want {
+			t.Errorf("ContainerName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestWriteMeta_OverwritesExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	meta := Meta{
+		Name:          "overwrite-me",
+		ContainerName: ContainerName("overwrite-me"),
+		Status:        StatusRunning,
+		CreatedAt:     time.Now().Truncate(time.Second),
+	}
+	if err := WriteMeta(meta); err != nil {
+		t.Fatalf("first WriteMeta: %v", err)
+	}
+
+	// Update status and overwrite.
+	meta.Status = StatusStopped
+	meta.StoppedAt = time.Now().Truncate(time.Second)
+	if err := WriteMeta(meta); err != nil {
+		t.Fatalf("second WriteMeta: %v", err)
+	}
+
+	got, err := ReadMeta("overwrite-me")
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("Status = %q, want %q", got.Status, StatusStopped)
+	}
+}

@@ -108,3 +108,36 @@ func TestListMessages_apiError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "channel_not_found")
 }
+
+func TestListMessages_limitClamping(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    int
+		expected string
+	}{
+		{"zero becomes 100", 0, "100"},
+		{"negative becomes 100", -5, "100"},
+		{"over 999 becomes 999", 1500, "999"},
+		{"normal value passes through", 50, "50"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, tc.expected, r.URL.Query().Get("limit"))
+				_, _ = fmt.Fprint(w, `{"ok": true, "messages": []}`)
+			}))
+			defer srv.Close()
+
+			client := newTestClient(srv.URL, "test-token", "C123")
+			_, err := client.ListMessages(context.Background(), tc.input)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestSetHTTPDoer(t *testing.T) {
+	client := newTestClient("http://unused", "token", "C123")
+	// Verify SetHTTPDoer doesn't panic with a valid doer.
+	client.SetHTTPDoer(http.DefaultClient)
+}

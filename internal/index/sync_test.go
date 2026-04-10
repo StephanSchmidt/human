@@ -434,6 +434,75 @@ func TestSync_transientFetchErrorDoesNotPrune(t *testing.T) {
 	}
 }
 
+func TestSync_usesIssueProjectWhenEmpty(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	provider := &mockProvider{
+		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+			return []tracker.Issue{{Key: "KAN-1"}}, nil
+		},
+		getFn: func(_ context.Context, key string) (*tracker.Issue, error) {
+			return &tracker.Issue{Key: key, Title: "Cross-project", Project: "PROJ"}, nil
+		},
+	}
+
+	// No projects configured - project should come from issue.
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", Provider: provider},
+	}
+
+	result, err := Sync(ctx, s, instances, false, &buf)
+	require.NoError(t, err)
+	if result.Indexed != 1 {
+		t.Errorf("expected 1 indexed, got %d", result.Indexed)
+	}
+
+	results, _ := s.Search(ctx, "Cross-project", 10)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Project != "PROJ" {
+		t.Errorf("Project = %q, want PROJ", results[0].Project)
+	}
+}
+
+// TestSync_nilIssueFromProvider verifies that a provider returning (nil, nil)
+// from GetIssue does not crash the sync and is treated as a skip.
+func TestSync_nilIssueFromProvider(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	provider := &mockProvider{
+		listFn: func(_ context.Context, _ tracker.ListOptions) ([]tracker.Issue, error) {
+			return []tracker.Issue{{Key: "KAN-1"}, {Key: "KAN-2"}}, nil
+		},
+		getFn: func(_ context.Context, key string) (*tracker.Issue, error) {
+			if key == "KAN-1" {
+				return nil, nil // provider returns nil issue
+			}
+			return &tracker.Issue{Key: key, Title: "OK"}, nil
+		},
+	}
+
+	instances := []tracker.Instance{
+		{Name: "work", Kind: "jira", Projects: []string{"KAN"}, Provider: provider},
+	}
+
+	result, _ := Sync(ctx, s, instances, false, &buf)
+	// KAN-1 should be skipped (nil issue), KAN-2 should be indexed.
+	if result.Indexed != 1 {
+		t.Errorf("expected 1 indexed (KAN-2), got %d", result.Indexed)
+	}
+
+	logOutput := buf.String()
+	if !bytes.Contains(buf.Bytes(), []byte("Skipping KAN-1")) {
+		t.Errorf("expected skip message for nil issue, got:\n%s", logOutput)
+	}
+}
+
 // TestSync_preferFullIssueURL verifies the M11.2 fix: entry.URL is
 // populated from the per-issue web URL when the provider sets it,
 // instead of always being the instance base URL.

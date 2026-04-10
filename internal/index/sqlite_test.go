@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -345,6 +346,188 @@ func TestAllKeys_bySource(t *testing.T) {
 	}
 	if len(keys) != 1 {
 		t.Errorf("expected 1 key for eng, got %d", len(keys))
+	}
+}
+
+func TestSearchWithKind_defaultLimit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Upsert enough entries to verify the default limit is applied.
+	for i := 0; i < 25; i++ {
+		key := "KAN-" + strings.Repeat("x", i+1)
+		require.NoError(t, s.UpsertEntry(ctx, Entry{Key: key, Source: "work", Kind: "jira", Title: "retry issue"}, "retry desc"))
+	}
+
+	// Pass limit=0 which should default to 20.
+	results, err := s.SearchWithKind(ctx, "retry", "", 0)
+	if err != nil {
+		t.Fatalf("SearchWithKind: %v", err)
+	}
+	if len(results) > 20 {
+		t.Errorf("expected at most 20 results with default limit, got %d", len(results))
+	}
+}
+
+func TestSearchWithKind_negativeLimit(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "retry issue"}, "desc"))
+
+	// Negative limit should default to 20.
+	results, err := s.SearchWithKind(ctx, "retry", "", -1)
+	if err != nil {
+		t.Fatalf("SearchWithKind: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestStats_lastIndexedAtParsed(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if st.LastIndexedAt.IsZero() {
+		t.Error("expected non-zero LastIndexedAt")
+	}
+}
+
+func TestDeleteEntry_verifiesFTSClean(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Insert and then delete.
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira", Title: "unique searchable term xyzzy"}, "xyzzy content"))
+	require.NoError(t, s.DeleteEntry(ctx, "KAN-1", "work"))
+
+	// Verify FTS no longer finds it.
+	results, err := s.Search(ctx, "xyzzy", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results after delete, got %d", len(results))
+	}
+
+	// Verify AllKeys is empty.
+	keys, err := s.AllKeys(ctx, "work")
+	if err != nil {
+		t.Fatalf("AllKeys: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected 0 keys after delete, got %d", len(keys))
+	}
+}
+
+func TestUpsertEntry_preservesAssigneeAndURL(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	entry := Entry{
+		Key:      "KAN-1",
+		Source:   "work",
+		Kind:     "jira",
+		Title:    "Test issue",
+		Status:   "Open",
+		Assignee: "alice",
+		URL:      "https://jira.example.com/browse/KAN-1",
+	}
+	require.NoError(t, s.UpsertEntry(ctx, entry, "some desc"))
+
+	results, err := s.Search(ctx, "Test issue", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Assignee != "alice" {
+		t.Errorf("Assignee = %q, want alice", results[0].Assignee)
+	}
+	if results[0].URL != "https://jira.example.com/browse/KAN-1" {
+		t.Errorf("URL = %q, want https://jira.example.com/browse/KAN-1", results[0].URL)
+	}
+}
+
+func TestUpsertEntry_multipleSourcesSameKey(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// Same key from different sources should create separate entries.
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "ITEM-1", Source: "source-a", Kind: "jira", Title: "From A"}, "d"))
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "ITEM-1", Source: "source-b", Kind: "linear", Title: "From B"}, "d"))
+
+	keysA, _ := s.AllKeys(ctx, "source-a")
+	keysB, _ := s.AllKeys(ctx, "source-b")
+	if len(keysA) != 1 {
+		t.Errorf("expected 1 key for source-a, got %d", len(keysA))
+	}
+	if len(keysB) != 1 {
+		t.Errorf("expected 1 key for source-b, got %d", len(keysB))
+	}
+}
+
+func TestNewSQLiteStore_fileDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "subdir", "test.db")
+
+	s, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(%q): %v", dbPath, err)
+	}
+	defer s.Close()
+
+	// Verify it created the directory and the DB is functional.
+	ctx := context.Background()
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "K-1", Source: "src", Kind: "test", Title: "Hello"}, "desc"))
+
+	keys, err := s.AllKeys(ctx, "src")
+	require.NoError(t, err)
+	assert.Len(t, keys, 1)
+}
+
+func TestDefaultDBPath(t *testing.T) {
+	path := DefaultDBPath()
+	if path == "" {
+		t.Fatal("DefaultDBPath returned empty string")
+	}
+	if !strings.HasSuffix(path, "index.db") {
+		t.Errorf("DefaultDBPath = %q, want suffix 'index.db'", path)
+	}
+	if !strings.Contains(path, ".human") {
+		t.Errorf("DefaultDBPath = %q, want to contain '.human'", path)
+	}
+}
+
+func TestNewSQLiteStore_invalidPath(t *testing.T) {
+	// Try to open a DB in a path where the directory can't be created.
+	_, err := NewSQLiteStore("/dev/null/impossible/path/test.db")
+	if err == nil {
+		t.Fatal("expected error for invalid path")
+	}
+}
+
+func TestAllKeys_emptySource(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.UpsertEntry(ctx, Entry{Key: "KAN-1", Source: "work", Kind: "jira"}, "d"))
+
+	// Different source should return empty.
+	keys, err := s.AllKeys(ctx, "other")
+	if err != nil {
+		t.Fatalf("AllKeys: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected 0 keys for non-existent source, got %d", len(keys))
 	}
 }
 

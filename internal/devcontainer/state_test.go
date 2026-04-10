@@ -132,3 +132,129 @@ func TestDevcontainersDir(t *testing.T) {
 		t.Errorf("DevcontainersDir() = %q, want %q", dir, expected)
 	}
 }
+
+func TestListMetas_SkipsCorruptFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	// Write a valid entry.
+	if err := WriteMeta(Meta{
+		Name:      "valid",
+		Status:    StatusRunning,
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write corrupt JSON directly.
+	corruptPath := filepath.Join(DevcontainersDir(), "corrupt.json")
+	if err := os.WriteFile(corruptPath, []byte("{not valid json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := ListMetas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Errorf("expected 1 valid meta, got %d", len(metas))
+	}
+	if len(metas) > 0 && metas[0].Name != "valid" {
+		t.Errorf("expected 'valid', got %q", metas[0].Name)
+	}
+}
+
+func TestListMetas_SkipsNonJSONAndDirs(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	dcDir := DevcontainersDir()
+	if err := os.MkdirAll(dcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a non-JSON file.
+	if err := os.WriteFile(filepath.Join(dcDir, "readme.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subdirectory.
+	if err := os.MkdirAll(filepath.Join(dcDir, "subdir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := ListMetas()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("expected 0 metas, got %d", len(metas))
+	}
+}
+
+func TestDeleteMeta_NonExistent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	err := DeleteMeta("nonexistent")
+	if err == nil {
+		t.Error("expected error deleting non-existent meta")
+	}
+}
+
+func TestWriteMeta_OverwritesExisting(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	meta := Meta{
+		Name:      "overwrite-dc",
+		Status:    StatusRunning,
+		CreatedAt: time.Now().Truncate(time.Second),
+	}
+	if err := WriteMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+
+	meta.Status = StatusStopped
+	meta.StoppedAt = time.Now().Truncate(time.Second)
+	if err := WriteMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadMeta("overwrite-dc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusStopped {
+		t.Errorf("status = %q, want %q", got.Status, StatusStopped)
+	}
+}
+
+func TestReadMeta_InvalidJSON(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	dcDir := DevcontainersDir()
+	if err := os.MkdirAll(dcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := MetaPath("bad-json")
+	if err := os.WriteFile(path, []byte("{invalid json}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadMeta("bad-json")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestMetaPath(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	got := MetaPath("my-dc")
+	want := filepath.Join(tmp, ".human", "devcontainers", "my-dc.json")
+	if got != want {
+		t.Errorf("MetaPath = %q, want %q", got, want)
+	}
+}

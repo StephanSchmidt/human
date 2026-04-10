@@ -3,6 +3,7 @@ package devcontainer
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -105,4 +106,76 @@ func (m *pullThenInspectMock) ImageInspect(_ context.Context, _ string) (ImageIn
 		return ImageInspectResponse{}, m.inspectErr
 	}
 	return m.inspectResult, nil
+}
+
+func TestDrainDockerOutput_NoError(t *testing.T) {
+	// Docker JSON stream with status messages but no error.
+	input := strings.NewReader(`{"status":"Pulling from library/ubuntu"}
+{"status":"Digest: sha256:abc123"}
+{"status":"Status: Downloaded newer image"}
+`)
+	err := drainDockerOutput(input)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestDrainDockerOutput_WithError(t *testing.T) {
+	input := strings.NewReader(`{"status":"Pulling from library/ubuntu"}
+{"error":"pull access denied"}
+{"status":"should not matter"}
+`)
+	err := drainDockerOutput(input)
+	if err == nil {
+		t.Error("expected error from Docker stream")
+	}
+}
+
+func TestDrainDockerOutput_EmptyStream(t *testing.T) {
+	input := strings.NewReader("")
+	err := drainDockerOutput(input)
+	if err != nil {
+		t.Errorf("expected no error for empty stream, got %v", err)
+	}
+}
+
+func TestDrainDockerOutput_InvalidJSON(t *testing.T) {
+	// Non-JSON lines should be skipped without error.
+	input := strings.NewReader("not json at all\n{also not valid\n")
+	err := drainDockerOutput(input)
+	if err != nil {
+		t.Errorf("expected no error for invalid JSON lines, got %v", err)
+	}
+}
+
+func TestEnsureImage_DockerFileShorthand(t *testing.T) {
+	// Test the cfg.DockerFile (non-build) path.
+	mock := &mockDockerClient{
+		imageInspectErr:    fmt.Errorf("not found"),
+		imageInspectResult: ImageInspectResponse{ID: "sha256:built"},
+	}
+	callCount := 0
+	mock2 := &pullThenInspectMock{
+		mockDockerClient: mock,
+		inspectCallCount: &callCount,
+		inspectErr:       fmt.Errorf("not found"),
+		inspectResult:    ImageInspectResponse{ID: "sha256:built", Tags: []string{"human-dc-test:abc123"}},
+	}
+
+	// Create temp project with a Dockerfile.
+	tmp := t.TempDir()
+	dcDir := fmt.Sprintf("%s/.devcontainer", tmp)
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fmt.Sprintf("%s/.devcontainer/Dockerfile", tmp), []byte("FROM ubuntu:22.04\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	builder := &ImageBuilder{Docker: mock2, Logger: testLogger()}
+	cfg := &DevcontainerConfig{DockerFile: "Dockerfile"}
+	_, _, err := builder.EnsureImage(context.Background(), cfg, tmp, "abc123abc123def456", false, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

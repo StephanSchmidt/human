@@ -16,6 +16,7 @@ import (
 	"github.com/StephanSchmidt/human/cmd/cmdprovider"
 	"github.com/StephanSchmidt/human/cmd/cmdtracker"
 	"github.com/StephanSchmidt/human/cmd/cmdutil"
+	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
@@ -1093,4 +1094,189 @@ func TestRunTrackerFindWithInstances_NoMatch(t *testing.T) {
 	err := cmdtracker.RunTrackerFindWithInstances(context.Background(), &buf, "KAN-42", instances, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no configured tracker matches key format")
+}
+
+// --- applyDaemonInfo tests ---
+
+func TestApplyDaemonInfo_tokenFromInfo(t *testing.T) {
+	// When caller token is empty, applyDaemonInfo should use info.Token.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:  "localhost:9999",
+		Token: "info-token",
+	}
+	addr, token := applyDaemonInfo(info, "")
+	assert.Equal(t, "localhost:9999", addr)
+	assert.Equal(t, "info-token", token)
+}
+
+func TestApplyDaemonInfo_callerTokenPreserved(t *testing.T) {
+	// When caller provides a token, it takes precedence over info.Token.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:  "localhost:9999",
+		Token: "info-token",
+	}
+	addr, token := applyDaemonInfo(info, "caller-token")
+	assert.Equal(t, "localhost:9999", addr)
+	assert.Equal(t, "caller-token", token)
+}
+
+func TestApplyDaemonInfo_setsChromeAddr(t *testing.T) {
+	// When HUMAN_CHROME_ADDR is empty and info has ChromeAddr, it should be set.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:       "localhost:9999",
+		ChromeAddr: "localhost:8888",
+	}
+	applyDaemonInfo(info, "t")
+	assert.Equal(t, "localhost:8888", os.Getenv("HUMAN_CHROME_ADDR"))
+}
+
+func TestApplyDaemonInfo_setsProxyAddr(t *testing.T) {
+	// When HUMAN_PROXY_ADDR is empty and info has ProxyAddr, it should be set.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:      "localhost:9999",
+		ProxyAddr: "localhost:7777",
+	}
+	applyDaemonInfo(info, "t")
+	assert.Equal(t, "localhost:7777", os.Getenv("HUMAN_PROXY_ADDR"))
+}
+
+func TestApplyDaemonInfo_doesNotOverrideChromeAddr(t *testing.T) {
+	// When HUMAN_CHROME_ADDR is already set, applyDaemonInfo should not change it.
+	t.Setenv("HUMAN_CHROME_ADDR", "existing:1111")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:       "localhost:9999",
+		ChromeAddr: "localhost:8888",
+	}
+	applyDaemonInfo(info, "t")
+	assert.Equal(t, "existing:1111", os.Getenv("HUMAN_CHROME_ADDR"))
+}
+
+func TestApplyDaemonInfo_doesNotOverrideProxyAddr(t *testing.T) {
+	// When HUMAN_PROXY_ADDR is already set, applyDaemonInfo should not change it.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "existing:2222")
+
+	info := daemon.DaemonInfo{
+		Addr:      "localhost:9999",
+		ProxyAddr: "localhost:7777",
+	}
+	applyDaemonInfo(info, "t")
+	assert.Equal(t, "existing:2222", os.Getenv("HUMAN_PROXY_ADDR"))
+}
+
+func TestApplyDaemonInfo_emptyInfoAddrs(t *testing.T) {
+	// When info has no ChromeAddr/ProxyAddr, env vars should remain empty.
+	t.Setenv("HUMAN_CHROME_ADDR", "")
+	t.Setenv("HUMAN_PROXY_ADDR", "")
+
+	info := daemon.DaemonInfo{
+		Addr:  "localhost:9999",
+		Token: "tok",
+	}
+	addr, token := applyDaemonInfo(info, "")
+	assert.Equal(t, "localhost:9999", addr)
+	assert.Equal(t, "tok", token)
+	assert.Equal(t, "", os.Getenv("HUMAN_CHROME_ADDR"))
+	assert.Equal(t, "", os.Getenv("HUMAN_PROXY_ADDR"))
+}
+
+// --- buildHookRunE tests ---
+
+func TestBuildHookRunE_malformedJSON(t *testing.T) {
+	// Malformed JSON should be silently ignored (return nil).
+	origStdin := os.Stdin
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, _ = w.WriteString("not valid json{{{")
+	w.Close()
+	os.Stdin = r
+
+	runE := buildHookRunE()
+	err = runE(nil, nil)
+	assert.NoError(t, err)
+}
+
+func TestBuildHookRunE_emptyEventName(t *testing.T) {
+	// Empty event name should be silently ignored (return nil).
+	origStdin := os.Stdin
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	input := hookInput{SessionID: "s1", Cwd: "/tmp"}
+	data, _ := json.Marshal(input)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, _ = w.Write(data)
+	w.Close()
+	os.Stdin = r
+
+	runE := buildHookRunE()
+	err = runE(nil, nil)
+	assert.NoError(t, err)
+}
+
+func TestBuildHookRunE_noDaemon(t *testing.T) {
+	// Valid input but no daemon configured should silently return nil.
+	origStdin := os.Stdin
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	// Ensure no daemon env vars or info file.
+	t.Setenv("HUMAN_DAEMON_ADDR", "")
+	t.Setenv("HUMAN_DAEMON_TOKEN", "")
+
+	input := hookInput{EventName: "tool_start", SessionID: "s1", Cwd: "/tmp"}
+	data, _ := json.Marshal(input)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	_, _ = w.Write(data)
+	w.Close()
+	os.Stdin = r
+
+	runE := buildHookRunE()
+	err = runE(nil, nil)
+	assert.NoError(t, err)
+}
+
+func TestBuildHookRunE_emptyStdin(t *testing.T) {
+	// Empty stdin should produce empty data, which fails json.Unmarshal
+	// and is silently ignored.
+	origStdin := os.Stdin
+	t.Cleanup(func() { os.Stdin = origStdin })
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	w.Close()
+	os.Stdin = r
+
+	runE := buildHookRunE()
+	err = runE(nil, nil)
+	assert.NoError(t, err)
+}
+
+// --- buildInstallCmd tests ---
+
+func TestBuildInstallCmd_unsupportedAgent(t *testing.T) {
+	cmd := buildInstallCmd()
+	cmd.SetArgs([]string{"--agent", "unknown"})
+
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported agent")
 }

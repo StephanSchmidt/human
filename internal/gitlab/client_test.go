@@ -569,3 +569,209 @@ func TestEditIssue_httpError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned")
 }
+
+func TestSetHTTPDoer_gitlab(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	client.SetHTTPDoer(&mockDoer{})
+	assert.NotNil(t, client)
+}
+
+// mockDoer implements apiclient.HTTPDoer for testing SetHTTPDoer.
+type mockDoer struct{}
+
+func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK}, nil
+}
+
+func TestProjectFromIssue(t *testing.T) {
+	tests := []struct {
+		name string
+		gi   glIssue
+		want string
+	}{
+		{
+			name: "with full reference",
+			gi: glIssue{
+				IID:        1,
+				References: &glReference{Full: "mygroup/myproject#1"},
+			},
+			want: "mygroup/myproject",
+		},
+		{
+			name: "multi-level reference",
+			gi: glIssue{
+				IID:        5,
+				References: &glReference{Full: "group/subgroup/project#5"},
+			},
+			want: "group/subgroup/project",
+		},
+		{
+			name: "nil references",
+			gi: glIssue{
+				IID: 1,
+			},
+			want: "",
+		},
+		{
+			name: "empty full reference",
+			gi: glIssue{
+				IID:        1,
+				References: &glReference{Full: ""},
+			},
+			want: "",
+		},
+		{
+			name: "reference without hash",
+			gi: glIssue{
+				IID:        1,
+				References: &glReference{Full: "nohash"},
+			},
+			want: "",
+		},
+		{
+			name: "hash at position 0",
+			gi: glIssue{
+				IID:        1,
+				References: &glReference{Full: "#123"},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := projectFromIssue(tt.gi)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestTransitionIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.TransitionIssue(context.Background(), "nohash", "closed")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestTransitionIssue_reopened(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "reopen", payload["state_event"])
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.TransitionIssue(context.Background(), "mygroup/myproject#1", "reopened")
+	require.NoError(t, err)
+}
+
+func TestTransitionIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	err := client.TransitionIssue(context.Background(), "mygroup/myproject#1", "closed")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAddComment_invalidKey(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	_, err := client.AddComment(context.Background(), "nohash", "test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestListComments_invalidKey(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	_, err := client.ListComments(context.Background(), "nohash")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestListComments_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	_, err := client.ListComments(context.Background(), "mygroup/myproject#42")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_invalidKey(t *testing.T) {
+	title := "X"
+	client := New("http://localhost", "glpat-test")
+	_, err := client.EditIssue(context.Background(), "nohash", tracker.EditOptions{Title: &title})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestEditIssue_descriptionOnly(t *testing.T) {
+	desc := "Updated description"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(body, &got))
+		assert.Equal(t, "Updated description", got["description"])
+		_, ok := got["title"]
+		assert.False(t, ok, "title should not be present")
+
+		_, _ = fmt.Fprint(w, `{"iid":42,"title":"Original","description":"Updated description","state":"opened"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	issue, err := client.EditIssue(context.Background(), "mygroup/myproject#42", tracker.EditOptions{Description: &desc})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Updated description", issue.Description)
+}
+
+func TestListIssues_withoutProject(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v4/issues", r.URL.Path)
+
+		_, _ = fmt.Fprint(w, `[
+			{"iid":1,"project_id":100,"title":"Global issue","description":"","state":"opened","author":{"id":1,"username":"alice"},"assignees":[],"labels":[],"references":{"full":"mygroup/myproject#1"}}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "glpat-test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults: 50,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "mygroup/myproject#1", issues[0].Key)
+	assert.Equal(t, "mygroup/myproject", issues[0].Project)
+}
+
+func TestTransitionIssue_invalidProject(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.TransitionIssue(context.Background(), "noslash#1", "closed")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestAssignIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "glpat-test")
+	err := client.AssignIssue(context.Background(), "nohash", "42")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}

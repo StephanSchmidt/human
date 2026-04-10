@@ -271,6 +271,39 @@ func TestSyncNotion_emptyInstances(t *testing.T) {
 	}
 }
 
+func TestSyncNotion_unknownTypeIgnored(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	var buf bytes.Buffer
+
+	client := &mockNotionClient{
+		searchFn: func(_ context.Context, _ string) ([]notion.SearchResult, error) {
+			return []notion.SearchResult{
+				{ID: "page-1", Title: "Real page", URL: "https://notion.so/page-1", Type: "page"},
+				{ID: "unknown-1", Title: "Unknown type", URL: "https://notion.so/unknown-1", Type: "comment"}, // unknown type
+			}, nil
+		},
+		getPageFn: func(_ context.Context, pageID string) (string, error) {
+			return "# Content of " + pageID, nil
+		},
+	}
+
+	instances := []NotionInstance{
+		{Name: "workspace", URL: "https://api.notion.com", Client: client},
+	}
+
+	result, err := SyncNotion(ctx, s, instances, &buf)
+	if err != nil {
+		t.Fatalf("SyncNotion: %v", err)
+	}
+	if result.Pages != 1 {
+		t.Errorf("expected 1 page, got %d", result.Pages)
+	}
+	if result.Databases != 0 {
+		t.Errorf("expected 0 databases, got %d", result.Databases)
+	}
+}
+
 func TestFlattenProperties(t *testing.T) {
 	props := map[string]string{
 		"Name":   "Auth Spec",

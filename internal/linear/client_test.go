@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/StephanSchmidt/human/internal/apiclient"
 	"github.com/StephanSchmidt/human/internal/tracker"
@@ -1044,4 +1045,531 @@ func TestResolveProjectID_graphQLError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "graphql error")
+}
+
+// --- New tests below ---
+
+func TestSetHTTPDoer_linear(t *testing.T) {
+	client := New("http://localhost", "lin_test")
+	client.SetHTTPDoer(http.DefaultClient)
+	// SetHTTPDoer is a simple setter; verify it does not panic.
+}
+
+func TestListIssues_updatedSince(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"updatedAt": func(vars map[string]any) string {
+				assert.Equal(t, "ENG", vars["teamKey"])
+				assert.NotNil(t, vars["since"])
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"ENG-5","title":"Recently updated","description":"",
+					 "state":{"name":"In Progress","type":"started"},"priorityLabel":"Medium",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	since := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:      "ENG",
+		MaxResults:   10,
+		UpdatedSince: since,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "ENG-5", issues[0].Key)
+}
+
+func TestListIssues_updatedSinceIncludeAll(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"updatedAt": func(vars map[string]any) string {
+				assert.Equal(t, "ENG", vars["teamKey"])
+				assert.NotNil(t, vars["since"])
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"ENG-10","title":"All updated","description":"",
+					 "state":{"name":"Done","type":"completed"},"priorityLabel":"Low",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	since := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:      "ENG",
+		MaxResults:   10,
+		IncludeAll:   true,
+		UpdatedSince: since,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "ENG-10", issues[0].Key)
+	assert.Equal(t, "done", issues[0].StatusType)
+}
+
+func TestListIssues_noProject(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issues(": func(vars map[string]any) string {
+				_, hasTeamKey := vars["teamKey"]
+				assert.False(t, hasTeamKey, "teamKey should not be set when project is empty")
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"TEAM-1","title":"Cross-team issue","description":"",
+					 "state":{"name":"Open","type":"unstarted"},"priorityLabel":"High",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults: 10,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "TEAM-1", issues[0].Key)
+	assert.Equal(t, "TEAM", issues[0].Project)
+}
+
+func TestListIssues_noProjectIncludeAll(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issues(": func(vars map[string]any) string {
+				_, hasTeamKey := vars["teamKey"]
+				assert.False(t, hasTeamKey)
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"ABC-3","title":"All teams all statuses","description":"",
+					 "state":{"name":"Cancelled","type":"canceled"},"priorityLabel":"None",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults: 10,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "ABC-3", issues[0].Key)
+	assert.Equal(t, "ABC", issues[0].Project)
+	assert.Equal(t, "closed", issues[0].StatusType)
+}
+
+func TestListIssues_noProjectUpdatedSince(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"updatedAt": func(vars map[string]any) string {
+				_, hasTeamKey := vars["teamKey"]
+				assert.False(t, hasTeamKey)
+				assert.NotNil(t, vars["since"])
+				return `{"data":{"issues":{"nodes":[]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	since := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults:   10,
+		UpdatedSince: since,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+}
+
+func TestListIssues_noProjectUpdatedSinceIncludeAll(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"updatedAt": func(vars map[string]any) string {
+				_, hasTeamKey := vars["teamKey"]
+				assert.False(t, hasTeamKey)
+				assert.NotNil(t, vars["since"])
+				return `{"data":{"issues":{"nodes":[
+					{"identifier":"X-1","title":"Updated all","description":"",
+					 "state":{"name":"Done","type":"completed"},"priorityLabel":"",
+					 "assignee":null,"creator":null,"labels":{"nodes":[]}}
+				]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	since := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		MaxResults:   10,
+		IncludeAll:   true,
+		UpdatedSince: since,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "X-1", issues[0].Key)
+	assert.Equal(t, "X", issues[0].Project)
+}
+
+func TestAddComment_serverReturnsFailure(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"commentCreate(": func(_ map[string]any) string {
+				return `{"data":{"commentCreate":{"success":false,"comment":null}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.AddComment(context.Background(), "ENG-1", "test body")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "comment creation failed")
+}
+
+func TestAddComment_resolveIssueIDError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.AddComment(context.Background(), "ENG-1", "test body")
+
+	require.Error(t, err)
+}
+
+func TestListComments_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.ListComments(context.Background(), "ENG-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListComments_invalidTimestamp(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"comments":{"nodes":[
+					{"id":"c1","body":"Bad date","createdAt":"not-a-date","user":{"name":"Alice"}}
+				]}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.ListComments(context.Background(), "ENG-42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing comment timestamp")
+}
+
+func TestListComments_commentWithNoUser(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"comments":{"nodes":[
+					{"id":"c1","body":"System comment","createdAt":"2025-01-15T10:30:00Z","user":null}
+				]}}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	comments, err := client.ListComments(context.Background(), "ENG-42")
+
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "", comments[0].Author)
+	assert.Equal(t, "System comment", comments[0].Body)
+}
+
+func TestTransitionIssue_updateFailure(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(id:": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"issue-uuid-1"}}}`
+			},
+			"states": func(_ map[string]any) string {
+				return `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[
+					{"id":"state-1","name":"Done","type":"completed"}
+				]}}]}}}`
+			},
+			"issueUpdate(": func(_ map[string]any) string {
+				return `{"data":{"issueUpdate":{"success":false}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "Done")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transition failed")
+}
+
+func TestTransitionIssue_httpErrorOnUpdate(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// resolveIssueID
+			_, _ = fmt.Fprint(w, `{"data":{"issue":{"id":"issue-uuid-1"}}}`)
+			return
+		}
+		if callCount == 2 {
+			// fetchTeamStates
+			_, _ = fmt.Fprint(w, `{"data":{"teams":{"nodes":[{"id":"team-1","states":{"nodes":[
+				{"id":"state-1","name":"Done","type":"completed"}
+			]}}]}}}`)
+			return
+		}
+		// issueUpdate HTTP error
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "Done")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestTransitionIssue_resolveIssueIDError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "Done")
+
+	require.Error(t, err)
+}
+
+func TestTransitionIssue_fetchTeamStatesError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// resolveIssueID succeeds
+			_, _ = fmt.Fprint(w, `{"data":{"issue":{"id":"issue-uuid-1"}}}`)
+			return
+		}
+		// fetchTeamStates HTTP error
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.TransitionIssue(context.Background(), "ENG-1", "Done")
+
+	require.Error(t, err)
+}
+
+func TestAssignIssue_resolveIssueIDError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.AssignIssue(context.Background(), "ENG-1", "user-uuid")
+
+	require.Error(t, err)
+}
+
+func TestAssignIssue_httpErrorOnUpdate(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// resolveIssueID succeeds
+			_, _ = fmt.Fprint(w, `{"data":{"issue":{"id":"issue-uuid-1"}}}`)
+			return
+		}
+		// issueUpdate HTTP error
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.AssignIssue(context.Background(), "ENG-1", "user-uuid")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_serverReturnsFailure(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":"uuid-1"}}}`
+			},
+			"issueUpdate": func(_ map[string]any) string {
+				return `{"data":{"issueUpdate":{"success":false}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	title := "New Title"
+	client := New(srv.URL, "lin_test")
+	_, err := client.EditIssue(context.Background(), "ENG-42", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "edit failed")
+}
+
+func TestEditIssue_descriptionOnly(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issueUpdate": func(vars map[string]any) string {
+				callCount++
+				input := vars["input"].(map[string]any)
+				_, hasTitle := input["title"]
+				assert.False(t, hasTitle, "title should not be set")
+				assert.Equal(t, "New description", input["description"])
+				return `{"data":{"issueUpdate":{"success":true}}}`
+			},
+			"issue(": func(_ map[string]any) string {
+				callCount++
+				if callCount <= 2 {
+					return `{"data":{"issue":{"id":"uuid-1"}}}`
+				}
+				return `{"data":{"issue":{
+					"identifier":"ENG-42","title":"Original","description":"New description",
+					"state":{"name":"In Progress","type":"started"},"priorityLabel":"High",
+					"assignee":null,"creator":null,"labels":{"nodes":[]}
+				}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	desc := "New description"
+	client := New(srv.URL, "lin_test")
+	issue, err := client.EditIssue(context.Background(), "ENG-42", tracker.EditOptions{Description: &desc})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ENG-42", issue.Key)
+	assert.Equal(t, "New description", issue.Description)
+}
+
+func TestFetchTeamStates_teamNotFound(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"states": func(_ map[string]any) string {
+				return `{"data":{"teams":{"nodes":[]}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.fetchTeamStates(context.Background(), "NOPE-1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "team not found")
+}
+
+func TestFetchTeamStates_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.fetchTeamStates(context.Background(), "ENG-1")
+
+	require.Error(t, err)
+}
+
+func TestResolveIssueID_notFound(t *testing.T) {
+	srv := httptest.NewServer(&graphQLHandler{
+		t: t,
+		handlers: map[string]func(vars map[string]any) string{
+			"issue(": func(_ map[string]any) string {
+				return `{"data":{"issue":{"id":""}}}`
+			},
+		},
+	})
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	_, err := client.resolveIssueID(context.Background(), "ENG-999")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "issue not found")
+}
+
+func TestToTrackerIssue_withUpdatedAt(t *testing.T) {
+	li := linearIssue{
+		Identifier: "ENG-7",
+		Title:      "With timestamp",
+		State:      stateNode{Name: "Triage", Type: "triage"},
+		UpdatedAt:  "2025-03-15T10:30:00Z",
+	}
+
+	issue := toTrackerIssue(li, "ENG")
+
+	assert.Equal(t, "ENG-7", issue.Key)
+	assert.Equal(t, "unstarted", issue.StatusType)
+	assert.False(t, issue.UpdatedAt.IsZero())
+	assert.Equal(t, 2025, issue.UpdatedAt.Year())
+}
+
+func TestDeleteIssue_resolveIssueIDError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "lin_test")
+	err := client.DeleteIssue(context.Background(), "ENG-42")
+
+	require.Error(t, err)
 }

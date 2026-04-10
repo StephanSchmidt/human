@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/StephanSchmidt/human/internal/tracker"
 
@@ -614,4 +615,369 @@ func TestEditIssue_httpError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestSetHTTPDoer_github(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	client.SetHTTPDoer(http.DefaultClient)
+	// No panic means success; SetHTTPDoer is a simple setter.
+}
+
+func TestListIssues_allRepos(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/search/issues", r.URL.Path)
+		assert.Contains(t, r.URL.Query().Get("q"), "is:issue")
+		assert.Contains(t, r.URL.Query().Get("q"), "is:open")
+		assert.Equal(t, "30", r.URL.Query().Get("per_page"))
+		assert.Equal(t, "created", r.URL.Query().Get("sort"))
+		assert.Equal(t, "desc", r.URL.Query().Get("order"))
+
+		_, _ = fmt.Fprint(w, `{
+			"items": [
+				{
+					"number": 10,
+					"html_url": "https://github.com/octocat/repo-a/issues/10",
+					"title": "Issue in repo A",
+					"body": "body A",
+					"state": "open",
+					"user": {"login": "alice"},
+					"labels": [{"name": "bug"}],
+					"repository_url": "https://api.github.com/repos/octocat/repo-a"
+				},
+				{
+					"number": 20,
+					"html_url": "https://github.com/other/repo-b/issues/20",
+					"title": "Issue in repo B",
+					"body": "body B",
+					"state": "open",
+					"user": {"login": "bob"},
+					"labels": [],
+					"repository_url": "https://api.github.com/repos/other/repo-b"
+				},
+				{
+					"number": 30,
+					"html_url": "https://github.com/octocat/repo-a/pull/30",
+					"title": "A pull request",
+					"body": "pr body",
+					"state": "open",
+					"user": {"login": "charlie"},
+					"labels": [],
+					"pull_request": {},
+					"repository_url": "https://api.github.com/repos/octocat/repo-a"
+				}
+			]
+		}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "", // empty project triggers listAllIssues
+		MaxResults: 30,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 2, "PRs should be filtered out")
+
+	assert.Equal(t, "octocat/repo-a#10", issues[0].Key)
+	assert.Equal(t, "octocat/repo-a", issues[0].Project)
+	assert.Equal(t, "Issue in repo A", issues[0].Title)
+	assert.Equal(t, "bug", issues[0].Type)
+	assert.Equal(t, "alice", issues[0].Reporter)
+
+	assert.Equal(t, "other/repo-b#20", issues[1].Key)
+	assert.Equal(t, "other/repo-b", issues[1].Project)
+	assert.Equal(t, "Issue in repo B", issues[1].Title)
+	assert.Equal(t, "", issues[1].Type) // no labels
+	assert.Equal(t, "bob", issues[1].Reporter)
+}
+
+func TestListIssues_allRepos_includeAll(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		assert.Contains(t, q, "is:issue")
+		assert.NotContains(t, q, "is:open") // IncludeAll should omit "is:open"
+
+		_, _ = fmt.Fprint(w, `{"items": []}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "",
+		MaxResults: 10,
+		IncludeAll: true,
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+}
+
+func TestListIssues_allRepos_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:    "",
+		MaxResults: 10,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestParseRepoURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		url       string
+		wantOwner string
+		wantRepo  string
+	}{
+		{
+			name:      "standard API URL",
+			url:       "https://api.github.com/repos/octocat/hello-world",
+			wantOwner: "octocat",
+			wantRepo:  "hello-world",
+		},
+		{
+			name:      "enterprise API URL",
+			url:       "https://github.example.com/api/v3/repos/myorg/myrepo",
+			wantOwner: "myorg",
+			wantRepo:  "myrepo",
+		},
+		{
+			name:      "no repos prefix",
+			url:       "https://api.github.com/users/octocat",
+			wantOwner: "",
+			wantRepo:  "",
+		},
+		{
+			name:      "repos but no repo name",
+			url:       "https://api.github.com/repos/octocat",
+			wantOwner: "",
+			wantRepo:  "",
+		},
+		{
+			name:      "empty string",
+			url:       "",
+			wantOwner: "",
+			wantRepo:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, repo := parseRepoURL(tt.url)
+			assert.Equal(t, tt.wantOwner, owner)
+			assert.Equal(t, tt.wantRepo, repo)
+		})
+	}
+}
+
+func TestListComments_invalidKey(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	_, err := client.ListComments(context.Background(), "badkey")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestListComments_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.ListComments(context.Background(), "octocat/hello-world#42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestTransitionIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	err := client.TransitionIssue(context.Background(), "badkey", "closed")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestTransitionIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.TransitionIssue(context.Background(), "octocat/hello-world#1", "open")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_invalidKey(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	err := client.AssignIssue(context.Background(), "badkey", "octocat")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestGetCurrentUser_invalidJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `not json`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	_, err := client.GetCurrentUser(context.Background())
+
+	require.Error(t, err)
+}
+
+func TestEditIssue_invalidKey(t *testing.T) {
+	title := "X"
+	client := New("http://localhost", "ghp_test")
+	_, err := client.EditIssue(context.Background(), "badkey", tracker.EditOptions{Title: &title})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid issue key format")
+}
+
+func TestEditIssue_withDescription(t *testing.T) {
+	title := "New Title"
+	desc := "New Body"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(body, &got))
+		assert.Equal(t, "New Title", got["title"])
+		assert.Equal(t, "New Body", got["body"])
+
+		_, _ = fmt.Fprint(w, `{"number":5,"title":"New Title","body":"New Body","state":"open"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	issue, err := client.EditIssue(context.Background(), "octocat/repo#5", tracker.EditOptions{
+		Title:       &title,
+		Description: &desc,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "New Title", issue.Title)
+	assert.Equal(t, "New Body", issue.Description)
+}
+
+func TestDeleteIssue_stateNotClosed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate a workflow rule re-opening the issue.
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{"number":42,"state":"open"}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.DeleteIssue(context.Background(), "octocat/hello-world#42")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not transition to closed")
+}
+
+func TestCreateIssue_invalidProject(t *testing.T) {
+	client := New("http://localhost", "ghp_test")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "noslash",
+		Title:   "Will fail",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid project format")
+}
+
+func TestListComments_commentWithoutUser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `[
+			{"id": 201, "body": "Anonymous comment", "user": null, "created_at": "2025-03-01T12:00:00Z"}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	comments, err := client.ListComments(context.Background(), "octocat/hello-world#1")
+
+	require.NoError(t, err)
+	require.Len(t, comments, 1)
+	assert.Equal(t, "", comments[0].Author)
+	assert.Equal(t, "Anonymous comment", comments[0].Body)
+}
+
+func TestListIssues_withUpdatedSince(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		since := r.URL.Query().Get("since")
+		assert.NotEmpty(t, since, "since parameter should be set")
+
+		_, _ = fmt.Fprint(w, `[
+			{"number":1,"title":"Recent issue","body":"","state":"open","user":{"login":"alice"},"labels":[],"updated_at":"2025-06-01T00:00:00Z"}
+		]`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	since, _ := time.Parse(time.RFC3339, "2025-05-01T00:00:00Z")
+	issues, err := client.ListIssues(context.Background(), tracker.ListOptions{
+		Project:      "octocat/hello-world",
+		MaxResults:   10,
+		UpdatedSince: since,
+	})
+
+	require.NoError(t, err)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "octocat/hello-world#1", issues[0].Key)
+}
+
+func TestAddComment_commentWithoutUser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprint(w, `{
+			"id": 301,
+			"body": "Bot comment",
+			"user": null,
+			"created_at": "2025-02-01T09:00:00Z"
+		}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	comment, err := client.AddComment(context.Background(), "octocat/hello-world#1", "Bot comment")
+
+	require.NoError(t, err)
+	assert.Equal(t, "301", comment.ID)
+	assert.Equal(t, "", comment.Author)
+	assert.Equal(t, "Bot comment", comment.Body)
+}
+
+func TestTransitionIssue_caseInsensitive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		var payload map[string]string
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "open", payload["state"])
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "ghp_test")
+	err := client.TransitionIssue(context.Background(), "octocat/hello-world#1", "Open")
+	require.NoError(t, err)
 }

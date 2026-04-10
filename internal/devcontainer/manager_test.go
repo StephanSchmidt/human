@@ -290,3 +290,586 @@ func TestParseRunArgs(t *testing.T) {
 		t.Errorf("SecurityOpt = %v", opts.SecurityOpt)
 	}
 }
+
+func TestParseMountString_BindMount(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// Standard devcontainer.json mount format.
+		{"source=/host/path,target=/container/path,type=bind", "/host/path:/container/path"},
+		// With readonly.
+		{"source=/host/path,target=/container/path,type=bind,readonly", "/host/path:/container/path:ro"},
+		// Alternative key names.
+		{"src=/a,dst=/b,type=bind", "/a:/b"},
+		{"src=/a,destination=/b,type=bind", "/a:/b"},
+		// Already in Binds format (passthrough).
+		{"/host:/container", "/host:/container"},
+		{"/host:/container:ro", "/host:/container:ro"},
+		// Non-bind mount type (volume) should return empty.
+		{"source=myvolume,target=/data,type=volume", ""},
+		// Missing source or target.
+		{"target=/container/path,type=bind", ""},
+		{"source=/host/path,type=bind", ""},
+		// No type specified (defaults to bind).
+		{"source=/host/path,target=/container/path", "/host/path:/container/path"},
+	}
+	for _, tt := range tests {
+		got := parseMountString(tt.input)
+		if got != tt.want {
+			t.Errorf("parseMountString(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestParseMountString_WithSpaces(t *testing.T) {
+	input := "source=/host/path , target=/container/path , type=bind"
+	got := parseMountString(input)
+	if got != "/host/path:/container/path" {
+		t.Errorf("parseMountString with spaces = %q, want %q", got, "/host/path:/container/path")
+	}
+}
+
+func TestDeduplicateBinds(t *testing.T) {
+	binds := []string{
+		"/first:/target-a",
+		"/second:/target-b",
+		"/third:/target-a", // duplicate target, should replace /first
+	}
+	got := deduplicateBinds(binds)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 deduped binds, got %d: %v", len(got), got)
+	}
+	// The last entry for /target-a should win.
+	foundA := false
+	for _, b := range got {
+		if strings.Contains(b, "/target-a") {
+			foundA = true
+			if !strings.HasPrefix(b, "/third:") {
+				t.Errorf("expected /third:/target-a to win, got %q", b)
+			}
+		}
+	}
+	if !foundA {
+		t.Error("missing /target-a entry")
+	}
+}
+
+func TestDeduplicateBinds_NoConflicts(t *testing.T) {
+	binds := []string{
+		"/a:/x",
+		"/b:/y",
+		"/c:/z",
+	}
+	got := deduplicateBinds(binds)
+	if len(got) != 3 {
+		t.Errorf("expected 3 binds, got %d", len(got))
+	}
+}
+
+func TestDeduplicateBinds_WithOptions(t *testing.T) {
+	binds := []string{
+		"/first:/target:ro",
+		"/second:/target:rw", // same target, should replace
+	}
+	got := deduplicateBinds(binds)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 bind, got %d: %v", len(got), got)
+	}
+	if got[0] != "/second:/target:rw" {
+		t.Errorf("expected /second:/target:rw, got %q", got[0])
+	}
+}
+
+func TestRemoteHome(t *testing.T) {
+	tests := []struct {
+		user string
+		want string
+	}{
+		{"root", "/root"},
+		{"", "/root"},
+		{"vscode", "/home/vscode"},
+		{"developer", "/home/developer"},
+	}
+	for _, tt := range tests {
+		cfg := &DevcontainerConfig{RemoteUser: tt.user}
+		got := remoteHome(cfg)
+		if got != tt.want {
+			t.Errorf("remoteHome(user=%q) = %q, want %q", tt.user, got, tt.want)
+		}
+	}
+}
+
+func TestManager_Status(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := WriteMeta(Meta{
+		Name:        "status-dc",
+		ContainerID: "status-id-123",
+		Status:      StatusRunning,
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockDockerClient{
+		inspectState: ContainerState{Running: true, Status: "running"},
+	}
+	mgr := &Manager{Docker: mock, Logger: testLogger()}
+	meta, err := mgr.Status(context.Background(), "status-dc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != StatusRunning {
+		t.Errorf("status = %q, want %q", meta.Status, StatusRunning)
+	}
+}
+
+func TestManager_Status_Stopped(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := WriteMeta(Meta{
+		Name:        "stopped-dc",
+		ContainerID: "stopped-id-123",
+		Status:      StatusRunning,
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockDockerClient{
+		inspectState: ContainerState{Running: false, Status: "exited"},
+	}
+	mgr := &Manager{Docker: mock, Logger: testLogger()}
+	meta, err := mgr.Status(context.Background(), "stopped-dc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != StatusStopped {
+		t.Errorf("status = %q, want %q", meta.Status, StatusStopped)
+	}
+}
+
+func TestManager_Status_ContainerGone(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := WriteMeta(Meta{
+		Name:        "gone-dc",
+		ContainerID: "gone-id-123",
+		Status:      StatusRunning,
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Return error on inspect to simulate container not found.
+	mock := &mockDockerClient{}
+	// Override ContainerInspect to return error by wrapping.
+	inspectErrMock := &inspectErrorMock{mockDockerClient: mock}
+	mgr := &Manager{Docker: inspectErrMock, Logger: testLogger()}
+	meta, err := mgr.Status(context.Background(), "gone-dc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != StatusFailed {
+		t.Errorf("status = %q, want %q", meta.Status, StatusFailed)
+	}
+}
+
+// inspectErrorMock wraps mockDockerClient but returns an error on ContainerInspect.
+type inspectErrorMock struct {
+	*mockDockerClient
+}
+
+func (m *inspectErrorMock) ContainerInspect(_ context.Context, _ string) (ContainerInspectResponse, error) {
+	return ContainerInspectResponse{}, fmt.Errorf("container not found")
+}
+
+func TestManager_Status_NotFound(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	mock := &mockDockerClient{}
+	mgr := &Manager{Docker: mock, Logger: testLogger()}
+	_, err := mgr.Status(context.Background(), "nonexistent-dc")
+	if err == nil {
+		t.Error("expected error for nonexistent devcontainer")
+	}
+}
+
+func TestReadConfig(t *testing.T) {
+	dir := t.TempDir()
+	dcDir := filepath.Join(dir, ".devcontainer")
+	if err := os.MkdirAll(dcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configJSON := `{
+  // This is a comment
+  "name": "test",
+  "image": "ubuntu:22.04",
+  "remoteUser": "vscode"
+}`
+	if err := os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(configJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := ReadConfig(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Name != "test" {
+		t.Errorf("name = %q, want %q", cfg.Name, "test")
+	}
+	if cfg.Image != "ubuntu:22.04" {
+		t.Errorf("image = %q, want %q", cfg.Image, "ubuntu:22.04")
+	}
+	if cfg.RemoteUser != "vscode" {
+		t.Errorf("remoteUser = %q, want %q", cfg.RemoteUser, "vscode")
+	}
+}
+
+func TestReadConfig_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	_, err := ReadConfig(dir)
+	if err == nil {
+		t.Error("expected error when no devcontainer.json exists")
+	}
+}
+
+func TestManager_Up_CustomContainerName(t *testing.T) {
+	projectDir, _, docker := setupTestProject(t, `{"image": "ubuntu:22.04"}`)
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	var buf bytes.Buffer
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir:    projectDir,
+		ContainerName: "my-custom-name",
+		Out:           &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.ContainerName != "my-custom-name" {
+		t.Errorf("container name = %q, want %q", meta.ContainerName, "my-custom-name")
+	}
+}
+
+func TestManager_Up_WithMounts(t *testing.T) {
+	projectDir, mock, docker := setupTestProject(t, `{
+  "image": "ubuntu:22.04",
+  "mounts": [
+    "source=/host/data,target=/data,type=bind",
+    "source=/host/config,target=/config,type=bind,readonly"
+  ]
+}`)
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	_, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mock.createCalls) != 1 {
+		t.Fatalf("expected 1 create call, got %d", len(mock.createCalls))
+	}
+	binds := mock.createCalls[0].Binds
+	foundData := false
+	foundConfigRO := false
+	for _, b := range binds {
+		if b == "/host/data:/data" {
+			foundData = true
+		}
+		if b == "/host/config:/config:ro" {
+			foundConfigRO = true
+		}
+	}
+	if !foundData {
+		t.Errorf("missing /host/data:/data in binds: %v", binds)
+	}
+	if !foundConfigRO {
+		t.Errorf("missing /host/config:/config:ro in binds: %v", binds)
+	}
+}
+
+func TestManager_Up_WithCACert(t *testing.T) {
+	projectDir, mock, docker := setupTestProject(t, `{"image": "ubuntu:22.04", "remoteUser": "vscode"}`)
+
+	// Create CA cert file in the test HOME.
+	home := os.Getenv("HOME")
+	humanDir := filepath.Join(home, ".human")
+	if err := os.MkdirAll(humanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(humanDir, "ca.crt"), []byte("cert-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	_, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mock.createCalls) != 1 {
+		t.Fatalf("expected 1 create call, got %d", len(mock.createCalls))
+	}
+	binds := mock.createCalls[0].Binds
+	foundCACert := false
+	for _, b := range binds {
+		if strings.Contains(b, "ca.crt") && strings.HasSuffix(b, ":ro") {
+			foundCACert = true
+			break
+		}
+	}
+	if !foundCACert {
+		t.Errorf("expected CA cert mount in binds: %v", binds)
+	}
+}
+
+func TestManager_Up_WithClaudeDir(t *testing.T) {
+	projectDir, mock, docker := setupTestProject(t, `{"image": "ubuntu:22.04", "remoteUser": "vscode"}`)
+
+	// Create .claude directory in the test HOME.
+	home := os.Getenv("HOME")
+	claudeDir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	_, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mock.createCalls) != 1 {
+		t.Fatalf("expected 1 create call, got %d", len(mock.createCalls))
+	}
+	binds := mock.createCalls[0].Binds
+	foundClaude := false
+	for _, b := range binds {
+		if strings.Contains(b, ".claude") && !strings.Contains(b, ".claude.json") {
+			foundClaude = true
+			break
+		}
+	}
+	if !foundClaude {
+		t.Errorf("expected .claude dir mount in binds: %v", binds)
+	}
+}
+
+func TestManager_Up_DefaultRemoteUser(t *testing.T) {
+	projectDir, _, docker := setupTestProject(t, `{"image": "ubuntu:22.04"}`)
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// When no remoteUser is specified, it should default to "root".
+	if meta.RemoteUser != "root" {
+		t.Errorf("remoteUser = %q, want %q", meta.RemoteUser, "root")
+	}
+}
+
+func TestManager_Up_DefaultWorkspaceFolder(t *testing.T) {
+	projectDir, _, docker := setupTestProject(t, `{"image": "ubuntu:22.04"}`)
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Default workspace folder: /workspaces/<basename>.
+	expected := "/workspaces/" + filepath.Base(projectDir)
+	if meta.WorkspaceDir != expected {
+		t.Errorf("workspaceDir = %q, want %q", meta.WorkspaceDir, expected)
+	}
+}
+
+func TestManager_Up_CustomWorkspaceFolder(t *testing.T) {
+	projectDir, _, docker := setupTestProject(t, `{"image": "ubuntu:22.04", "workspaceFolder": "/custom/workspace"}`)
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.WorkspaceDir != "/custom/workspace" {
+		t.Errorf("workspaceDir = %q, want %q", meta.WorkspaceDir, "/custom/workspace")
+	}
+}
+
+func TestManager_Up_SourceDir(t *testing.T) {
+	projectDir, mock, docker := setupTestProject(t, `{"image": "ubuntu:22.04"}`)
+	sourceDir := t.TempDir()
+
+	mgr := &Manager{Docker: docker, Logger: testLogger()}
+	_, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		SourceDir:  sourceDir,
+		Out:        &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(mock.createCalls) != 1 {
+		t.Fatalf("expected 1 create call, got %d", len(mock.createCalls))
+	}
+	// The bind mounts should use sourceDir, not projectDir.
+	binds := mock.createCalls[0].Binds
+	foundSource := false
+	for _, b := range binds {
+		if strings.HasPrefix(b, sourceDir+":") {
+			foundSource = true
+			break
+		}
+	}
+	if !foundSource {
+		t.Errorf("expected sourceDir %q in binds, got %v", sourceDir, binds)
+	}
+}
+
+func TestManager_Up_ExistingRunning(t *testing.T) {
+	projectDir, _, _ := setupTestProject(t, `{"image": "ubuntu:22.04", "remoteUser": "vscode"}`)
+
+	containerName := ContainerName(projectDir)
+	// Mock that returns existing running container in list.
+	existingMock := &existingContainerMock{
+		mockDockerClient: &mockDockerClient{
+			imageInspectErr:    fmt.Errorf("not found"),
+			imageInspectResult: ImageInspectResponse{ID: "sha256:pulled"},
+			createID:           "container-abc123",
+			inspectState:       ContainerState{Running: true},
+		},
+		containers: []ContainerSummary{{
+			ID:     "existing-id",
+			Names:  []string{"/" + containerName},
+			Image:  "ubuntu:22.04",
+			State:  "running",
+			Labels: map[string]string{LabelManaged: "true"},
+		}},
+	}
+
+	mgr := &Manager{Docker: existingMock, Logger: testLogger()}
+	var buf bytes.Buffer
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != StatusRunning {
+		t.Errorf("status = %q, want %q", meta.Status, StatusRunning)
+	}
+	if !strings.Contains(buf.String(), "already running") {
+		t.Errorf("expected 'already running' in output: %s", buf.String())
+	}
+}
+
+func TestManager_Up_StoppedSameConfig(t *testing.T) {
+	projectDir, _, _ := setupTestProject(t, `{"image": "ubuntu:22.04"}`)
+
+	containerName := ContainerName(projectDir)
+	configData, _ := os.ReadFile(filepath.Join(projectDir, ".devcontainer", "devcontainer.json"))
+	hash := ConfigHash(configData)
+
+	existingMock := &existingContainerMock{
+		mockDockerClient: &mockDockerClient{
+			imageInspectErr:    fmt.Errorf("not found"),
+			imageInspectResult: ImageInspectResponse{ID: "sha256:pulled"},
+			createID:           "container-abc123",
+			inspectState:       ContainerState{Running: true},
+		},
+		containers: []ContainerSummary{{
+			ID:    "stopped-id",
+			Names: []string{"/" + containerName},
+			Image: "ubuntu:22.04",
+			State: "exited",
+			Labels: map[string]string{
+				LabelManaged:    "true",
+				LabelConfigHash: hash,
+			},
+		}},
+	}
+
+	mgr := &Manager{Docker: existingMock, Logger: testLogger()}
+	var buf bytes.Buffer
+	meta, err := mgr.Up(context.Background(), UpOptions{
+		ProjectDir: projectDir,
+		Out:        &buf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != StatusRunning {
+		t.Errorf("status = %q, want %q", meta.Status, StatusRunning)
+	}
+	if !strings.Contains(buf.String(), "Restarting stopped") {
+		t.Errorf("expected 'Restarting stopped' in output: %s", buf.String())
+	}
+}
+
+// existingContainerMock wraps mockDockerClient to return a pre-configured
+// container list.
+type existingContainerMock struct {
+	*mockDockerClient
+	containers []ContainerSummary
+}
+
+func (m *existingContainerMock) ContainerList(_ context.Context, _ ContainerListOptions) ([]ContainerSummary, error) {
+	return m.containers, nil
+}
+
+func TestParseRunArgs_Empty(t *testing.T) {
+	opts := &ContainerCreateOptions{}
+	ParseRunArgs(nil, opts, testLogger())
+	if opts.Privileged {
+		t.Error("Privileged should be false for empty args")
+	}
+	if opts.NetworkMode != "" {
+		t.Errorf("NetworkMode should be empty, got %q", opts.NetworkMode)
+	}
+}
+
+func TestNeedsValue(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"--add-host", true},
+		{"--cap-add", true},
+		{"--security-opt", true},
+		{"--network", true},
+		{"--privileged", false},
+		{"--unknown", false},
+	}
+	for _, tt := range tests {
+		got := needsValue(tt.key)
+		if got != tt.want {
+			t.Errorf("needsValue(%q) = %v, want %v", tt.key, got, tt.want)
+		}
+	}
+}

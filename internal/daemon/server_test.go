@@ -21,6 +21,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/StephanSchmidt/human/internal/env"
+	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/stats"
+	"github.com/StephanSchmidt/human/internal/tracker"
 )
 
 func echoCmd() *cobra.Command {
@@ -981,4 +984,587 @@ func TestServer_ConfirmOpEndpoint_SelfApprovalRejected(t *testing.T) {
 
 	// The entry must still be pending — no decision was delivered.
 	assert.Equal(t, 1, store.Len())
+}
+
+// --- helper: start a server with arbitrary Server fields ---
+
+func startTestServerCustom(t *testing.T, token string, customize func(s *Server)) (addr string, cancel context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	srv := &Server{
+		Addr:       "127.0.0.1:0",
+		Token:      token,
+		CmdFactory: echoCmd,
+		Logger:     zerolog.Nop(),
+	}
+	customize(srv)
+
+	ln, err := net.Listen("tcp", srv.Addr)
+	require.NoError(t, err)
+	addr = ln.Addr().String()
+	_ = ln.Close()
+	srv.Addr = addr
+
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, dialErr := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Cleanup(func() { cancel() })
+	return addr, cancel
+}
+
+// --- handleLogMode tests ---
+
+func TestServer_HandleLogMode_GetDefault(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	// Reset to known state.
+	proxy.SetLogMode(proxy.LogModeOff)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"log-mode"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "off\n", resp.Stdout)
+}
+
+func TestServer_HandleLogMode_SetMeta(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	proxy.SetLogMode(proxy.LogModeOff)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"log-mode", "meta"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "meta\n", resp.Stdout)
+
+	// Verify it was set.
+	assert.Equal(t, proxy.LogModeMeta, proxy.GetLogMode())
+}
+
+func TestServer_HandleLogMode_SetFull(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	proxy.SetLogMode(proxy.LogModeOff)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"log-mode", "full"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "full\n", resp.Stdout)
+	assert.Equal(t, proxy.LogModeFull, proxy.GetLogMode())
+}
+
+func TestServer_HandleLogMode_SetOff(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	proxy.SetLogMode(proxy.LogModeFull)
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"log-mode", "off"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "off\n", resp.Stdout)
+	assert.Equal(t, proxy.LogModeOff, proxy.GetLogMode())
+}
+
+func TestServer_HandleLogMode_InvalidMode(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"log-mode", "bogus"}})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.Contains(t, resp.Stderr, "unknown log mode")
+}
+
+// --- handleHookEvent tests ---
+
+func TestServer_HandleHookEvent_WithStore(t *testing.T) {
+	token := "test-token"
+	store := NewHookEventStore()
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = store
+	})
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"hook-event", "tool_start", "session-1", "/tmp", "", "Bash"},
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "ok\n", resp.Stdout)
+
+	events := store.RecentEvents()
+	require.Len(t, events, 1)
+	assert.Equal(t, "tool_start", events[0].EventName)
+	assert.Equal(t, "session-1", events[0].SessionID)
+	assert.Equal(t, "/tmp", events[0].Cwd)
+	assert.Equal(t, "Bash", events[0].ToolName)
+}
+
+func TestServer_HandleHookEvent_NilStore(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = nil
+	})
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"hook-event", "tool_start", "session-1", "/tmp"},
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "ok\n", resp.Stdout)
+}
+
+func TestServer_HandleHookEvent_NoArgs(t *testing.T) {
+	token := "test-token"
+	store := NewHookEventStore()
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = store
+	})
+
+	resp := sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"hook-event"},
+	})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "ok\n", resp.Stdout)
+
+	events := store.RecentEvents()
+	require.Len(t, events, 1)
+	// Event was stored with empty fields.
+	assert.Empty(t, events[0].EventName)
+}
+
+// --- handleHookSnapshot tests ---
+
+func TestServer_HandleHookSnapshot_WithEvents(t *testing.T) {
+	token := "test-token"
+	store := NewHookEventStore()
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = store
+	})
+
+	// First store some events.
+	sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"hook-event", "tool_start", "sess-A", "/home/user/project", "", "Read"},
+	})
+	sendRequest(t, addr, Request{
+		Token: token,
+		Args:  []string{"hook-event", "tool_end", "sess-A", "/home/user/project", "", "Read"},
+	})
+
+	// Now snapshot.
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"hook-snapshot"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Contains(t, resp.Stdout, "sess-A")
+
+	// Verify it's valid JSON.
+	var snapshot map[string]interface{}
+	err := json.Unmarshal([]byte(strings.TrimSpace(resp.Stdout)), &snapshot)
+	require.NoError(t, err)
+	assert.Contains(t, snapshot, "sess-A")
+}
+
+func TestServer_HandleHookSnapshot_NilStore(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = nil
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"hook-snapshot"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "{}\n", resp.Stdout)
+}
+
+func TestServer_HandleHookSnapshot_EmptyStore(t *testing.T) {
+	token := "test-token"
+	store := NewHookEventStore()
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = store
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"hook-snapshot"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	// Empty map rendered as JSON.
+	assert.Equal(t, "{}\n", resp.Stdout)
+}
+
+// --- handleTrackerDiagnose tests ---
+
+func TestServer_HandleTrackerDiagnose_WithDiagnoser(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.TrackerDiagnoser = func(dir string) []tracker.TrackerStatus {
+			return []tracker.TrackerStatus{
+				{Name: "work", Kind: "linear", Label: "Linear", Working: true},
+				{Name: "amazingcto", Kind: "jira", Label: "Jira", Working: false},
+			}
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-diagnose"}})
+	assert.Equal(t, 0, resp.ExitCode)
+
+	var statuses []tracker.TrackerStatus
+	err := json.Unmarshal([]byte(strings.TrimSpace(resp.Stdout)), &statuses)
+	require.NoError(t, err)
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "linear", statuses[0].Kind)
+	assert.True(t, statuses[0].Working)
+	assert.Equal(t, "jira", statuses[1].Kind)
+	assert.False(t, statuses[1].Working)
+}
+
+func TestServer_HandleTrackerDiagnose_EmptyResult(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.TrackerDiagnoser = func(dir string) []tracker.TrackerStatus {
+			return nil
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-diagnose"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "null\n", resp.Stdout)
+}
+
+func TestServer_HandleTrackerDiagnose_ReceivesProjectDir(t *testing.T) {
+	token := "test-token"
+	var receivedDir string
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.TrackerDiagnoser = func(dir string) []tracker.TrackerStatus {
+			receivedDir = dir
+			return nil
+		}
+	})
+
+	// Without a ProjectRegistry, projectDir defaults to ".".
+	sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-diagnose"}})
+	assert.Equal(t, ".", receivedDir)
+}
+
+// --- handleTrackerIssues tests ---
+
+func TestServer_HandleTrackerIssues_NilFetcher(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.IssueFetcher = nil
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-issues"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "[]\n", resp.Stdout)
+}
+
+func TestServer_HandleTrackerIssues_WithResults(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.IssueFetcher = func() ([]TrackerIssuesResult, error) {
+			return []TrackerIssuesResult{
+				{
+					TrackerName: "work",
+					TrackerKind: "linear",
+					Project:     "HUM",
+					Issues: []tracker.Issue{
+						{Key: "HUM-1", Title: "First issue", Status: "In Progress"},
+						{Key: "HUM-2", Title: "Second issue", Status: "Todo"},
+					},
+				},
+			}, nil
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-issues"}})
+	assert.Equal(t, 0, resp.ExitCode)
+
+	var results []TrackerIssuesResult
+	err := json.Unmarshal([]byte(strings.TrimSpace(resp.Stdout)), &results)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "linear", results[0].TrackerKind)
+	assert.Equal(t, "HUM", results[0].Project)
+	require.Len(t, results[0].Issues, 2)
+	assert.Equal(t, "HUM-1", results[0].Issues[0].Key)
+}
+
+func TestServer_HandleTrackerIssues_FetcherError(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.IssueFetcher = func() ([]TrackerIssuesResult, error) {
+			return nil, fmt.Errorf("network timeout")
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-issues"}})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.Contains(t, resp.Stderr, "network timeout")
+}
+
+func TestServer_HandleTrackerIssues_EmptyResults(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.IssueFetcher = func() ([]TrackerIssuesResult, error) {
+			return []TrackerIssuesResult{}, nil
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-issues"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "[]\n", resp.Stdout)
+}
+
+// --- handleToolStats tests ---
+
+func TestServer_HandleToolStats_NilStore(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.StatsStore = nil
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tool-stats"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "{}\n", resp.Stdout)
+}
+
+func TestServer_HandleToolStats_WithData(t *testing.T) {
+	token := "test-token"
+
+	store, err := stats.NewStatsStore(":memory:")
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	// Insert some events.
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, store.InsertEvent(ctx, "sess-1", "tool_start", "Bash", "/tmp", "", now.Add(-1*time.Hour)))
+	require.NoError(t, store.InsertEvent(ctx, "sess-1", "tool_end", "Bash", "/tmp", "", now.Add(-59*time.Minute)))
+	require.NoError(t, store.InsertEvent(ctx, "sess-1", "tool_start", "Read", "/tmp", "", now.Add(-30*time.Minute)))
+
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.StatsStore = store
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tool-stats"}})
+	assert.Equal(t, 0, resp.ExitCode)
+
+	var ts stats.ToolStats
+	err = json.Unmarshal([]byte(strings.TrimSpace(resp.Stdout)), &ts)
+	require.NoError(t, err)
+	assert.Equal(t, 3, ts.TotalEvents)
+	assert.NotEmpty(t, ts.ByTool)
+}
+
+func TestServer_HandleToolStats_EmptyDB(t *testing.T) {
+	token := "test-token"
+
+	store, err := stats.NewStatsStore(":memory:")
+	require.NoError(t, err)
+	defer func() { _ = store.Close() }()
+
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.StatsStore = store
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tool-stats"}})
+	assert.Equal(t, 0, resp.ExitCode)
+
+	var ts stats.ToolStats
+	err = json.Unmarshal([]byte(strings.TrimSpace(resp.Stdout)), &ts)
+	require.NoError(t, err)
+	assert.Equal(t, 0, ts.TotalEvents)
+}
+
+// --- routeIntercept tests ---
+
+func TestServer_RouteIntercept_EmptyArgs(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	// Empty args should not be intercepted; falls through to command execution.
+	// With no subcommand registered for empty args, the root cmd prints help and exits 0.
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{}})
+	assert.Equal(t, 0, resp.ExitCode)
+}
+
+func TestServer_RouteIntercept_UnknownCommand(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {})
+
+	// An unknown command should NOT be intercepted; falls through to cobra.
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"nonexistent"}})
+	// Cobra returns exit code 1 for unknown subcommands.
+	assert.Equal(t, 1, resp.ExitCode)
+}
+
+func TestServer_RouteIntercept_HookEventRoute(t *testing.T) {
+	token := "test-token"
+	store := NewHookEventStore()
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = store
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"hook-event", "tool_start", "s1", "/tmp"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "ok\n", resp.Stdout)
+	assert.Len(t, store.RecentEvents(), 1)
+}
+
+func TestServer_RouteIntercept_HookSnapshotRoute(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.HookEvents = NewHookEventStore()
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"hook-snapshot"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "{}\n", resp.Stdout)
+}
+
+func TestServer_RouteIntercept_TrackerDiagnoseRoute(t *testing.T) {
+	token := "test-token"
+	var called bool
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.TrackerDiagnoser = func(dir string) []tracker.TrackerStatus {
+			called = true
+			return []tracker.TrackerStatus{}
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-diagnose"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.True(t, called)
+}
+
+func TestServer_RouteIntercept_TrackerIssuesRoute(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.IssueFetcher = func() ([]TrackerIssuesResult, error) {
+			return []TrackerIssuesResult{}, nil
+		}
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-issues"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "[]\n", resp.Stdout)
+}
+
+func TestServer_RouteIntercept_ToolStatsRoute(t *testing.T) {
+	token := "test-token"
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.StatsStore = nil
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"tool-stats"}})
+	assert.Equal(t, 0, resp.ExitCode)
+	assert.Equal(t, "{}\n", resp.Stdout)
+}
+
+// --- resolveProjectDir tests ---
+
+func TestServer_ResolveProjectDir_NilRegistry(t *testing.T) {
+	s := &Server{Projects: nil}
+	dir, err := s.resolveProjectDir("/some/path")
+	require.NoError(t, err)
+	assert.Equal(t, ".", dir)
+}
+
+func TestServer_ResolveProjectDir_SingleProject(t *testing.T) {
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "myproject", Dir: "/home/user/myproject"},
+		},
+	}
+	s := &Server{Projects: registry}
+	dir, err := s.resolveProjectDir("/whatever/path")
+	require.NoError(t, err)
+	assert.Equal(t, "/home/user/myproject", dir)
+}
+
+func TestServer_ResolveProjectDir_MultiProject_Match(t *testing.T) {
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "backend", Dir: "/home/user/backend"},
+			{Name: "frontend", Dir: "/home/user/frontend"},
+		},
+	}
+	s := &Server{Projects: registry}
+
+	dir, err := s.resolveProjectDir("/home/user/backend/src")
+	require.NoError(t, err)
+	assert.Equal(t, "/home/user/backend", dir)
+}
+
+func TestServer_ResolveProjectDir_MultiProject_NoMatch(t *testing.T) {
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "backend", Dir: "/home/user/backend"},
+			{Name: "frontend", Dir: "/home/user/frontend"},
+		},
+	}
+	s := &Server{Projects: registry}
+
+	_, err := s.resolveProjectDir("/home/other/unrelated")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match any registered project")
+	assert.Contains(t, err.Error(), "backend")
+	assert.Contains(t, err.Error(), "frontend")
+}
+
+func TestServer_ResolveProjectDir_MultiProject_CwdMatch(t *testing.T) {
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "backend", Dir: "/home/user/backend"},
+			{Name: "frontend", Dir: "/home/user/frontend"},
+		},
+	}
+	s := &Server{Projects: registry}
+
+	dir, err := s.resolveProjectDir("/home/user/frontend/components")
+	require.NoError(t, err)
+	assert.Equal(t, "/home/user/frontend", dir)
+}
+
+// --- integration: resolveProjectDir via full server request ---
+
+func TestServer_ResolveProjectDir_SingleProject_Integration(t *testing.T) {
+	token := "test-token"
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "myproject", Dir: "/home/user/myproject"},
+		},
+	}
+	var receivedDir string
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.Projects = registry
+		s.TrackerDiagnoser = func(dir string) []tracker.TrackerStatus {
+			receivedDir = dir
+			return nil
+		}
+	})
+
+	sendRequest(t, addr, Request{Token: token, Args: []string{"tracker-diagnose"}, Cwd: "/whatever"})
+	assert.Equal(t, "/home/user/myproject", receivedDir)
+}
+
+func TestServer_ResolveProjectDir_MultiProject_ErrorIntegration(t *testing.T) {
+	token := "test-token"
+	registry := &ProjectRegistry{
+		entries: []ProjectEntry{
+			{Name: "backend", Dir: "/home/user/backend"},
+			{Name: "frontend", Dir: "/home/user/frontend"},
+		},
+	}
+	addr, _ := startTestServerCustom(t, token, func(s *Server) {
+		s.Projects = registry
+	})
+
+	resp := sendRequest(t, addr, Request{Token: token, Args: []string{"echo", "test"}, Cwd: "/unrelated"})
+	assert.Equal(t, 1, resp.ExitCode)
+	assert.Contains(t, resp.Stderr, "does not match any registered project")
 }
