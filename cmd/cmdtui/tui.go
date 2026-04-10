@@ -549,9 +549,18 @@ func (m model) handleSpawnAgent() (tea.Model, tea.Cmd) {
 	}
 	name := nextAgentName()
 	projectDir := m.activeProjectDir()
+	// Find a tmux window belonging to this project so the agent pane
+	// opens next to the project's existing Claude instances.
+	var tmuxTarget string
+	if m.snap != nil {
+		for _, p := range m.filterPanes(m.snap.Panes) {
+			tmuxTarget = fmt.Sprintf("%s:%d", p.SessionName, p.WindowIndex)
+			break
+		}
+	}
 	m.dispatchStatus = fmt.Sprintf("Spawning %s...", name)
 	m.dispatchAt = time.Now()
-	return m, spawnAgentCmd(name, projectDir)
+	return m, spawnAgentCmd(name, projectDir, tmuxTarget)
 }
 
 // activeProjectDir returns the directory of the active project tab.
@@ -575,7 +584,7 @@ func (m *model) handleSpawnAgentResult(msg spawnAgentMsg) {
 	m.dispatchAt = time.Now()
 }
 
-func spawnAgentCmd(name, projectDir string) tea.Cmd {
+func spawnAgentCmd(name, projectDir, tmuxTarget string) tea.Cmd {
 	return func() tea.Msg {
 		humanExe, err := os.Executable()
 		if err != nil {
@@ -588,10 +597,16 @@ func spawnAgentCmd(name, projectDir string) tea.Cmd {
 			cmd += fmt.Sprintf(" --workspace %s", projectDir)
 			paneDir = projectDir
 		}
-		cmd += "; echo; echo 'Press enter to close'; read"
+		cmd += " || { echo; echo 'Press enter to close'; read; }"
+
+		tmuxArgs := []string{"split-window", "-h", "-c", paneDir}
+		if tmuxTarget != "" {
+			tmuxArgs = append(tmuxArgs, "-t", tmuxTarget)
+		}
+		tmuxArgs = append(tmuxArgs, cmd)
 
 		runner := claude.OSCommandRunner{}
-		_, err = runner.Run(context.Background(), "tmux", "split-window", "-h", "-c", paneDir, cmd)
+		_, err = runner.Run(context.Background(), "tmux", tmuxArgs...)
 		return spawnAgentMsg{name: name, err: err}
 	}
 }
