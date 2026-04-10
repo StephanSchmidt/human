@@ -190,6 +190,8 @@ func (m *Monitor) parseSessions(instances []claude.Instance) map[string]logparse
 			byPath[inst.FilePath] = state
 		}
 	}
+	m.parseContainerSessions(instances, byPath, active)
+
 	// Prune parsers for files no longer referenced by any instance.
 	// This prevents stale state from lingering when a PID's JSONL path
 	// changes (e.g. after resolveJSONLPath corrects a startup race).
@@ -199,6 +201,35 @@ func (m *Monitor) parseSessions(instances []claude.Instance) map[string]logparse
 		}
 	}
 	return byPath
+}
+
+// parseContainerSessions parses JSONL from container instances via their
+// in-memory data. Containers have no FilePath, so we key by Root.
+// Must be called with parsersMu held.
+func (m *Monitor) parseContainerSessions(instances []claude.Instance, byPath map[string]logparser.SessionState, active map[string]bool) {
+	for _, inst := range instances {
+		if inst.Source != "container" || inst.Root == "" {
+			continue
+		}
+		active[inst.Root] = true
+		bw, ok := inst.Walker.(*claude.ByteWalker)
+		if !ok || len(bw.Data) == 0 {
+			continue
+		}
+		parser, ok := m.parsers[inst.Root]
+		if !ok {
+			parser = logparser.NewFileParser()
+			m.parsers[inst.Root] = parser
+		}
+		state, parseErr := parser.UpdateBytes(bw.Data)
+		if parseErr != nil {
+			log.Debug().Err(parseErr).Str("root", inst.Root).Msg("container session parse failed")
+			continue
+		}
+		if state.SessionID != "" {
+			byPath[inst.Root] = state
+		}
+	}
 }
 
 func collectContainerIDs(instances []claude.Instance) []string {
@@ -319,17 +350,21 @@ func fillMissingFromHooks(instances []claude.Instance, byPath map[string]logpars
 	}
 	// Match instances without a session to hook snapshots by cwd.
 	for _, inst := range instances {
-		if inst.FilePath == "" || inst.Cwd == "" {
+		key := inst.FilePath
+		if key == "" {
+			key = inst.Root
+		}
+		if key == "" || inst.Cwd == "" {
 			continue
 		}
-		if _, hasSession := byPath[inst.FilePath]; hasSession {
+		if _, hasSession := byPath[key]; hasSession {
 			continue
 		}
 		snap, ok := byCwd[inst.Cwd]
 		if !ok {
 			continue
 		}
-		byPath[inst.FilePath] = logparser.SessionState{
+		byPath[key] = logparser.SessionState{
 			SessionID:    snap.SessionID,
 			Cwd:          snap.Cwd,
 			Status:       snap.Status,
@@ -346,7 +381,11 @@ func matchInstances(usages []claude.InstanceUsage, byPath map[string]logparser.S
 	views := make([]InstanceView, len(usages))
 	for i, iu := range usages {
 		views[i] = InstanceView{Usage: iu}
-		if sess, ok := byPath[iu.Instance.FilePath]; ok {
+		key := iu.Instance.FilePath
+		if key == "" {
+			key = iu.Instance.Root
+		}
+		if sess, ok := byPath[key]; ok {
 			s := sess // copy
 			views[i].Session = &s
 		}

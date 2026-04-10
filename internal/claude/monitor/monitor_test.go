@@ -145,7 +145,40 @@ func TestFillMissingFromHooks_NoCwd(t *testing.T) {
 	assert.Empty(t, byPath, "instance without cwd should not match")
 }
 
+func TestFillMissingFromHooks_ContainerByRoot(t *testing.T) {
+	hookTime := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+
+	instances := []claude.Instance{
+		{Source: "container", Root: "/container/abc123", Cwd: "/workspaces/cli"},
+	}
+	byPath := map[string]logparser.SessionState{}
+	hooks := map[string]hookevents.SessionSnapshot{
+		"s-container": {SessionID: "s-container", Cwd: "/workspaces/cli", Status: logparser.StatusWorking, LastEventAt: hookTime},
+	}
+
+	fillMissingFromHooks(instances, byPath, hooks)
+
+	require.Contains(t, byPath, "/container/abc123")
+	sess := byPath["/container/abc123"]
+	assert.Equal(t, "s-container", sess.SessionID)
+	assert.Equal(t, logparser.StatusWorking, sess.Status)
+}
+
 // --- matchInstances tests ---
+
+func TestMatchInstances_ContainerByRoot(t *testing.T) {
+	usages := []claude.InstanceUsage{
+		{Instance: claude.Instance{Source: "container", Root: "/container/abc123"}},
+	}
+	byPath := map[string]logparser.SessionState{
+		"/container/abc123": {SessionID: "s1", Status: logparser.StatusWorking},
+	}
+	views := matchInstances(usages, byPath)
+	require.Len(t, views, 1)
+	require.NotNil(t, views[0].Session)
+	assert.Equal(t, "s1", views[0].Session.SessionID)
+	assert.Equal(t, logparser.StatusWorking, views[0].Session.Status)
+}
 
 func TestMatchInstances_WithSession(t *testing.T) {
 	usages := []claude.InstanceUsage{
@@ -325,7 +358,22 @@ func TestFetchQuick_CarriesForwardPanes(t *testing.T) {
 	assert.Equal(t, "main", snap.Panes[0].SessionName)
 }
 
-// --- parseSessions pruning tests ---
+// --- parseSessions tests ---
+
+func TestParseSessions_ContainerInstance(t *testing.T) {
+	mon := New(&stubFinder{}, nil)
+
+	// Minimal JSONL that establishes a session.
+	jsonl := []byte(`{"type":"system","sessionId":"sess-ctr","cwd":"/workspaces/cli"}` + "\n")
+
+	instances := []claude.Instance{
+		{Source: "container", Root: "/container/abc123", Walker: &claude.ByteWalker{Data: jsonl}},
+	}
+	byPath := mon.parseSessions(instances)
+
+	require.Contains(t, byPath, "/container/abc123")
+	assert.Equal(t, "sess-ctr", byPath["/container/abc123"].SessionID)
+}
 
 func TestParseSessions_PrunesStaleParser(t *testing.T) {
 	// When an instance's FilePath changes (e.g. JSONL resolution corrects
