@@ -502,7 +502,7 @@ func spawnAgentInTmux(name, projectDir, tmuxTarget string, extraFlags ...string)
 		parts = append(parts, "--workspace", projectDir)
 		paneDir = projectDir
 	}
-	cmd := strings.Join(parts, " ") + "; human agent stop " + name + " >/dev/null 2>&1 & echo; echo 'Press enter to close'; read"
+	cmd := strings.Join(parts, " ") + " || { echo; echo 'Press enter to close'; read; }"
 	tmuxArgs := []string{"split-window", "-h", "-c", paneDir}
 	if tmuxTarget != "" {
 		tmuxArgs = append(tmuxArgs, "-t", tmuxTarget)
