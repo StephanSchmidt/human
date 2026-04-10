@@ -12,5 +12,10 @@ func IsWSL() bool {
 	if err != nil {
 		return false
 	}
+	return isWSLFrom(data)
+}
+
+// isWSLFrom checks whether the given /proc/version content indicates WSL.
+func isWSLFrom(data []byte) bool {
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
 }

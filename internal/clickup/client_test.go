@@ -914,3 +914,284 @@ func TestSetMarkdownDescription_happy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "# Updated\n\nNew content", gotBody["markdown_description"])
 }
+
+// --- HTTP error tests ---
+
+func TestGetIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.GetIssue(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestCreateIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Project: "901",
+		Title:   "Test",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestCreateIssue_requiresProject(t *testing.T) {
+	client := New("http://localhost", "tok-test", "")
+	_, err := client.CreateIssue(context.Background(), &tracker.Issue{
+		Title: "Test",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "project")
+}
+
+func TestAddComment_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.AddComment(context.Background(), "abc123", "Hello")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestDeleteIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	err := client.DeleteIssue(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestTransitionIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	err := client.TransitionIssue(context.Background(), "abc123", "in progress")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	err := client.AssignIssue(context.Background(), "abc123", "12345")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestAssignIssue_invalidUserID(t *testing.T) {
+	client := New("http://localhost", "tok-test", "")
+	err := client.AssignIssue(context.Background(), "abc123", "not-a-number")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid")
+}
+
+func TestGetCurrentUser_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.GetCurrentUser(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestEditIssue_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	title := "Updated"
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.EditIssue(context.Background(), "abc123", tracker.EditOptions{
+		Title: &title,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListStatuses_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.ListStatuses(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListComments_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.ListComments(context.Background(), "abc123")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListSpaces_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "team1")
+	_, err := client.ListSpaces(context.Background(), "team1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListFolders_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.ListFolders(context.Background(), "sp1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListLists_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.ListLists(context.Background(), "f1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListFolderlessLists_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.ListFolderlessLists(context.Background(), "sp1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestListWorkspaceMembers_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "team1")
+	_, err := client.ListWorkspaceMembers(context.Background(), "team1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetCustomFields_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.GetCustomFields(context.Background(), "abc1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestSetCustomField_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	err := client.SetCustomField(context.Background(), "abc1", "cf1", "8")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetMarkdownDescription_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	_, err := client.GetMarkdownDescription(context.Background(), "abc1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestSetMarkdownDescription_httpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "")
+	err := client.SetMarkdownDescription(context.Background(), "abc1", "# Test")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "returned")
+}
+
+func TestGetMarkdownDescription_withCustomID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v2/task/PROJ-42", r.URL.Path)
+		// Verify both include_markdown_description and custom ID params are present
+		q := r.URL.Query()
+		assert.Equal(t, "true", q.Get("include_markdown_description"))
+		assert.Equal(t, "true", q.Get("custom_task_ids"))
+		assert.Equal(t, "9876", q.Get("team_id"))
+
+		_, _ = fmt.Fprint(w, `{
+			"id": "abc456",
+			"custom_id": "PROJ-42",
+			"name": "Test",
+			"description": "plain",
+			"markdown_description": "# Custom ID markdown",
+			"status": {"status": "open", "type": "open"},
+			"assignees": [],
+			"creator": {},
+			"list": {"id": "901"}
+		}`)
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL, "tok-test", "9876")
+	md, err := client.GetMarkdownDescription(context.Background(), "PROJ-42")
+	require.NoError(t, err)
+	assert.Equal(t, "# Custom ID markdown", md)
+}

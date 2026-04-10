@@ -75,3 +75,22 @@ func TestRunOpen_openerError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "opening browser")
 }
+
+func TestValidateURL_javascript(t *testing.T) {
+	err := ValidateURL("javascript:alert(1)")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http or https")
+}
+
+func TestValidateURL_dataScheme(t *testing.T) {
+	err := ValidateURL("data:text/html,<h1>hi</h1>")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "http or https")
+}
+
+func TestRunOpen_noOutput(t *testing.T) {
+	m := &mockOpener{err: fmt.Errorf("no browser")}
+	var buf bytes.Buffer
+	_ = RunOpen(m, &buf, "https://example.com")
+	assert.Empty(t, buf.String(), "no output should be written when opener errors")
+}
