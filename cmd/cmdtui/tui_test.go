@@ -731,39 +731,23 @@ func TestDispatch_NoIssues(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
-func TestDispatch_NoIdlePanes(t *testing.T) {
+func TestDispatch_NotInTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
 	m := testModel()
-	m.snap = testSnapshot(func(s *monitor.Snapshot) {
-		s.Panes = []claude.TmuxPane{{SessionName: "s", State: claude.StateBusy}}
-	})
 	m.issues = []trackerIssues{
 		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
 	}
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	um := updated.(model)
-	assert.Equal(t, "No idle panes", um.dispatchStatus)
-	assert.Nil(t, cmd)
-}
-
-func TestDispatch_NoPanes(t *testing.T) {
-	m := testModel()
-	m.snap = testSnapshot() // no panes
-	m.issues = []trackerIssues{
-		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
-	}
-
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	um := updated.(model)
-	assert.Equal(t, "No idle panes", um.dispatchStatus)
+	assert.Equal(t, "Not in tmux", um.dispatchStatus)
 	assert.Nil(t, cmd)
 }
 
 func TestDispatch_LinearIssue(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+	t.Setenv("HOME", t.TempDir())
 	m := testModel()
-	m.snap = testSnapshot(func(s *monitor.Snapshot) {
-		s.Panes = []claude.TmuxPane{{SessionName: "work", WindowIndex: 0, PaneIndex: 1, State: claude.StateReady}}
-	})
 	m.issues = []trackerIssues{
 		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-42"}}},
 	}
@@ -771,14 +755,15 @@ func TestDispatch_LinearIssue(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	um := updated.(model)
 	assert.True(t, um.dispatching)
+	assert.Contains(t, um.dispatchStatus, "Spawning")
+	assert.Contains(t, um.dispatchStatus, "HUM-42")
 	assert.NotNil(t, cmd)
 }
 
 func TestDispatch_ShortcutIssue(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+	t.Setenv("HOME", t.TempDir())
 	m := testModel()
-	m.snap = testSnapshot(func(s *monitor.Snapshot) {
-		s.Panes = []claude.TmuxPane{{SessionName: "work", State: claude.StateReady}}
-	})
 	m.issues = []trackerIssues{
 		{TrackerKind: "shortcut", Project: "PM", Issues: []tracker.Issue{{Key: "99"}}},
 	}
@@ -786,15 +771,15 @@ func TestDispatch_ShortcutIssue(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	um := updated.(model)
 	assert.True(t, um.dispatching)
+	assert.Contains(t, um.dispatchStatus, "Spawning")
+	assert.Contains(t, um.dispatchStatus, "99")
 	assert.NotNil(t, cmd)
 }
 
 func TestDispatch_WhileDispatching(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
 	m := testModel()
 	m.dispatching = true
-	m.snap = testSnapshot(func(s *monitor.Snapshot) {
-		s.Panes = []claude.TmuxPane{{SessionName: "s", State: claude.StateReady}}
-	})
 	m.issues = []trackerIssues{
 		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
 	}
@@ -809,11 +794,11 @@ func TestDispatchResultMsg_Success(t *testing.T) {
 	m := testModel()
 	m.dispatching = true
 
-	updated, _ := m.Update(dispatchResultMsg{issueKey: "HUM-42", paneLabel: "work:0.1"})
+	updated, _ := m.Update(dispatchResultMsg{issueKey: "HUM-42", agentName: "agent-3"})
 	um := updated.(model)
 	assert.False(t, um.dispatching)
 	assert.Contains(t, um.dispatchStatus, "HUM-42")
-	assert.Contains(t, um.dispatchStatus, "work:0.1")
+	assert.Contains(t, um.dispatchStatus, "agent-3")
 	assert.False(t, um.dispatchAt.IsZero())
 }
 
@@ -831,7 +816,7 @@ func TestDispatchResultMsg_Error(t *testing.T) {
 func TestDispatchStatusAutoClear(t *testing.T) {
 	m := testModel()
 	m.fetching = false
-	m.dispatchStatus = "Sent HUM-42"
+	m.dispatchStatus = "Spawned agent-1 for HUM-42"
 	m.dispatchAt = time.Now().Add(-4 * time.Second) // 4s ago
 
 	updated, _ := m.Update(fastTickMsg(time.Now()))
@@ -842,12 +827,12 @@ func TestDispatchStatusAutoClear(t *testing.T) {
 func TestDispatchStatusNotClearedEarly(t *testing.T) {
 	m := testModel()
 	m.fetching = false
-	m.dispatchStatus = "Sent HUM-42"
+	m.dispatchStatus = "Spawned agent-1 for HUM-42"
 	m.dispatchAt = time.Now() // just now
 
 	updated, _ := m.Update(fastTickMsg(time.Now()))
 	um := updated.(model)
-	assert.Equal(t, "Sent HUM-42", um.dispatchStatus)
+	assert.Equal(t, "Spawned agent-1 for HUM-42", um.dispatchStatus)
 }
 
 // --- render tests for cursor ---
@@ -865,8 +850,8 @@ func TestRenderIssuesPanelCursor(t *testing.T) {
 }
 
 func TestRenderFooter_ShowsDispatchStatus(t *testing.T) {
-	footer := renderFooter(120, "off", "Sent HUM-42 → work:0.1", false)
-	assert.Contains(t, footer, "Sent HUM-42")
+	footer := renderFooter(120, "off", "Spawned agent-3 for HUM-42", false)
+	assert.Contains(t, footer, "Spawned agent-3 for HUM-42")
 	assert.Contains(t, footer, "⏎ send")
 }
 
@@ -874,19 +859,6 @@ func TestRenderFooter_ShowsNavKeys(t *testing.T) {
 	footer := renderFooter(120, "", "", false)
 	assert.Contains(t, footer, "j/k nav")
 	assert.Contains(t, footer, "⏎ send")
-}
-
-func TestDispatch_SnapNil(t *testing.T) {
-	m := testModel()
-	// snap is nil (initial state)
-	m.issues = []trackerIssues{
-		{TrackerKind: "linear", Project: "HUM", Issues: []tracker.Issue{{Key: "HUM-1"}}},
-	}
-
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	um := updated.(model)
-	assert.Equal(t, "No idle panes", um.dispatchStatus)
-	assert.Nil(t, cmd)
 }
 
 // --- open in browser tests ---

@@ -26,7 +26,6 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/claude/monitor"
 	"github.com/StephanSchmidt/human/internal/daemon"
-	"github.com/StephanSchmidt/human/internal/dispatch"
 	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
 )
@@ -424,7 +423,7 @@ func (m *model) clearExpiredDispatchStatus() {
 
 type dispatchResultMsg struct {
 	issueKey  string
-	paneLabel string
+	agentName string
 	err       error
 }
 
@@ -433,7 +432,7 @@ func (m *model) handleDispatchResult(msg dispatchResultMsg) {
 	if msg.err != nil {
 		m.dispatchStatus = fmt.Sprintf("Failed: %s", msg.err)
 	} else {
-		m.dispatchStatus = fmt.Sprintf("Sent %s → %s", msg.issueKey, msg.paneLabel)
+		m.dispatchStatus = fmt.Sprintf("Spawned %s for %s", msg.agentName, msg.issueKey)
 	}
 	m.dispatchAt = time.Now()
 }
@@ -451,24 +450,12 @@ func (m model) handleDispatch() (tea.Model, tea.Cmd) {
 	if m.issueCursor >= len(flat) {
 		return m, nil
 	}
-	sel := flat[m.issueCursor]
-
-	// Find first idle pane scoped to the active project tab.
-	var target *claude.TmuxPane
-	if m.snap != nil {
-		panes := m.filterPanes(m.snap.Panes)
-		for i := range panes {
-			if panes[i].State == claude.StateReady {
-				target = &panes[i]
-				break
-			}
-		}
-	}
-	if target == nil {
-		m.dispatchStatus = "No idle panes"
+	if os.Getenv("TMUX") == "" {
+		m.dispatchStatus = "Not in tmux"
 		m.dispatchAt = time.Now()
 		return m, nil
 	}
+	sel := flat[m.issueCursor]
 
 	// Build slash command based on tracker kind.
 	var prompt string
@@ -479,22 +466,51 @@ func (m model) handleDispatch() (tea.Model, tea.Cmd) {
 		prompt = "/human-execute " + sel.Issue.Key
 	}
 
+	name := nextAgentName()
+	projectDir := m.activeProjectDir()
+	var tmuxTarget string
+	if m.snap != nil {
+		for _, p := range m.filterPanes(m.snap.Panes) {
+			tmuxTarget = fmt.Sprintf("%s:%d", p.SessionName, p.WindowIndex)
+			break
+		}
+	}
+
 	m.dispatching = true
-	return m, dispatchIssueCmd(*target, prompt, sel.Issue.Key)
+	m.dispatchStatus = fmt.Sprintf("Spawning %s for %s...", name, sel.Issue.Key)
+	m.dispatchAt = time.Now()
+	return m, dispatchIssueCmd(name, projectDir, tmuxTarget, prompt, sel.Issue.Key)
 }
 
-func dispatchIssueCmd(pane claude.TmuxPane, prompt, issueKey string) tea.Cmd {
+func dispatchIssueCmd(name, projectDir, tmuxTarget, prompt, issueKey string) tea.Cmd {
 	return func() tea.Msg {
-		sender := &dispatch.TmuxSender{Runner: claude.OSCommandRunner{}}
-		agent := dispatch.Agent{
-			SessionName: pane.SessionName,
-			WindowIndex: pane.WindowIndex,
-			PaneIndex:   pane.PaneIndex,
-			Label:       fmt.Sprintf("%s:%d.%d", pane.SessionName, pane.WindowIndex, pane.PaneIndex),
-		}
-		err := sender.SendPrompt(context.Background(), agent, prompt)
-		return dispatchResultMsg{issueKey: issueKey, paneLabel: agent.Label, err: err}
+		err := spawnAgentInTmux(name, projectDir, tmuxTarget, "--prompt", prompt, "--skip-permissions")
+		return dispatchResultMsg{issueKey: issueKey, agentName: name, err: err}
 	}
+}
+
+// spawnAgentInTmux splits a new tmux pane and starts a human agent there.
+func spawnAgentInTmux(name, projectDir, tmuxTarget string, extraFlags ...string) error {
+	humanExe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find executable: %w", err)
+	}
+	parts := []string{humanExe, "agent", "start", name}
+	parts = append(parts, extraFlags...)
+	paneDir, _ := os.Getwd()
+	if projectDir != "" {
+		parts = append(parts, "--workspace", projectDir)
+		paneDir = projectDir
+	}
+	cmd := strings.Join(parts, " ") + " || { echo; echo 'Press enter to close'; read; }"
+	tmuxArgs := []string{"split-window", "-h", "-c", paneDir}
+	if tmuxTarget != "" {
+		tmuxArgs = append(tmuxArgs, "-t", tmuxTarget)
+	}
+	tmuxArgs = append(tmuxArgs, cmd)
+	runner := claude.OSCommandRunner{}
+	_, err = runner.Run(context.Background(), "tmux", tmuxArgs...)
+	return err
 }
 
 // --- open in browser ---
@@ -586,27 +602,7 @@ func (m *model) handleSpawnAgentResult(msg spawnAgentMsg) {
 
 func spawnAgentCmd(name, projectDir, tmuxTarget string) tea.Cmd {
 	return func() tea.Msg {
-		humanExe, err := os.Executable()
-		if err != nil {
-			return spawnAgentMsg{name: name, err: fmt.Errorf("cannot find executable: %w", err)}
-		}
-
-		cmd := fmt.Sprintf("%s agent start %s --interactive --skip-permissions", humanExe, name)
-		paneDir, _ := os.Getwd()
-		if projectDir != "" {
-			cmd += fmt.Sprintf(" --workspace %s", projectDir)
-			paneDir = projectDir
-		}
-		cmd += " || { echo; echo 'Press enter to close'; read; }"
-
-		tmuxArgs := []string{"split-window", "-h", "-c", paneDir}
-		if tmuxTarget != "" {
-			tmuxArgs = append(tmuxArgs, "-t", tmuxTarget)
-		}
-		tmuxArgs = append(tmuxArgs, cmd)
-
-		runner := claude.OSCommandRunner{}
-		_, err = runner.Run(context.Background(), "tmux", tmuxArgs...)
+		err := spawnAgentInTmux(name, projectDir, tmuxTarget, "--interactive", "--skip-permissions")
 		return spawnAgentMsg{name: name, err: err}
 	}
 }
@@ -885,16 +881,20 @@ func (m model) handleCreateResult(msg createResultMsg) (tea.Model, tea.Cmd) {
 	m.dispatchAt = time.Now()
 	m.issuesLoading = true
 
-	// Auto-dispatch /human-ready to an idle pane.
-	if !m.dispatching && m.snap != nil {
-		panes := m.filterPanes(m.snap.Panes)
-		for i := range panes {
-			if panes[i].State == claude.StateReady {
-				m.dispatching = true
-				prompt := "/human-ready " + msg.trackerKind + " " + msg.key
-				return m, tea.Batch(fetchIssuesCmd(), dispatchIssueCmd(panes[i], prompt, msg.key))
+	// Auto-dispatch /human-ready via a new agent.
+	if !m.dispatching && os.Getenv("TMUX") != "" {
+		name := nextAgentName()
+		projectDir := m.activeProjectDir()
+		var tmuxTarget string
+		if m.snap != nil {
+			for _, p := range m.filterPanes(m.snap.Panes) {
+				tmuxTarget = fmt.Sprintf("%s:%d", p.SessionName, p.WindowIndex)
+				break
 			}
 		}
+		m.dispatching = true
+		prompt := "/human-ready " + msg.trackerKind + " " + msg.key
+		return m, tea.Batch(fetchIssuesCmd(), dispatchIssueCmd(name, projectDir, tmuxTarget, prompt, msg.key))
 	}
 
 	return m, fetchIssuesCmd()
