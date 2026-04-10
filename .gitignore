@@ -2,7 +2,7 @@ bin/
 dist/
 /human
 local/
-coverage.out
+*.out
 *.cov
 logo/
 .claude/
