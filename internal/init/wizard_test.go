@@ -1059,3 +1059,88 @@ func TestRunInit_FullWizardWithAgentInstall(t *testing.T) {
 	assert.Contains(t, buf.String(), "Installing Claude Code integration")
 	assert.Contains(t, buf.String(), "Done!")
 }
+
+// --- ProjectConfigStep tests ---
+
+func TestProjectConfigStep_Name(t *testing.T) {
+	step := NewProjectConfigStep()
+	assert.Equal(t, "project-config", step.Name())
+}
+
+func TestProjectConfigStep_CreatesMinimalConfig(t *testing.T) {
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep().Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	data, ok := fw.files[".humanconfig.yaml"]
+	require.True(t, ok, "expected .humanconfig.yaml to be written")
+	content := string(data)
+	assert.Contains(t, content, "project:")
+	assert.NotContains(t, content, "devcontainer:")
+}
+
+func TestProjectConfigStep_WithDevcontainer(t *testing.T) {
+	fw := newMockFileWriter()
+	fw.files[".devcontainer/devcontainer.json"] = []byte(`{"name":"test"}`)
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep().Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "project:")
+	assert.Contains(t, content, "devcontainer:\n  configdir:")
+}
+
+func TestProjectConfigStep_AppendsToExisting(t *testing.T) {
+	fw := newMockFileWriter()
+	fw.files[".humanconfig.yaml"] = []byte("jiras:\n  - name: work\n")
+	fw.files[".devcontainer/devcontainer.json"] = []byte(`{}`)
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep().Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "jiras:")
+	assert.Contains(t, content, "project:")
+	assert.Contains(t, content, "devcontainer:")
+}
+
+func TestProjectConfigStep_SkipsExistingKeys(t *testing.T) {
+	fw := newMockFileWriter()
+	original := "project: myapp\ndevcontainer:\n  configdir: \".\"\n"
+	fw.files[".humanconfig.yaml"] = []byte(original)
+	fw.files[".devcontainer/devcontainer.json"] = []byte(`{}`)
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep().Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	// File should not have been rewritten.
+	assert.Equal(t, original, string(fw.files[".humanconfig.yaml"]))
+}
+
+func TestProjectConfigStep_WriteError(t *testing.T) {
+	fw := &failingFileWriter{err: fmt.Errorf("disk full")}
+	var buf bytes.Buffer
+
+	_, err := NewProjectConfigStep().Run(&buf, fw)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "writing project config")
+}
+
+func TestHasYAMLKey(t *testing.T) {
+	content := "jiras:\n  - name: work\nproject: myapp\n"
+	assert.True(t, hasYAMLKey(content, "project"))
+	assert.True(t, hasYAMLKey(content, "jiras"))
+	assert.False(t, hasYAMLKey(content, "devcontainer"))
+	assert.False(t, hasYAMLKey(content, ""))
+}
