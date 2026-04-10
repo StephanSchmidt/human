@@ -35,7 +35,7 @@ func RunAgentCleanup(ctx context.Context, store *HookEventStore, cleaner AgentCl
 				if evt.AgentName == "" {
 					continue
 				}
-				if evt.EventName != "SessionEnd" && evt.EventName != "StopFailure" {
+				if evt.EventName != "Stop" && evt.EventName != "SessionEnd" && evt.EventName != "StopFailure" {
 					continue
 				}
 				if cleaned[evt.AgentName] {
