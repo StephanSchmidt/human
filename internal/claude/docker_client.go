@@ -39,7 +39,7 @@ func (e *engineDockerClient) ListContainers(ctx context.Context) ([]ContainerInf
 				name = name[1:]
 			}
 		}
-		infos = append(infos, ContainerInfo{ID: c.ID, Name: name})
+		infos = append(infos, ContainerInfo{ID: c.ID, Name: name, Labels: c.Labels})
 	}
 	return infos, nil
 }

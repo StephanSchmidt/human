@@ -985,6 +985,41 @@ func TestDockerFinder_ProxyNotConfigured(t *testing.T) {
 	}
 }
 
+func TestDockerFinder_UsesProjectLabelAsCwd(t *testing.T) {
+	inWindow := time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC)
+	jsonlData := makeJSONLLine(t, "claude-opus-4-6", inWindow, 100_000, 50_000)
+
+	dc := &mockDockerClient{
+		containers: []ContainerInfo{
+			{
+				ID:   "labeled1234567",
+				Name: "human-agent-test",
+				Labels: map[string]string{
+					"dev.human.project": "/home/user/my-project",
+				},
+			},
+		},
+		execResults: map[string]mockExecResult{
+			"labeled1234567|pgrep":    {exitCode: 0, data: []byte("1\n")},
+			"labeled1234567|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"labeled1234567|cat":      {exitCode: 0, data: jsonlData},
+			"labeled1234567|printenv": {exitCode: 1, data: nil},
+		},
+	}
+
+	finder := &DockerFinder{Client: dc}
+	instances, err := finder.FindInstances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(instances))
+	}
+	if instances[0].Cwd != "/home/user/my-project" {
+		t.Errorf("Cwd = %q, want /home/user/my-project (from label)", instances[0].Cwd)
+	}
+}
+
 func TestDockerFinder_ListError(t *testing.T) {
 	dc := &mockDockerClient{
 		listErr: errors.New("docker not available"),

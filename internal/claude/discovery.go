@@ -70,8 +70,9 @@ type DockerClient interface {
 
 // ContainerInfo holds minimal container metadata.
 type ContainerInfo struct {
-	ID   string
-	Name string
+	ID     string
+	Name   string
+	Labels map[string]string
 }
 
 // ContainerChecker determines whether a process is running inside a container.
@@ -542,7 +543,12 @@ func (d *DockerFinder) buildContainerInstance(ctx context.Context, ctr Container
 		log.Debug().Err(proxyErr).Str("container", shortID).Msg("container proxy probe failed")
 	}
 
-	containerCwd := d.probeContainerCwd(ctx, ctr.ID, shortID)
+	// Prefer the host project path from the container label so the TUI
+	// can match this instance to the correct project tab.
+	cwd := ctr.Labels["dev.human.project"]
+	if cwd == "" {
+		cwd = d.probeContainerCwd(ctx, ctr.ID, shortID)
+	}
 
 	return Instance{
 		Label:           fmt.Sprintf("Container %q (%s)", name, shortID),
@@ -551,7 +557,7 @@ func (d *DockerFinder) buildContainerInstance(ctx context.Context, ctr Container
 		Root:            "/container/" + shortID,
 		Memory:          mem,
 		ContainerID:     ctr.ID,
-		Cwd:             containerCwd,
+		Cwd:             cwd,
 		ProxyConfigured: proxyExit == 0,
 	}, true
 }
