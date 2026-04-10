@@ -1,6 +1,5 @@
 // Package agent manages Claude Code agent lifecycle: spawning, stopping,
-// listing, attaching, and resuming background tmux sessions with isolated
-// git worktrees.
+// listing, attaching, and resuming background tmux sessions in devcontainers.
 package agent
 
 import (
@@ -31,7 +30,6 @@ type Meta struct {
 	Name          string    `json:"name"`
 	ContainerID   string    `json:"container_id"`
 	ContainerName string    `json:"container_name"`
-	WorktreeDir   string    `json:"worktree_dir,omitempty"`
 	Cwd           string    `json:"cwd"`
 	Prompt        string    `json:"prompt,omitempty"`
 	Status        Status    `json:"status"`

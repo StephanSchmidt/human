@@ -3,7 +3,6 @@
 package cmdagent
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/agent"
-	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/devcontainer"
 )
 
@@ -57,8 +55,7 @@ func newManager(cmd *cobra.Command) (*agent.Manager, func(), error) {
 	cleanup := func() { _ = docker.Close() }
 
 	return &agent.Manager{
-		Docker:    docker,
-		GitRunner: &osGitRunner{},
+		Docker: docker,
 	}, cleanup, nil
 }
 
@@ -69,7 +66,6 @@ func buildStartCmd() *cobra.Command {
 	var interactive bool
 	var configDir string
 	var workspace string
-	var noWorktree bool
 	var rebuild bool
 
 	cmd := &cobra.Command{
@@ -105,7 +101,6 @@ Examples:
 				Interactive: interactive,
 				ConfigDir:   configDir,
 				Workspace:   workspace,
-				NoWorktree:  noWorktree,
 				Rebuild:     rebuild,
 			}
 
@@ -132,9 +127,6 @@ Examples:
 
 			out := cmd.OutOrStdout()
 			_, _ = fmt.Fprintf(out, "Agent %q started (container: %s)\n", meta.Name, meta.ContainerName)
-			if meta.WorktreeDir != "" {
-				_, _ = fmt.Fprintf(out, "Worktree: %s\n", meta.WorktreeDir)
-			}
 			_, _ = fmt.Fprintf(out, "Attach:   human agent attach %s\n", meta.Name)
 			return nil
 		},
@@ -146,15 +138,12 @@ Examples:
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Directory to mount into container (default: cwd)")
 	cmd.Flags().StringVar(&model, "model", "", "Claude model to use")
 	cmd.Flags().BoolVar(&skipPerms, "skip-permissions", false, "Run with --dangerously-skip-permissions")
-	cmd.Flags().BoolVar(&noWorktree, "no-worktree", false, "Mount workspace directly, no git worktree")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "Force image rebuild")
 	return cmd
 }
 
 func buildStopCmd() *cobra.Command {
-	var clean bool
-
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "stop NAME",
 		Short: "Stop and remove an agent's container",
 		Args:  cobra.ExactArgs(1),
@@ -165,16 +154,13 @@ func buildStopCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			if err := mgr.Stop(cmd.Context(), args[0], clean); err != nil {
+			if err := mgr.Stop(cmd.Context(), args[0]); err != nil {
 				return err
 			}
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Agent %q stopped\n", args[0])
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&clean, "clean", false, "Also remove the git worktree")
-	return cmd
 }
 
 func buildListCmd() *cobra.Command {
@@ -251,9 +237,3 @@ func buildAttachCmd() *cobra.Command {
 	}
 }
 
-// osGitRunner runs git commands via os/exec.
-type osGitRunner struct{}
-
-func (r *osGitRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return claude.OSCommandRunner{}.Run(ctx, name, args...)
-}

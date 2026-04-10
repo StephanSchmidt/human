@@ -30,20 +30,13 @@ type StartOpts struct {
 	SkipPerms   bool
 	ConfigDir   string // where .devcontainer/devcontainer.json lives (default: cwd)
 	Workspace   string // directory to mount into container (default: cwd)
-	NoWorktree  bool
 	Rebuild     bool
 	Interactive bool // foreground TTY mode
 }
 
 // Manager orchestrates agent lifecycle using devcontainers.
 type Manager struct {
-	Docker    devcontainer.DockerClient
-	GitRunner GitRunner // for worktree operations
-}
-
-// GitRunner abstracts git commands for testability.
-type GitRunner interface {
-	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+	Docker devcontainer.DockerClient
 }
 
 // Start creates a new container-based agent.
@@ -69,11 +62,9 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 
 	containerName := ContainerPrefix + opts.Name
 	workspace, configDir := resolveDirectories(opts)
-	worktreeDir, workspace := m.maybeCreateWorktree(ctx, opts, workspace)
 
 	dcMeta, err := m.startDevcontainer(ctx, containerName, configDir, workspace, opts.Rebuild)
 	if err != nil {
-		m.cleanupWorktree(ctx, worktreeDir)
 		return Meta{}, errors.WrapWithDetails(err, "starting agent container", "name", opts.Name)
 	}
 
@@ -83,7 +74,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 
 	meta := Meta{
 		Name: opts.Name, ContainerID: dcMeta.ContainerID, ContainerName: containerName,
-		WorktreeDir: worktreeDir, Cwd: workspace, Prompt: opts.Prompt,
+		Cwd: workspace, Prompt: opts.Prompt,
 		Status: StatusRunning, CreatedAt: time.Now(), SkipPerms: opts.SkipPerms,
 		Model: opts.Model, ConfigDir: configDir, ImageName: dcMeta.ImageName,
 		RemoteUser: dcMeta.RemoteUser,
@@ -113,25 +104,6 @@ func resolveDirectories(opts StartOpts) (workspace, configDir string) {
 		}
 	}
 	return
-}
-
-func (m *Manager) maybeCreateWorktree(ctx context.Context, opts StartOpts, workspace string) (worktreeDir, resolvedWorkspace string) {
-	if opts.NoWorktree || m.GitRunner == nil {
-		return "", workspace
-	}
-	repoRoot, rootErr := m.gitRepoRoot(ctx)
-	if rootErr != nil {
-		return "", workspace
-	}
-	wDir := fmt.Sprintf("%s/.worktrees/%s", repoRoot, opts.Name)
-	if _, err := os.Stat(wDir); err == nil {
-		return wDir, wDir
-	}
-	wDir, wErr := m.createWorktree(ctx, repoRoot, opts.Name, "agent/"+opts.Name)
-	if wErr != nil {
-		return "", workspace
-	}
-	return wDir, wDir
 }
 
 func (m *Manager) startDevcontainer(ctx context.Context, containerName, configDir, workspace string, rebuild bool) (*devcontainer.Meta, error) {
@@ -164,18 +136,8 @@ func (m *Manager) execClaudeDetached(ctx context.Context, containerID, remoteUse
 	}
 }
 
-func (m *Manager) cleanupWorktree(ctx context.Context, worktreeDir string) {
-	if worktreeDir == "" || m.GitRunner == nil {
-		return
-	}
-	repoRoot, err := m.gitRepoRoot(ctx)
-	if err == nil {
-		_ = m.removeWorktree(ctx, repoRoot, worktreeDir, "")
-	}
-}
-
 // Stop stops and removes an agent's container.
-func (m *Manager) Stop(ctx context.Context, name string, cleanWorktree bool) error {
+func (m *Manager) Stop(ctx context.Context, name string) error {
 	meta, err := ReadMeta(name)
 	if err != nil {
 		return err
@@ -189,23 +151,15 @@ func (m *Manager) Stop(ctx context.Context, name string, cleanWorktree bool) err
 		_ = devcontainer.DeleteMeta(meta.Name)
 	}
 
-	if cleanWorktree && meta.WorktreeDir != "" && m.GitRunner != nil {
-		repoRoot, rootErr := m.gitRepoRoot(ctx)
-		if rootErr == nil {
-			_ = m.removeWorktree(ctx, repoRoot, meta.WorktreeDir, "agent/"+name)
-		}
-	}
-
 	meta.Status = StatusStopped
 	meta.StoppedAt = time.Now()
 	return WriteMeta(meta)
 }
 
-// Delete stops the container, removes the worktree and branch, and deletes
-// the agent metadata so no trace remains. Best-effort: always deletes
-// metadata even if container/worktree cleanup fails.
+// Delete stops the container and deletes the agent metadata so no trace
+// remains. Best-effort: always deletes metadata even if container cleanup fails.
 func (m *Manager) Delete(ctx context.Context, name string) error {
-	_ = m.Stop(ctx, name, true)
+	_ = m.Stop(ctx, name)
 	return DeleteMeta(name)
 }
 
@@ -325,34 +279,3 @@ func (m *Manager) restartDaemon(projectDir, host string) {
 	}
 }
 
-// --- git worktree operations ---
-
-func (m *Manager) gitRepoRoot(ctx context.Context) (string, error) {
-	out, err := m.GitRunner.Run(ctx, "git", "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func (m *Manager) createWorktree(ctx context.Context, repoRoot, name, branch string) (string, error) {
-	worktreeDir := fmt.Sprintf("%s/.worktrees/%s", repoRoot, name)
-	_, _ = m.GitRunner.Run(ctx, "git", "branch", branch)
-	_, err := m.GitRunner.Run(ctx, "git", "worktree", "add", worktreeDir, branch)
-	if err != nil {
-		return "", errors.WrapWithDetails(err, "creating git worktree", "dir", worktreeDir)
-	}
-	return worktreeDir, nil
-}
-
-func (m *Manager) removeWorktree(ctx context.Context, repoRoot, worktreeDir, branch string) error {
-	_, err := m.GitRunner.Run(ctx, "git", "-C", repoRoot, "worktree", "remove", "--force", worktreeDir)
-	if err != nil {
-		return errors.WrapWithDetails(err, "removing git worktree", "dir", worktreeDir)
-	}
-	_, _ = m.GitRunner.Run(ctx, "git", "-C", repoRoot, "worktree", "prune")
-	if branch != "" {
-		_, _ = m.GitRunner.Run(ctx, "git", "-C", repoRoot, "branch", "-D", branch)
-	}
-	return nil
-}
