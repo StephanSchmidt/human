@@ -2149,7 +2149,7 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 	b.WriteString(header)
 	b.WriteByte('\n')
 
-	// Sparkline from hourly data — omitted when empty.
+	// Sparkline from hourly data.
 	if len(ts.ByHour) > 0 {
 		values := byHourToValues(ts.ByHour, ts.Since, ts.Until)
 		sparkWidth := w - 6 // 4-char indent + 2-char margin
@@ -2161,13 +2161,18 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 		}
 	}
 
-	// Tool distribution: show up to 8 tools with a simple bar.
+	renderToolDistribution(&b, ts, w)
+	renderOutcomes(&b, ts.ByEventName)
+
+	return b.String()
+}
+
+func renderToolDistribution(b *strings.Builder, ts *stats.ToolStats, w int) {
 	maxTools := 8
 	if len(ts.ByTool) < maxTools {
 		maxTools = len(ts.ByTool)
 	}
 
-	// Find max count for bar scaling.
 	maxCount := 0
 	for _, tc := range ts.ByTool[:maxTools] {
 		if tc.Count > maxCount {
@@ -2175,7 +2180,7 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 		}
 	}
 
-	barWidth := w - 40 // narrower to accommodate percentage suffix
+	barWidth := w - 40
 	if barWidth < 10 {
 		barWidth = 10
 	}
@@ -2193,16 +2198,17 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 		if ts.TotalEvents > 0 {
 			pct = (tc.Count * 100) / ts.TotalEvents
 		}
-		_, _ = fmt.Fprintf(&b, "    %-10s %s %d  (%d%%)\n",
+		_, _ = fmt.Fprintf(b, "    %-10s %s %d  (%d%%)\n",
 			titleStyle.Render(tc.ToolName),
 			specialStyle.Render(bar),
 			tc.Count,
 			pct)
 	}
+}
 
-	// Success/failure summary from event names, now with error rate.
+func renderOutcomes(b *strings.Builder, byEventName []stats.EventNameCount) {
 	var successes, failures int
-	for _, enc := range ts.ByEventName {
+	for _, enc := range byEventName {
 		switch enc.EventName {
 		case "PostToolUse":
 			successes += enc.Count
@@ -2213,10 +2219,8 @@ func renderToolStatsPanel(ts *stats.ToolStats, w int) string {
 	if successes+failures > 0 {
 		total := successes + failures
 		errorRate := float64(failures) * 100.0 / float64(total)
-		_, _ = fmt.Fprintf(&b, "    %s %d ok, %d failed (%.1f%% error rate)",
+		_, _ = fmt.Fprintf(b, "    %s %d ok, %d failed (%.1f%% error rate)",
 			subtleStyle.Render("Outcomes:"),
 			successes, failures, errorRate)
 	}
-
-	return b.String()
 }

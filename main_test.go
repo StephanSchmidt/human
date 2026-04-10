@@ -1204,7 +1204,7 @@ func TestBuildHookRunE_malformedJSON(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	_, _ = w.WriteString("not valid json{{{")
-	w.Close()
+	_ = w.Close()
 	os.Stdin = r
 
 	runE := buildHookRunE()
@@ -1223,7 +1223,7 @@ func TestBuildHookRunE_emptyEventName(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	_, _ = w.Write(data)
-	w.Close()
+	_ = w.Close()
 	os.Stdin = r
 
 	runE := buildHookRunE()
@@ -1246,7 +1246,7 @@ func TestBuildHookRunE_noDaemon(t *testing.T) {
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
 	_, _ = w.Write(data)
-	w.Close()
+	_ = w.Close()
 	os.Stdin = r
 
 	runE := buildHookRunE()
@@ -1262,7 +1262,7 @@ func TestBuildHookRunE_emptyStdin(t *testing.T) {
 
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
-	w.Close()
+	_ = w.Close()
 	os.Stdin = r
 
 	runE := buildHookRunE()

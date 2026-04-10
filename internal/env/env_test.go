@@ -34,6 +34,7 @@ func TestLookup_FallsBackToOsGetenv(t *testing.T) {
 func TestLookup_NilContext(t *testing.T) {
 	t.Setenv("TEST_ENV_NIL_CTX", "fallback")
 	//nolint:staticcheck // intentionally passing nil context to test fallback
+	//lint:ignore SA1012 intentionally passing nil context to test fallback
 	assert.Equal(t, "fallback", Lookup(nil, "TEST_ENV_NIL_CTX"))
 }
 

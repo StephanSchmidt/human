@@ -483,7 +483,7 @@ func TestNewSQLiteStore_fileDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(%q): %v", dbPath, err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Verify it created the directory and the DB is functional.
 	ctx := context.Background()

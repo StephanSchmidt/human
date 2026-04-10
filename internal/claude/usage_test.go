@@ -435,7 +435,8 @@ func TestMergeUsage_NilSrc(t *testing.T) {
 	}}
 	MergeUsage(dst, nil)
 	// dst should be unchanged.
-	if dst.Models["opus 4.6"].InputTokens != 100 {
+	m := dst.Models["opus 4.6"]
+	if m == nil || m.InputTokens != 100 {
 		t.Errorf("dst should be unchanged after nil src merge")
 	}
 }
