@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude"
@@ -220,5 +221,32 @@ func buildDevcontainerConfig(proxy, intercept bool, stacks []StackType) devconta
 		cfg.PostStartCommand = "human install --agent claude && human chrome-bridge"
 	}
 
+	// Install LSP binaries matching the selected language stacks.
+	if lsp := lspInstallCmd(stacks); lsp != "" {
+		cfg.PostStartCommand += " && " + lsp
+	}
+
 	return cfg
+}
+
+// lspInstallCmd returns a shell command that installs LSP server binaries
+// for the selected language stacks. Returns "" when no stacks have an LSP.
+func lspInstallCmd(stacks []StackType) string {
+	featureToCmd := map[string]string{
+		"ghcr.io/devcontainers/features/go:1":     "go install golang.org/x/tools/gopls@latest",
+		"ghcr.io/devcontainers/features/rust:1":   "rustup component add rust-analyzer",
+		"ghcr.io/devcontainers/features/python:1": "npm install -g pyright",
+		"ghcr.io/devcontainers/features/ruby:1":   "gem install solargraph",
+		"ghcr.io/devcontainers/features/php:1":    "npm install -g intelephense",
+	}
+	var cmds []string
+	for _, stack := range stacks {
+		if cmd, ok := featureToCmd[stack.FeatureKey]; ok {
+			cmds = append(cmds, cmd)
+		}
+	}
+	if len(cmds) == 0 {
+		return ""
+	}
+	return strings.Join(cmds, " && ")
 }

@@ -1,6 +1,7 @@
 package init
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -148,7 +149,7 @@ func NewLspSetupStep(p LspPrompter, installer LspInstaller) WizardStep {
 
 func (s *lspSetupStep) Name() string { return "lsp-setup" }
 
-func (s *lspSetupStep) Run(w io.Writer, _ claude.FileWriter) ([]string, error) {
+func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) {
 	confirm, err := s.prompter.ConfirmLspSetup()
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "confirming LSP setup")
@@ -175,12 +176,18 @@ func (s *lspSetupStep) Run(w io.Writer, _ claude.FileWriter) ([]string, error) {
 	}
 
 	var hints []string
+	var lspCmds []string
 	for _, plugin := range selected {
 		// Install the Claude Code plugin (downloads plugin files + enables it).
 		_, _ = fmt.Fprintf(w, "  Installing plugin: %s\n", plugin.PluginID)
 		if pluginErr := s.installer.InstallPlugin(plugin.PluginID); pluginErr != nil {
 			hints = append(hints, fmt.Sprintf("Failed to install plugin %s. Install manually: claude plugin install %s", plugin.PluginID, plugin.PluginID))
 			continue
+		}
+
+		// Track install command for devcontainer config.
+		if plugin.InstallCmd != "" {
+			lspCmds = append(lspCmds, plugin.InstallCmd)
 		}
 
 		// Check if LSP binary is already on PATH.
@@ -202,5 +209,49 @@ func (s *lspSetupStep) Run(w io.Writer, _ claude.FileWriter) ([]string, error) {
 		}
 	}
 
+	// Update devcontainer config with LSP install commands so containers
+	// get the LSP binaries installed on startup.
+	if len(lspCmds) > 0 {
+		appendLspToDevcontainer(w, fw, lspCmds)
+	}
+
 	return hints, nil
+}
+
+// appendLspToDevcontainer reads .devcontainer/devcontainer.json and appends
+// LSP install commands to postStartCommand. Silently skips if no config exists.
+func appendLspToDevcontainer(w io.Writer, fw claude.FileWriter, cmds []string) {
+	data, err := fw.ReadFile(devcontainerPath)
+	if err != nil {
+		return
+	}
+	raw := map[string]interface{}{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return
+	}
+
+	lspCmd := strings.Join(cmds, " && ")
+
+	// Check if commands are already present.
+	existing, _ := raw["postStartCommand"].(string)
+	if strings.Contains(existing, lspCmd) {
+		return
+	}
+
+	if existing != "" {
+		raw["postStartCommand"] = existing + " && " + lspCmd
+	} else {
+		raw["postStartCommand"] = lspCmd
+	}
+
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return
+	}
+	out = append(out, '\n')
+
+	if err := fw.WriteFile(devcontainerPath, out, 0o644); err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "  Updated %s with LSP install commands\n", devcontainerPath)
 }

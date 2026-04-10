@@ -111,7 +111,7 @@ func (m *Manager) createFresh(ctx context.Context, cfg *DevcontainerConfig, proj
 	}
 	// Docker bind mounts require absolute paths.
 	sourceDir, _ = filepath.Abs(sourceDir)
-	createOpts := m.buildCreateOptions(cfg, sourceDir, containerName, imageName, workspaceDir, hash, opts.DaemonInfo)
+	createOpts := m.buildCreateOptions(cfg, sourceDir, projectDir, containerName, imageName, workspaceDir, hash, opts.DaemonInfo)
 	ParseRunArgs(cfg.RunArgs, &createOpts, m.Logger)
 
 	_, _ = fmt.Fprintf(out, "Creating container %s...\n", containerName)
@@ -253,7 +253,8 @@ func (m *Manager) handleExisting(ctx context.Context, existing ContainerSummary,
 }
 
 // buildCreateOptions creates ContainerCreateOptions from the devcontainer config.
-func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, containerName, imageName, workspaceDir, hash string, daemonInfo *daemon.DaemonInfo) ContainerCreateOptions {
+// configDir is the directory containing .devcontainer/devcontainer.json (may differ from projectDir).
+func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, configDir, containerName, imageName, workspaceDir, hash string, daemonInfo *daemon.DaemonInfo) ContainerCreateOptions {
 	env := make([]string, 0)
 	for k, v := range cfg.ContainerEnv {
 		env = append(env, k+"="+v)
@@ -286,16 +287,11 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, contai
 		binds = append(binds, caCert+":"+targetHome+"/.human/ca.crt:ro")
 	}
 
-	// Mount host Claude config so auth tokens persist across containers.
-	claudeDir := filepath.Join(home, ".claude")
-	if _, statErr := os.Stat(claudeDir); statErr == nil {
-		binds = append(binds, claudeDir+":"+targetHome+"/.claude")
-
-		// Mount .claude.json (Claude Code config) if it exists.
-		claudeJSON := filepath.Join(home, ".claude.json")
-		if _, jsonErr := os.Stat(claudeJSON); jsonErr == nil {
-			binds = append(binds, claudeJSON+":"+targetHome+"/.claude.json")
-		}
+	// Mount project-local Claude config so auth and plugins persist
+	// across container rebuilds without touching the host's ~/.claude.
+	containerClaudeDir := filepath.Join(configDir, ".devcontainer", "claude")
+	if mkErr := os.MkdirAll(containerClaudeDir, 0o750); mkErr == nil {
+		binds = append(binds, containerClaudeDir+":"+targetHome+"/.claude")
 	}
 
 	// Mount host human binary so the container always uses the same version.
