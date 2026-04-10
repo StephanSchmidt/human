@@ -62,6 +62,9 @@ func (c *Client) ListIssues(ctx context.Context, opts tracker.ListOptions) ([]tr
 	query := url.Values{
 		"per_page": {fmt.Sprintf("%d", opts.MaxResults)},
 	}
+	if opts.Project == "" {
+		query.Set("scope", "all")
+	}
 	if !opts.IncludeAll {
 		query.Set("state", "opened")
 	}

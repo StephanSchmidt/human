@@ -744,6 +744,7 @@ func TestEditIssue_descriptionOnly(t *testing.T) {
 func TestListIssues_withoutProject(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/v4/issues", r.URL.Path)
+		assert.Equal(t, "all", r.URL.Query().Get("scope"))
 
 		_, _ = fmt.Fprint(w, `[
 			{"iid":1,"project_id":100,"title":"Global issue","description":"","state":"opened","author":{"id":1,"username":"alice"},"assignees":[],"labels":[],"references":{"full":"mygroup/myproject#1"}}
