@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/StephanSchmidt/human/internal/agent"
+	"github.com/StephanSchmidt/human/internal/logo"
 	"github.com/StephanSchmidt/human/internal/browser"
 	"github.com/StephanSchmidt/human/internal/claude"
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
@@ -502,7 +503,8 @@ func spawnAgentInTmux(name, projectDir, tmuxTarget string, extraFlags ...string)
 		parts = append(parts, "--workspace", projectDir)
 		paneDir = projectDir
 	}
-	cmd := strings.Join(parts, " ") + " || { echo; echo 'Press enter to close'; read; }"
+	agentCmd := strings.Join(parts, " ")
+	cmd := fmt.Sprintf("%s; EC=$?; %s agent stop --async %s 2>/dev/null; [ $EC -ne 0 ] && { echo; echo 'Press enter to close'; read; }", agentCmd, humanExe, name)
 	tmuxArgs := []string{"split-window", "-h", "-c", paneDir}
 	if tmuxTarget != "" {
 		tmuxArgs = append(tmuxArgs, "-t", tmuxTarget)
@@ -968,7 +970,10 @@ func (m model) View() string {
 	b.WriteByte('\n')
 
 	if m.snap == nil {
-		b.WriteString("  " + m.spinner.View() + " Loading...\n")
+		b.WriteByte('\n')
+		b.WriteString(logo.Render())
+		b.WriteByte('\n')
+		b.WriteString("\n  " + m.spinner.View() + " Loading...\n")
 		return b.String()
 	}
 
