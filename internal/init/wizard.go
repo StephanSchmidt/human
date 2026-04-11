@@ -9,6 +9,7 @@ import (
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/claude"
+	"github.com/StephanSchmidt/human/internal/logo"
 )
 
 // WizardStep is a self-contained phase of the init wizard.
@@ -22,6 +23,7 @@ type WizardStep interface {
 // Prompter is a composite interface embedding all step-specific prompter interfaces.
 type Prompter interface {
 	ServicesPrompter
+	VaultPrompter
 	DevcontainerPrompter
 	ClaudeMigratePrompter
 	LspPrompter
@@ -209,6 +211,44 @@ func yamlSafeString(s string) string {
 	return s
 }
 
+// WizardState holds data shared between wizard steps.
+// It is passed by pointer so that earlier steps can populate fields
+// that later steps consume.
+type WizardState struct {
+	SelectedStacks   []StackType
+	ProxyEnabled     bool
+	InterceptEnabled bool
+	VaultProvider    string // e.g. "1password", empty if none
+	VaultAccount     string // e.g. 1Password account name
+}
+
+// DefaultProxyDomains provides a sensible allowlist for new projects.
+var DefaultProxyDomains = []string{
+	"*.github.com",
+	"api.openai.com",
+	"claude.ai",
+	"*.googleapis.com",
+	"*.githubusercontent.com",
+	"*.claude.com",
+	"*.anthropic.com",
+}
+
+// StackToLspBinary maps devcontainer feature keys to LSP binary names
+// from LspRegistry. Used to auto-select LSP plugins when language
+// stacks are already chosen in the devcontainer step.
+func StackToLspBinary() map[string]string {
+	return map[string]string{
+		"ghcr.io/devcontainers/features/go:1":     "gopls",
+		"ghcr.io/devcontainers/features/rust:1":   "rust-analyzer",
+		"ghcr.io/devcontainers/features/python:1": "pyright-langserver",
+		"ghcr.io/devcontainers/features/java:1":   "jdtls",
+		"ghcr.io/devcontainers/features/ruby:1":   "solargraph",
+		"ghcr.io/devcontainers/features/dotnet:2": "OmniSharp",
+		"ghcr.io/devcontainers/features/php:1":    "intelephense",
+		"ghcr.io/devcontainers/features/node:1":   "vtsls",
+	}
+}
+
 // StackType describes a language stack that can be added as a devcontainer feature.
 type StackType struct {
 	Label      string // display name, e.g. "Go"
@@ -236,6 +276,10 @@ const configPath = ".humanconfig.yaml"
 // RunInit orchestrates the init wizard by running each step in sequence.
 // Follow-up hints from all steps are printed after the final "Done!" line.
 func RunInit(w io.Writer, steps []WizardStep, fw claude.FileWriter) error {
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, logo.Render())
+	_, _ = fmt.Fprintln(w)
+
 	var allHints []string
 	for _, step := range steps {
 		hints, err := step.Run(w, fw)

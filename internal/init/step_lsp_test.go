@@ -23,14 +23,14 @@ func findPlugin(t *testing.T, binary string) LspPlugin {
 }
 
 func TestLspSetupStep_Name(t *testing.T) {
-	step := NewLspSetupStep(&mockPrompter{}, newTestInstaller())
+	step := NewLspSetupStep(&mockPrompter{}, newTestInstaller(), &WizardState{})
 	assert.Equal(t, "lsp-setup", step.Name())
 }
 
 func TestLspSetupStep_Declined(t *testing.T) {
 	prompter := &mockPrompter{confirmLspSetup: false}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -44,7 +44,7 @@ func TestLspSetupStep_Declined(t *testing.T) {
 func TestLspSetupStep_ConfirmError(t *testing.T) {
 	prompter := &mockPrompter{confirmLspSetupErr: fmt.Errorf("prompt error")}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -60,7 +60,7 @@ func TestLspSetupStep_NoneSelected(t *testing.T) {
 		selectedLsps:    []LspPlugin{},
 	}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -77,7 +77,7 @@ func TestLspSetupStep_SelectError(t *testing.T) {
 		selectLspsErr:   fmt.Errorf("select error"),
 	}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -95,7 +95,7 @@ func TestLspSetupStep_BinaryAlreadyInstalled(t *testing.T) {
 	}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -116,7 +116,7 @@ func TestLspSetupStep_AutoInstallSuccess(t *testing.T) {
 		selectedLsps:    []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -138,7 +138,7 @@ func TestLspSetupStep_AutoInstallFailure(t *testing.T) {
 	}
 	installer := newTestInstaller()
 	installer.binaryInstallErr = fmt.Errorf("install failed")
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -159,7 +159,7 @@ func TestLspSetupStep_ManualOnly(t *testing.T) {
 		selectedLsps:    []LspPlugin{jdtls},
 	}
 	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -182,7 +182,7 @@ func TestLspSetupStep_PluginInstallFailure(t *testing.T) {
 	}
 	installer := newTestInstaller()
 	installer.pluginInstallErr = fmt.Errorf("plugin install failed")
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -204,7 +204,7 @@ func TestLspSetupStep_MarketplaceAddCalled(t *testing.T) {
 	}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -223,7 +223,7 @@ func TestLspSetupStep_MarketplaceErrorContinues(t *testing.T) {
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
 	installer.marketplaceErr = fmt.Errorf("already exists")
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -247,7 +247,7 @@ func TestLspSetupStep_MultiplePlugins(t *testing.T) {
 	}
 	installer := newTestInstaller()
 	installer.installed["vtsls"] = true
-	step := NewLspSetupStep(prompter, installer)
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -303,6 +303,99 @@ func TestLspRegistry_AllPlugins(t *testing.T) {
 		assert.NotEmpty(t, p.PluginID, "PluginID for %s", p.Label)
 		assert.NotEmpty(t, p.Binary, "Binary for %s", p.Label)
 		assert.NotEmpty(t, p.InstallHint, "InstallHint for %s", p.Label)
+	}
+}
+
+func TestLspSetupStep_AutoSelectFromStacks(t *testing.T) {
+	prompter := &mockPrompter{
+		confirmLspSetup: true,
+	}
+	installer := newTestInstaller()
+	installer.installed["gopls"] = true
+	installer.installed["pyright-langserver"] = true
+	state := &WizardState{
+		SelectedStacks: []StackType{
+			{Label: "Go", FeatureKey: "ghcr.io/devcontainers/features/go:1"},
+			{Label: "Python", FeatureKey: "ghcr.io/devcontainers/features/python:1"},
+		},
+	}
+	step := NewLspSetupStep(prompter, installer, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	hints, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Empty(t, hints)
+	// Both plugins should be installed without prompting for selection.
+	assert.Equal(t, []string{
+		"gopls@claude-code-lsps",
+		"pyright@claude-code-lsps",
+	}, installer.pluginInstallCalls)
+	// SelectLspPlugins should NOT have been called (auto-selected from stacks).
+	assert.Empty(t, prompter.selectedLsps)
+}
+
+func TestLspSetupStep_FallbackWhenNoStacks(t *testing.T) {
+	gopls := LspRegistry()[0]
+	prompter := &mockPrompter{
+		confirmLspSetup: true,
+		selectedLsps:    []LspPlugin{gopls},
+	}
+	installer := newTestInstaller()
+	state := &WizardState{} // no stacks selected
+	step := NewLspSetupStep(prompter, installer, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	_, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+	// Should fall back to manual selection.
+	assert.Equal(t, []string{"gopls@claude-code-lsps"}, installer.pluginInstallCalls)
+}
+
+func TestLspsForStacks(t *testing.T) {
+	stacks := []StackType{
+		{Label: "Go", FeatureKey: "ghcr.io/devcontainers/features/go:1"},
+		{Label: "Python", FeatureKey: "ghcr.io/devcontainers/features/python:1"},
+	}
+	result := lspsForStacks(stacks)
+
+	assert.Len(t, result, 2)
+	binaries := make([]string, len(result))
+	for i, lsp := range result {
+		binaries[i] = lsp.Binary
+	}
+	assert.Contains(t, binaries, "gopls")
+	assert.Contains(t, binaries, "pyright-langserver")
+}
+
+func TestLspsForStacks_Empty(t *testing.T) {
+	result := lspsForStacks(nil)
+	assert.Empty(t, result)
+}
+
+func TestLspsForStacks_NodeFixedIncludesVtsls(t *testing.T) {
+	stacks := []StackType{
+		{Label: "Node.js 22 (required by Claude Code)", FeatureKey: "ghcr.io/devcontainers/features/node:1", Fixed: true},
+	}
+	result := lspsForStacks(stacks)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "vtsls", result[0].Binary)
+}
+
+func TestStackToLspBinary_AllMappingsValid(t *testing.T) {
+	mapping := StackToLspBinary()
+	registry := LspRegistry()
+	binaries := make(map[string]bool)
+	for _, lsp := range registry {
+		binaries[lsp.Binary] = true
+	}
+	for feature, binary := range mapping {
+		assert.True(t, binaries[binary],
+			"StackToLspBinary maps %s to %s, but no LspPlugin has Binary=%s", feature, binary, binary)
 	}
 }
 

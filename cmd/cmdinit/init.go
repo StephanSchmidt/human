@@ -245,6 +245,33 @@ func (h huhPrompter) ConfirmIntercept() (bool, error) {
 	return intercept, err
 }
 
+func (h huhPrompter) SelectVaultProvider(available []string) (string, error) {
+	options := make([]huh.Option[string], 0, len(available)+1)
+	options = append(options, huh.NewOption("None", ""))
+	for _, p := range available {
+		options = append(options, huh.NewOption(p, p))
+	}
+
+	var provider string
+	err := huh.NewSelect[string]().
+		Title("Configure a vault provider for secret resolution?").
+		Description("Vault resolves secret references (e.g. 1pw://) in tracker configs").
+		Options(options...).
+		Value(&provider).
+		Run()
+	return provider, err
+}
+
+func (h huhPrompter) PromptVaultAccount() (string, error) {
+	var account string
+	err := huh.NewInput().
+		Title("1Password account name").
+		Description("Top-left in the 1Password app sidebar (leave empty to skip)").
+		Value(&account).
+		Run()
+	return account, err
+}
+
 func (h huhPrompter) ConfirmLspSetup() (bool, error) {
 	setup := true
 	err := huh.NewConfirm().
@@ -342,13 +369,15 @@ and optionally install Claude Code agent integration.
 Credentials are never stored in the config file — the wizard prints
 the environment variables you need to set.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			state := &initpkg.WizardState{}
 			steps := []initpkg.WizardStep{
 				initpkg.NewPrerequisitesStep(initpkg.OSPathLooker{}),
 				initpkg.NewServicesStep(huhPrompter{}),
-				initpkg.NewDevcontainerStep(huhPrompter{}),
-				initpkg.NewProjectConfigStep(),
+				initpkg.NewVaultStep(huhPrompter{}, state),
+				initpkg.NewDevcontainerStep(huhPrompter{}, state),
+				initpkg.NewProjectConfigStep(state),
 				initpkg.NewClaudeMigrateStep(huhPrompter{}),
-				initpkg.NewLspSetupStep(huhPrompter{}, initpkg.OSLspInstaller{}),
+				initpkg.NewLspSetupStep(huhPrompter{}, initpkg.OSLspInstaller{}, state),
 				initpkg.NewAgentInstallStep(huhPrompter{}),
 			}
 			return initpkg.RunInit(cmd.OutOrStdout(), steps, claude.OSFileWriter{})

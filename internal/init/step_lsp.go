@@ -137,13 +137,15 @@ const claudeCodeLspsRepo = "boostvolt/claude-code-lsps"
 type lspSetupStep struct {
 	prompter  LspPrompter
 	installer LspInstaller
+	state     *WizardState
 }
 
 // NewLspSetupStep creates a WizardStep that sets up LSP servers for Claude Code.
-func NewLspSetupStep(p LspPrompter, installer LspInstaller) WizardStep {
+func NewLspSetupStep(p LspPrompter, installer LspInstaller, state *WizardState) WizardStep {
 	return &lspSetupStep{
 		prompter:  p,
 		installer: installer,
+		state:     state,
 	}
 }
 
@@ -158,9 +160,16 @@ func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 		return nil, nil
 	}
 
-	selected, err := s.prompter.SelectLspPlugins(LspRegistry())
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "selecting LSP plugins")
+	// Auto-select LSPs matching language stacks chosen in the devcontainer step.
+	var selected []LspPlugin
+	if len(s.state.SelectedStacks) > 0 {
+		selected = lspsForStacks(s.state.SelectedStacks)
+	}
+	if len(selected) == 0 {
+		selected, err = s.prompter.SelectLspPlugins(LspRegistry())
+		if err != nil {
+			return nil, errors.WrapWithDetails(err, "selecting LSP plugins")
+		}
 	}
 	if len(selected) == 0 {
 		return nil, nil
@@ -216,6 +225,25 @@ func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 	}
 
 	return hints, nil
+}
+
+// lspsForStacks returns LSP plugins matching the given language stacks.
+func lspsForStacks(stacks []StackType) []LspPlugin {
+	mapping := StackToLspBinary()
+	wanted := make(map[string]bool)
+	for _, stack := range stacks {
+		if binary, ok := mapping[stack.FeatureKey]; ok {
+			wanted[binary] = true
+		}
+	}
+
+	var result []LspPlugin
+	for _, lsp := range LspRegistry() {
+		if wanted[lsp.Binary] {
+			result = append(result, lsp)
+		}
+	}
+	return result
 }
 
 // appendLspToDevcontainer reads .devcontainer/devcontainer.json and appends

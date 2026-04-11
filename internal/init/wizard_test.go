@@ -42,6 +42,10 @@ type mockPrompter struct {
 	confirmLspSetupErr      error
 	selectedLsps            []LspPlugin
 	selectLspsErr           error
+	vaultProvider           string
+	vaultProviderErr        error
+	vaultAccount            string
+	vaultAccountErr         error
 }
 
 func (m *mockPrompter) ConfirmOverwrite() (bool, error) {
@@ -98,6 +102,14 @@ func (m *mockPrompter) ConfirmLspSetup() (bool, error) {
 
 func (m *mockPrompter) SelectLspPlugins(_ []LspPlugin) ([]LspPlugin, error) {
 	return m.selectedLsps, m.selectLspsErr
+}
+
+func (m *mockPrompter) SelectVaultProvider(_ []string) (string, error) {
+	return m.vaultProvider, m.vaultProviderErr
+}
+
+func (m *mockPrompter) PromptVaultAccount() (string, error) {
+	return m.vaultAccount, m.vaultAccountErr
 }
 
 // mockFileWriter implements claude.FileWriter for testing.
@@ -602,13 +614,13 @@ func TestAgentInstallStep_Name(t *testing.T) {
 // --- DevcontainerStep tests ---
 
 func TestDevcontainerStep_Name(t *testing.T) {
-	step := NewDevcontainerStep(&mockPrompter{})
+	step := NewDevcontainerStep(&mockPrompter{}, &WizardState{})
 	assert.Equal(t, "devcontainer", step.Name())
 }
 
 func TestDevcontainerStep_Declined(t *testing.T) {
 	prompter := &mockPrompter{confirmDevcontainer: false}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -628,7 +640,7 @@ func TestDevcontainerStep_BasicConfig(t *testing.T) {
 		confirmDevcontainer: true,
 		confirmProxy:        false,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -665,7 +677,7 @@ func TestDevcontainerStep_WithProxy(t *testing.T) {
 		confirmDevcontainer: true,
 		confirmProxy:        true,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -697,7 +709,7 @@ func TestDevcontainerStep_WithProxyAndIntercept(t *testing.T) {
 		confirmProxy:        true,
 		confirmIntercept:    true,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -726,7 +738,7 @@ func TestDevcontainerStep_OverwriteDeclined_InjectsFeature(t *testing.T) {
 		confirmDevcontainer:     true,
 		confirmOverwriteDevcont: false,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	fw.files[".devcontainer/devcontainer.json"] = []byte(`{"image":"node:20"}`)
 	var buf bytes.Buffer
@@ -753,7 +765,7 @@ func TestDevcontainerStep_OverwriteDeclined_FeatureAlreadyPresent(t *testing.T) 
 		confirmDevcontainer:     true,
 		confirmOverwriteDevcont: false,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	fw.files[".devcontainer/devcontainer.json"] = []byte(existing)
 	var buf bytes.Buffer
@@ -777,7 +789,7 @@ func TestDevcontainerStep_OverwriteAccepted(t *testing.T) {
 		confirmOverwriteDevcont: true,
 		confirmProxy:            false,
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -790,7 +802,7 @@ func TestDevcontainerStep_OverwriteAccepted(t *testing.T) {
 
 func TestDevcontainerStep_PromptError(t *testing.T) {
 	prompter := &mockPrompter{confirmDevcontainerErr: fmt.Errorf("prompt failed")}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -812,7 +824,7 @@ func TestDevcontainerStep_OverwritePromptError(t *testing.T) {
 		confirmDevcontainer:    true,
 		confirmOverwriteDevErr: fmt.Errorf("overwrite error"),
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -832,7 +844,7 @@ func TestDevcontainerStep_ProxyPromptError(t *testing.T) {
 		confirmDevcontainer: true,
 		confirmProxyErr:     fmt.Errorf("proxy error"),
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -874,7 +886,7 @@ func TestDevcontainerStep_WithStacks(t *testing.T) {
 		confirmProxy:        false,
 		selectedStacks:      []StackType{reg[1], reg[3]}, // Go, Python
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -899,7 +911,7 @@ func TestDevcontainerStep_StacksWithProxy(t *testing.T) {
 		confirmProxy:        true,
 		selectedStacks:      []StackType{reg[2]}, // Rust
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -924,7 +936,7 @@ func TestDevcontainerStep_SelectStacksError(t *testing.T) {
 		confirmProxy:        false,
 		selectStacksErr:     fmt.Errorf("stack select error"),
 	}
-	step := NewDevcontainerStep(prompter)
+	step := NewDevcontainerStep(prompter, &WizardState{})
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
@@ -1003,8 +1015,8 @@ func TestRunInit_FullWizardFlow(t *testing.T) {
 	installer := &mockLspInstaller{installed: map[string]bool{}}
 	steps := []WizardStep{
 		NewServicesStep(prompter),
-		NewDevcontainerStep(prompter),
-		NewLspSetupStep(prompter, installer),
+		NewDevcontainerStep(prompter, &WizardState{}),
+		NewLspSetupStep(prompter, installer, &WizardState{}),
 		NewAgentInstallStep(prompter),
 	}
 	fw := newMockFileWriter()
@@ -1046,8 +1058,8 @@ func TestRunInit_FullWizardWithAgentInstall(t *testing.T) {
 	installer := &mockLspInstaller{installed: map[string]bool{}}
 	steps := []WizardStep{
 		NewServicesStep(prompter),
-		NewDevcontainerStep(prompter),
-		NewLspSetupStep(prompter, installer),
+		NewDevcontainerStep(prompter, &WizardState{}),
+		NewLspSetupStep(prompter, installer, &WizardState{}),
 		NewAgentInstallStep(prompter),
 	}
 	fw := newMockFileWriter()
@@ -1063,7 +1075,7 @@ func TestRunInit_FullWizardWithAgentInstall(t *testing.T) {
 // --- ProjectConfigStep tests ---
 
 func TestProjectConfigStep_Name(t *testing.T) {
-	step := NewProjectConfigStep()
+	step := NewProjectConfigStep(&WizardState{})
 	assert.Equal(t, "project-config", step.Name())
 }
 
@@ -1071,7 +1083,7 @@ func TestProjectConfigStep_CreatesMinimalConfig(t *testing.T) {
 	fw := newMockFileWriter()
 	var buf bytes.Buffer
 
-	hints, err := NewProjectConfigStep().Run(&buf, fw)
+	hints, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
 
 	require.NoError(t, err)
 	assert.Nil(t, hints)
@@ -1087,7 +1099,7 @@ func TestProjectConfigStep_WithDevcontainer(t *testing.T) {
 	fw.files[".devcontainer/devcontainer.json"] = []byte(`{"name":"test"}`)
 	var buf bytes.Buffer
 
-	hints, err := NewProjectConfigStep().Run(&buf, fw)
+	hints, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
 
 	require.NoError(t, err)
 	assert.Nil(t, hints)
@@ -1102,7 +1114,7 @@ func TestProjectConfigStep_AppendsToExisting(t *testing.T) {
 	fw.files[".devcontainer/devcontainer.json"] = []byte(`{}`)
 	var buf bytes.Buffer
 
-	hints, err := NewProjectConfigStep().Run(&buf, fw)
+	hints, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
 
 	require.NoError(t, err)
 	assert.Nil(t, hints)
@@ -1119,7 +1131,7 @@ func TestProjectConfigStep_SkipsExistingKeys(t *testing.T) {
 	fw.files[".devcontainer/devcontainer.json"] = []byte(`{}`)
 	var buf bytes.Buffer
 
-	hints, err := NewProjectConfigStep().Run(&buf, fw)
+	hints, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
 
 	require.NoError(t, err)
 	assert.Nil(t, hints)
@@ -1131,10 +1143,199 @@ func TestProjectConfigStep_WriteError(t *testing.T) {
 	fw := &failingFileWriter{err: fmt.Errorf("disk full")}
 	var buf bytes.Buffer
 
-	_, err := NewProjectConfigStep().Run(&buf, fw)
+	_, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "writing project config")
+}
+
+func TestProjectConfigStep_WithProxy(t *testing.T) {
+	fw := newMockFileWriter()
+	state := &WizardState{ProxyEnabled: true}
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(state).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "proxy:\n  mode: allowlist\n  domains:")
+	for _, d := range DefaultProxyDomains {
+		assert.Contains(t, content, d)
+	}
+	assert.NotContains(t, content, "intercept:")
+}
+
+func TestProjectConfigStep_WithProxyAndIntercept(t *testing.T) {
+	fw := newMockFileWriter()
+	state := &WizardState{ProxyEnabled: true, InterceptEnabled: true}
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(state).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "proxy:\n  mode: allowlist\n  domains:")
+	assert.Contains(t, content, "intercept:")
+	assert.Contains(t, content, "api.anthropic.com")
+}
+
+func TestProjectConfigStep_ProxySkippedWhenAlreadyPresent(t *testing.T) {
+	fw := newMockFileWriter()
+	original := "project: myapp\nproxy:\n  mode: blocklist\n"
+	fw.files[".humanconfig.yaml"] = []byte(original)
+	state := &WizardState{ProxyEnabled: true}
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(state).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	// Proxy already exists, should not be duplicated.
+	assert.Equal(t, original, string(fw.files[".humanconfig.yaml"]))
+}
+
+func TestProjectConfigStep_AbsoluteConfigdir(t *testing.T) {
+	fw := newMockFileWriter()
+	fw.files[".devcontainer/devcontainer.json"] = []byte(`{"name":"test"}`)
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(&WizardState{}).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "devcontainer:\n  configdir:")
+	// configdir must be an absolute path, not "."
+	assert.NotContains(t, content, `configdir: "."`)
+	assert.Contains(t, content, "configdir: /")
+}
+
+func TestGenerateProxyYAML(t *testing.T) {
+	yaml := generateProxyYAML(false)
+	assert.Contains(t, yaml, "proxy:")
+	assert.Contains(t, yaml, "mode: allowlist")
+	assert.Contains(t, yaml, "*.github.com")
+	assert.Contains(t, yaml, "*.anthropic.com")
+	assert.NotContains(t, yaml, "intercept:")
+}
+
+func TestGenerateProxyYAML_WithIntercept(t *testing.T) {
+	yaml := generateProxyYAML(true)
+	assert.Contains(t, yaml, "intercept:")
+	assert.Contains(t, yaml, "api.anthropic.com")
+}
+
+// --- VaultStep tests ---
+
+func TestVaultStep_Name(t *testing.T) {
+	step := NewVaultStep(&mockPrompter{}, &WizardState{})
+	assert.Equal(t, "vault", step.Name())
+}
+
+func TestVaultStep_NoneSelected(t *testing.T) {
+	prompter := &mockPrompter{vaultProvider: ""}
+	state := &WizardState{}
+	step := NewVaultStep(prompter, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	hints, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	assert.Empty(t, state.VaultProvider)
+}
+
+func TestVaultStep_OnePasswordSelected(t *testing.T) {
+	prompter := &mockPrompter{
+		vaultProvider: "1password",
+		vaultAccount:  "my-team",
+	}
+	state := &WizardState{}
+	step := NewVaultStep(prompter, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	hints, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	assert.Equal(t, "1password", state.VaultProvider)
+	assert.Equal(t, "my-team", state.VaultAccount)
+	assert.Contains(t, buf.String(), "1password")
+	assert.Contains(t, buf.String(), "my-team")
+}
+
+func TestVaultStep_SelectError(t *testing.T) {
+	prompter := &mockPrompter{vaultProviderErr: fmt.Errorf("prompt error")}
+	state := &WizardState{}
+	step := NewVaultStep(prompter, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	_, err := step.Run(&buf, fw)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "selecting vault provider")
+}
+
+func TestVaultStep_AccountError(t *testing.T) {
+	prompter := &mockPrompter{
+		vaultProvider:   "1password",
+		vaultAccountErr: fmt.Errorf("prompt error"),
+	}
+	state := &WizardState{}
+	step := NewVaultStep(prompter, state)
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	_, err := step.Run(&buf, fw)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "prompting vault account")
+}
+
+func TestProjectConfigStep_WithVault(t *testing.T) {
+	fw := newMockFileWriter()
+	state := &WizardState{VaultProvider: "1password", VaultAccount: "my-team"}
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(state).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "vault:\n  provider: 1password\n  account: my-team")
+}
+
+func TestProjectConfigStep_WithVaultNoAccount(t *testing.T) {
+	fw := newMockFileWriter()
+	state := &WizardState{VaultProvider: "1password"}
+	var buf bytes.Buffer
+
+	hints, err := NewProjectConfigStep(state).Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Nil(t, hints)
+	content := string(fw.files[".humanconfig.yaml"])
+	assert.Contains(t, content, "vault:\n  provider: 1password")
+	assert.NotContains(t, content, "account:")
+}
+
+func TestGenerateVaultYAML(t *testing.T) {
+	yaml := generateVaultYAML("1password", "my-team")
+	assert.Contains(t, yaml, "vault:")
+	assert.Contains(t, yaml, "provider: 1password")
+	assert.Contains(t, yaml, "account: my-team")
+}
+
+func TestGenerateVaultYAML_NoAccount(t *testing.T) {
+	yaml := generateVaultYAML("1password", "")
+	assert.Contains(t, yaml, "vault:")
+	assert.Contains(t, yaml, "provider: 1password")
+	assert.NotContains(t, yaml, "account:")
 }
 
 func TestHasYAMLKey(t *testing.T) {

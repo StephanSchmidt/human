@@ -40,15 +40,15 @@ func (s *servicesStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 			_, _ = fmt.Fprintln(w, "Aborted — existing .humanconfig.yaml kept.")
 			return nil, nil
 		}
-	} else {
-		addTrackers, promptErr := s.prompter.ConfirmAddTrackers()
-		if promptErr != nil {
-			return nil, errors.WrapWithDetails(promptErr, "confirming tracker setup")
-		}
-		if !addTrackers {
-			_, _ = fmt.Fprintln(w, "Skipping tracker configuration.")
-			return nil, nil
-		}
+	}
+
+	addTrackers, promptErr := s.prompter.ConfirmAddTrackers()
+	if promptErr != nil {
+		return nil, errors.WrapWithDetails(promptErr, "confirming tracker setup")
+	}
+	if !addTrackers {
+		_, _ = fmt.Fprintln(w, "Skipping tracker configuration.")
+		return nil, nil
 	}
 
 	// Select services.

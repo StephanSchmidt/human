@@ -24,11 +24,12 @@ type DevcontainerPrompter interface {
 
 type devcontainerStep struct {
 	prompter DevcontainerPrompter
+	state    *WizardState
 }
 
 // NewDevcontainerStep creates a WizardStep that optionally generates .devcontainer/devcontainer.json.
-func NewDevcontainerStep(p DevcontainerPrompter) WizardStep {
-	return &devcontainerStep{prompter: p}
+func NewDevcontainerStep(p DevcontainerPrompter, state *WizardState) WizardStep {
+	return &devcontainerStep{prompter: p, state: state}
 }
 
 func (s *devcontainerStep) Name() string { return "devcontainer" }
@@ -69,10 +70,15 @@ func (s *devcontainerStep) Run(w io.Writer, fw claude.FileWriter) ([]string, err
 		}
 	}
 
+	s.state.ProxyEnabled = proxy
+	s.state.InterceptEnabled = intercept
+
 	stacks, err := s.prompter.SelectStacks(StackRegistry())
 	if err != nil {
 		return nil, errors.WrapWithDetails(err, "selecting language stacks")
 	}
+
+	s.state.SelectedStacks = stacks
 
 	cfg := buildDevcontainerConfig(proxy, intercept, stacks)
 

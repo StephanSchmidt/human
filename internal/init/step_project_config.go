@@ -11,12 +11,14 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude"
 )
 
-type projectConfigStep struct{}
+type projectConfigStep struct {
+	state *WizardState
+}
 
 // NewProjectConfigStep creates a WizardStep that ensures .humanconfig.yaml
-// has a project: field and devcontainer: section for agent readiness.
-func NewProjectConfigStep() WizardStep {
-	return &projectConfigStep{}
+// has a project: field, devcontainer: section, and proxy: section for agent readiness.
+func NewProjectConfigStep(state *WizardState) WizardStep {
+	return &projectConfigStep{state: state}
 }
 
 func (s *projectConfigStep) Name() string { return "project-config" }
@@ -25,20 +27,33 @@ func (s *projectConfigStep) Run(w io.Writer, fw claude.FileWriter) ([]string, er
 	existing, _ := fw.ReadFile(configPath)
 	content := string(existing)
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "determining working directory")
+	}
+	absDir, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, errors.WrapWithDetails(err, "resolving absolute path")
+	}
+
 	var additions []string
 
 	if !hasYAMLKey(content, "project") {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, errors.WrapWithDetails(err, "determining project name")
-		}
-		additions = append(additions, fmt.Sprintf("project: %s", yamlSafeString(filepath.Base(cwd))))
+		additions = append(additions, fmt.Sprintf("project: %s", yamlSafeString(filepath.Base(absDir))))
 	}
 
 	if !hasYAMLKey(content, "devcontainer") {
 		if _, err := fw.ReadFile(devcontainerPath); err == nil {
-			additions = append(additions, "devcontainer:\n  configdir: \".\"")
+			additions = append(additions, fmt.Sprintf("devcontainer:\n  configdir: %s", yamlSafeString(absDir)))
 		}
+	}
+
+	if s.state.VaultProvider != "" && !hasYAMLKey(content, "vault") {
+		additions = append(additions, generateVaultYAML(s.state.VaultProvider, s.state.VaultAccount))
+	}
+
+	if s.state.ProxyEnabled && !hasYAMLKey(content, "proxy") {
+		additions = append(additions, generateProxyYAML(s.state.InterceptEnabled))
 	}
 
 	if len(additions) == 0 {
@@ -71,4 +86,31 @@ func hasYAMLKey(content, key string) bool {
 		}
 	}
 	return false
+}
+
+// generateVaultYAML returns the vault YAML section for .humanconfig.yaml.
+func generateVaultYAML(provider, account string) string {
+	var buf strings.Builder
+	buf.WriteString("vault:\n")
+	fmt.Fprintf(&buf, "  provider: %s", provider)
+	if account != "" {
+		fmt.Fprintf(&buf, "\n  account: %s", yamlSafeString(account))
+	}
+	return buf.String()
+}
+
+// generateProxyYAML returns the proxy YAML section for .humanconfig.yaml.
+func generateProxyYAML(intercept bool) string {
+	var buf strings.Builder
+	buf.WriteString("proxy:\n")
+	buf.WriteString("  mode: allowlist\n")
+	buf.WriteString("  domains:")
+	for _, d := range DefaultProxyDomains {
+		fmt.Fprintf(&buf, "\n    - %q", d)
+	}
+	if intercept {
+		buf.WriteString("\n  intercept:")
+		buf.WriteString("\n    - \"api.anthropic.com\"")
+	}
+	return buf.String()
 }
