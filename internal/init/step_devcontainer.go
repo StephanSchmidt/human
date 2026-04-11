@@ -115,6 +115,7 @@ const devcontainerPath = ".devcontainer/devcontainer.json"
 type devcontainerConfig struct {
 	Name             string                 `json:"name"`
 	Image            string                 `json:"image"`
+	RemoteUser       string                 `json:"remoteUser,omitempty"`
 	Features         map[string]interface{} `json:"features"`
 	Mounts           []string               `json:"mounts,omitempty"`
 	RunArgs          []string               `json:"runArgs,omitempty"`
@@ -202,6 +203,7 @@ func buildDevcontainerConfig(proxy, intercept bool, stacks []StackType) devconta
 	cfg := devcontainerConfig{
 		Name:         "human secure container",
 		Image:        "mcr.microsoft.com/devcontainers/base:ubuntu",
+		RemoteUser:   "vscode",
 		Features:     features,
 		Mounts:       []string{"source=${localEnv:HOME}/.human/ca.crt,target=/home/vscode/.human/ca.crt,type=bind,readonly"},
 		RunArgs:      []string{"--add-host=host.docker.internal:host-gateway"},
