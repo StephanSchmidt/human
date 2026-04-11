@@ -10,6 +10,13 @@ import (
 // AgentCleaner stops and removes an agent by name.
 type AgentCleaner interface {
 	DeleteAgent(ctx context.Context, name string) error
+	// DecommissionAgent removes the agent from the list immediately and
+	// returns the container ID for background teardown. This makes
+	// "human agent list" responsive while the slow container stop happens
+	// asynchronously.
+	DecommissionAgent(name string) (containerID string, err error)
+	// StopContainer stops and removes a container by ID.
+	StopContainer(ctx context.Context, containerID string) error
 }
 
 // RunAgentCleanup watches for SessionEnd hook events from devcontainer agents

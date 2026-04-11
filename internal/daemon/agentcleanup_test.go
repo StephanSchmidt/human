@@ -20,6 +20,14 @@ func (m *mockCleaner) DeleteAgent(_ context.Context, name string) error {
 	return nil
 }
 
+func (m *mockCleaner) DecommissionAgent(name string) (string, error) {
+	return "container-" + name, nil
+}
+
+func (m *mockCleaner) StopContainer(_ context.Context, _ string) error {
+	return nil
+}
+
 func TestRunAgentCleanup_StopEvent(t *testing.T) {
 	store := NewHookEventStore()
 	cleaner := &mockCleaner{}

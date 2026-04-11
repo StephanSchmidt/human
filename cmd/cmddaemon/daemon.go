@@ -948,6 +948,29 @@ func (c *dockerAgentCleaner) DeleteAgent(ctx context.Context, name string) error
 	return mgr.Delete(ctx, name)
 }
 
+func (c *dockerAgentCleaner) DecommissionAgent(name string) (string, error) {
+	meta, err := agent.ReadMeta(name)
+	if err != nil {
+		return "", err
+	}
+	containerID := meta.ContainerID
+	_ = agent.DeleteMeta(name)
+	_ = devcontainer.DeleteMeta(name)
+	return containerID, nil
+}
+
+func (c *dockerAgentCleaner) StopContainer(ctx context.Context, containerID string) error {
+	docker, err := devcontainer.NewDockerClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = docker.Close() }()
+
+	timeout := 10
+	_ = docker.ContainerStop(ctx, containerID, &timeout)
+	return docker.ContainerRemove(ctx, containerID, devcontainer.ContainerRemoveOptions{Force: true})
+}
+
 // dockerAgentSweeper implements daemon.AgentZombieSweeper using real Docker and agent metadata.
 type dockerAgentSweeper struct{}
 

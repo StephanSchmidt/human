@@ -414,8 +414,10 @@ func (s *Server) handleToolStats(conn net.Conn) {
 	_ = enc.Encode(resp)
 }
 
-// handleAgentStopAsync queues an agent stop in the background and returns
-// immediately so the caller (e.g. tmux pane) doesn't block.
+// handleAgentStopAsync removes the agent from the list immediately and
+// tears down the container in the background. This makes the TUI and
+// "human agent list" responsive while the slow container stop happens
+// asynchronously.
 func (s *Server) handleAgentStopAsync(conn net.Conn, args []string) {
 	if len(args) == 0 {
 		s.writeError(conn, "agent name required", 1)
@@ -427,17 +429,26 @@ func (s *Server) handleAgentStopAsync(conn net.Conn, args []string) {
 		return
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := s.AgentCleaner.DeleteAgent(ctx, name); err != nil {
-			s.Logger.Warn().Err(err).Str("agent", name).Msg("async agent stop failed")
-		} else {
-			s.Logger.Info().Str("agent", name).Msg("async agent stop completed")
-		}
-	}()
+	// Remove metadata first so the agent disappears from the list immediately.
+	containerID, err := s.AgentCleaner.DecommissionAgent(name)
+	if err != nil {
+		s.Logger.Warn().Err(err).Str("agent", name).Msg("async agent decommission failed")
+	}
 
-	resp := Response{Stdout: fmt.Sprintf("Agent %q stop queued\n", name)}
+	// Tear down the container in the background.
+	if containerID != "" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if stopErr := s.AgentCleaner.StopContainer(ctx, containerID); stopErr != nil {
+				s.Logger.Warn().Err(stopErr).Str("agent", name).Msg("async container stop failed")
+			} else {
+				s.Logger.Info().Str("agent", name).Msg("async container stop completed")
+			}
+		}()
+	}
+
+	resp := Response{Stdout: fmt.Sprintf("Agent %q stopped\n", name)}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
 }
