@@ -294,6 +294,17 @@ func (m *Manager) buildCreateOptions(cfg *DevcontainerConfig, projectDir, config
 		binds = append(binds, containerClaudeDir+":"+targetHome+"/.claude")
 	}
 
+	// Persist ~/.claude.json across container rebuilds. Claude Code stores
+	// auth state here; without it each new container prompts for re-auth.
+	claudeJSON := filepath.Join(containerClaudeDir, ".claude.json")
+	if _, statErr := os.Stat(claudeJSON); os.IsNotExist(statErr) {
+		// Seed from the most recent backup if available.
+		if restored := restoreClaudeJSON(containerClaudeDir, claudeJSON); !restored {
+			_ = os.WriteFile(claudeJSON, []byte("{}\n"), 0o600) // #nosec G306
+		}
+	}
+	binds = append(binds, claudeJSON+":"+targetHome+"/.claude.json")
+
 	// Mount host human binary so the container always uses the same version.
 	if humanBin, exeErr := os.Executable(); exeErr == nil {
 		binds = append(binds, humanBin+":/usr/local/bin/human:ro")
@@ -407,6 +418,31 @@ func remoteHome(cfg *DevcontainerConfig) string {
 		return "/root"
 	}
 	return "/home/" + user
+}
+
+// restoreClaudeJSON copies the most recent backup to claudeJSON.
+// Returns true if a backup was restored.
+func restoreClaudeJSON(claudeDir, claudeJSON string) bool {
+	backupDir := filepath.Join(claudeDir, "backups")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return false
+	}
+	// Find the most recent backup by name (timestamp suffix sorts lexically).
+	var latest string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".claude.json.backup.") {
+			latest = e.Name()
+		}
+	}
+	if latest == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(backupDir, latest)) // #nosec G304 -- path from known directory
+	if err != nil {
+		return false
+	}
+	return os.WriteFile(claudeJSON, data, 0o600) == nil // #nosec G306
 }
 
 // Exec runs a command inside a running devcontainer.
