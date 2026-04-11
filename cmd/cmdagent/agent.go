@@ -14,6 +14,7 @@ import (
 
 	"github.com/StephanSchmidt/human/errors"
 	"github.com/StephanSchmidt/human/internal/agent"
+	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/devcontainer"
 )
 
@@ -143,11 +144,20 @@ Examples:
 }
 
 func buildStopCmd() *cobra.Command {
-	return &cobra.Command{
+	var async bool
+	cmd := &cobra.Command{
 		Use:   "stop NAME",
 		Short: "Stop and remove an agent's container",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if async {
+				// Signal the daemon to clean up asynchronously.
+				if info, infoErr := daemon.ReadInfo(); infoErr == nil && info.IsReachable() {
+					_, _ = daemon.RunRemote(info.Addr, info.Token, []string{"agent-stop-async", args[0]}, "")
+					return nil
+				}
+				// No daemon: fall through to synchronous stop.
+			}
 			mgr, cleanup, err := newManager(cmd)
 			if err != nil {
 				return err
@@ -161,6 +171,8 @@ func buildStopCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&async, "async", false, "Signal daemon to stop agent in background and return immediately")
+	return cmd
 }
 
 func buildListCmd() *cobra.Command {

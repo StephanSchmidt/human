@@ -196,6 +196,7 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		PendingConfirms:  confirmStore,
 		StatsWriter:      statsWriter,
 		StatsStore:       statsStore,
+		AgentCleaner:     &dockerAgentCleaner{},
 	}
 
 	return &daemonState{
@@ -274,6 +275,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 
 	go daemon.RunAgentCleanup(ctx, ds.srv.HookEvents, &dockerAgentCleaner{}, logger)
+	go daemon.RunAgentZombieSweep(ctx, &dockerAgentSweeper{}, logger)
 
 	return ds.srv.ListenAndServe(ctx)
 }
@@ -936,6 +938,63 @@ func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolve
 type dockerAgentCleaner struct{}
 
 func (c *dockerAgentCleaner) DeleteAgent(ctx context.Context, name string) error {
+	docker, err := devcontainer.NewDockerClient()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = docker.Close() }()
+
+	mgr := &agent.Manager{Docker: docker}
+	return mgr.Delete(ctx, name)
+}
+
+// dockerAgentSweeper implements daemon.AgentZombieSweeper using real Docker and agent metadata.
+type dockerAgentSweeper struct{}
+
+func (s *dockerAgentSweeper) RunningAgents() ([]daemon.AgentInfo, error) {
+	metas, err := agent.ListMetas()
+	if err != nil {
+		return nil, err
+	}
+	var result []daemon.AgentInfo
+	for _, m := range metas {
+		if m.Status != agent.StatusRunning {
+			continue
+		}
+		result = append(result, daemon.AgentInfo{
+			Name:        m.Name,
+			ContainerID: m.ContainerID,
+			CreatedAt:   m.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+func (s *dockerAgentSweeper) IsProcessRunning(ctx context.Context, containerID string, process string) (bool, error) {
+	docker, err := devcontainer.NewDockerClient()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = docker.Close() }()
+
+	execID, err := docker.ExecCreate(ctx, containerID, []string{"pgrep", "-x", process}, devcontainer.ExecOptions{})
+	if err != nil {
+		return false, err
+	}
+	resp, err := docker.ExecAttach(ctx, execID)
+	if err != nil {
+		return false, err
+	}
+	_ = resp.Close()
+
+	inspect, err := docker.ExecInspect(ctx, execID)
+	if err != nil {
+		return false, err
+	}
+	return inspect.ExitCode == 0, nil
+}
+
+func (s *dockerAgentSweeper) DeleteAgent(ctx context.Context, name string) error {
 	docker, err := devcontainer.NewDockerClient()
 	if err != nil {
 		return err

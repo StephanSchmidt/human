@@ -49,6 +49,7 @@ type Server struct {
 	PendingConfirms  *PendingConfirmStore                     // pending destructive operation confirmations; nil disables
 	StatsWriter      *stats.Writer                            // async SQLite writer for tool event persistence; nil disables
 	StatsStore       *stats.StatsStore                        // for query-time aggregation; nil disables tool-stats route
+	AgentCleaner     AgentCleaner                             // async agent cleanup; nil disables agent-stop-async route
 
 	wg sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }
@@ -272,6 +273,9 @@ func (s *Server) routeIntercept(conn net.Conn, reader *bufio.Reader, args []stri
 	case "tool-stats":
 		s.handleToolStats(conn)
 		return true
+	case "agent-stop-async":
+		s.handleAgentStopAsync(conn, args[1:])
+		return true
 	}
 
 	// Intercept browser commands with OAuth redirect_uri for relay.
@@ -406,6 +410,34 @@ func (s *Server) handleToolStats(conn net.Conn) {
 		out = "{}\n"
 	}
 	resp := Response{Stdout: out}
+	enc := json.NewEncoder(conn)
+	_ = enc.Encode(resp)
+}
+
+// handleAgentStopAsync queues an agent stop in the background and returns
+// immediately so the caller (e.g. tmux pane) doesn't block.
+func (s *Server) handleAgentStopAsync(conn net.Conn, args []string) {
+	if len(args) == 0 {
+		s.writeError(conn, "agent name required", 1)
+		return
+	}
+	name := args[0]
+	if s.AgentCleaner == nil {
+		s.writeError(conn, "agent cleanup not available", 1)
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := s.AgentCleaner.DeleteAgent(ctx, name); err != nil {
+			s.Logger.Warn().Err(err).Str("agent", name).Msg("async agent stop failed")
+		} else {
+			s.Logger.Info().Str("agent", name).Msg("async agent stop completed")
+		}
+	}()
+
+	resp := Response{Stdout: fmt.Sprintf("Agent %q stop queued\n", name)}
 	enc := json.NewEncoder(conn)
 	_ = enc.Encode(resp)
 }
