@@ -4,7 +4,7 @@ dist/
 local/
 *.out
 *.cov
-logo/
+/logo/
 .claude/
 .devcontainer/
 .human/
