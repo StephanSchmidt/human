@@ -38,8 +38,6 @@ type mockPrompter struct {
 	confirmInterceptErr     error
 	selectedStacks          []StackType
 	selectStacksErr         error
-	confirmLspSetup         bool
-	confirmLspSetupErr      error
 	selectedLsps            []LspPlugin
 	selectLspsErr           error
 	vaultProvider           string
@@ -94,10 +92,6 @@ func (m *mockPrompter) ConfirmIntercept() (bool, error) {
 
 func (m *mockPrompter) SelectStacks(_ []StackType) ([]StackType, error) {
 	return m.selectedStacks, m.selectStacksErr
-}
-
-func (m *mockPrompter) ConfirmLspSetup() (bool, error) {
-	return m.confirmLspSetup, m.confirmLspSetupErr
 }
 
 func (m *mockPrompter) SelectLspPlugins(_ []LspPlugin) ([]LspPlugin, error) {
@@ -1008,7 +1002,6 @@ func TestRunInit_FullWizardFlow(t *testing.T) {
 		},
 		confirmDevcontainer: true,
 		confirmProxy:        false,
-		confirmLspSetup:     false,
 		installAgents:       false,
 	}
 
@@ -1051,7 +1044,6 @@ func TestRunInit_FullWizardWithAgentInstall(t *testing.T) {
 		selected:            []ServiceType{registry[1]}, // GitHub
 		instanceValues:      []map[string]string{{"name": "oss"}},
 		confirmDevcontainer: false,
-		confirmLspSetup:     false,
 		installAgents:       true,
 	}
 

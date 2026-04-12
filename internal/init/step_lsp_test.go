@@ -27,37 +27,9 @@ func TestLspSetupStep_Name(t *testing.T) {
 	assert.Equal(t, "lsp-setup", step.Name())
 }
 
-func TestLspSetupStep_Declined(t *testing.T) {
-	prompter := &mockPrompter{confirmLspSetup: false}
-	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer, &WizardState{})
-	fw := newMockFileWriter()
-	var buf bytes.Buffer
-
-	hints, err := step.Run(&buf, fw)
-
-	require.NoError(t, err)
-	assert.Nil(t, hints)
-	assert.Empty(t, installer.pluginInstallCalls)
-}
-
-func TestLspSetupStep_ConfirmError(t *testing.T) {
-	prompter := &mockPrompter{confirmLspSetupErr: fmt.Errorf("prompt error")}
-	installer := newTestInstaller()
-	step := NewLspSetupStep(prompter, installer, &WizardState{})
-	fw := newMockFileWriter()
-	var buf bytes.Buffer
-
-	_, err := step.Run(&buf, fw)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "confirming LSP setup")
-}
-
 func TestLspSetupStep_NoneSelected(t *testing.T) {
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{},
+		selectedLsps: []LspPlugin{},
 	}
 	installer := newTestInstaller()
 	step := NewLspSetupStep(prompter, installer, &WizardState{})
@@ -73,8 +45,7 @@ func TestLspSetupStep_NoneSelected(t *testing.T) {
 
 func TestLspSetupStep_SelectError(t *testing.T) {
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectLspsErr:   fmt.Errorf("select error"),
+		selectLspsErr: fmt.Errorf("select error"),
 	}
 	installer := newTestInstaller()
 	step := NewLspSetupStep(prompter, installer, &WizardState{})
@@ -90,8 +61,7 @@ func TestLspSetupStep_SelectError(t *testing.T) {
 func TestLspSetupStep_BinaryAlreadyInstalled(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
@@ -112,8 +82,7 @@ func TestLspSetupStep_BinaryAlreadyInstalled(t *testing.T) {
 func TestLspSetupStep_AutoInstallSuccess(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	step := NewLspSetupStep(prompter, installer, &WizardState{})
@@ -133,8 +102,7 @@ func TestLspSetupStep_AutoInstallSuccess(t *testing.T) {
 func TestLspSetupStep_AutoInstallFailure(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	installer.binaryInstallErr = fmt.Errorf("install failed")
@@ -155,8 +123,7 @@ func TestLspSetupStep_AutoInstallFailure(t *testing.T) {
 func TestLspSetupStep_ManualOnly(t *testing.T) {
 	jdtls := findPlugin(t, "jdtls") // jdtls has empty InstallCmd
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{jdtls},
+		selectedLsps: []LspPlugin{jdtls},
 	}
 	installer := newTestInstaller()
 	step := NewLspSetupStep(prompter, installer, &WizardState{})
@@ -177,8 +144,7 @@ func TestLspSetupStep_ManualOnly(t *testing.T) {
 func TestLspSetupStep_PluginInstallFailure(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	installer.pluginInstallErr = fmt.Errorf("plugin install failed")
@@ -199,8 +165,7 @@ func TestLspSetupStep_PluginInstallFailure(t *testing.T) {
 func TestLspSetupStep_MarketplaceAddCalled(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
@@ -217,8 +182,7 @@ func TestLspSetupStep_MarketplaceAddCalled(t *testing.T) {
 func TestLspSetupStep_MarketplaceErrorContinues(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
@@ -242,8 +206,7 @@ func TestLspSetupStep_MultiplePlugins(t *testing.T) {
 	vtsls := findPlugin(t, "vtsls") // has InstallCmd, binary already installed
 
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls, jdtls, vtsls},
+		selectedLsps: []LspPlugin{gopls, jdtls, vtsls},
 	}
 	installer := newTestInstaller()
 	installer.installed["vtsls"] = true
@@ -307,9 +270,7 @@ func TestLspRegistry_AllPlugins(t *testing.T) {
 }
 
 func TestLspSetupStep_AutoSelectFromStacks(t *testing.T) {
-	prompter := &mockPrompter{
-		confirmLspSetup: true,
-	}
+	prompter := &mockPrompter{}
 	installer := newTestInstaller()
 	installer.installed["gopls"] = true
 	installer.installed["pyright-langserver"] = true
@@ -339,8 +300,7 @@ func TestLspSetupStep_AutoSelectFromStacks(t *testing.T) {
 func TestLspSetupStep_FallbackWhenNoStacks(t *testing.T) {
 	gopls := LspRegistry()[0]
 	prompter := &mockPrompter{
-		confirmLspSetup: true,
-		selectedLsps:    []LspPlugin{gopls},
+		selectedLsps: []LspPlugin{gopls},
 	}
 	installer := newTestInstaller()
 	state := &WizardState{} // no stacks selected
@@ -397,6 +357,86 @@ func TestStackToLspBinary_AllMappingsValid(t *testing.T) {
 		assert.True(t, binaries[binary],
 			"StackToLspBinary maps %s to %s, but no LspPlugin has Binary=%s", feature, binary, binary)
 	}
+}
+
+func TestEnableLspTool_SetsEnvVar(t *testing.T) {
+	origHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return "/fakehome", nil }
+	t.Cleanup(func() { userHomeDir = origHomeDir })
+
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	err := enableLspTool(&buf, fw)
+
+	require.NoError(t, err)
+
+	settingsPath := "/fakehome/.claude/settings.json"
+	data, ok := fw.files[settingsPath]
+	require.True(t, ok, "settings.json should have been written")
+	assert.Contains(t, string(data), `"ENABLE_LSP_TOOL": "1"`)
+	assert.Contains(t, buf.String(), "Enabled ENABLE_LSP_TOOL")
+}
+
+func TestEnableLspTool_MergesExistingSettings(t *testing.T) {
+	origHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return "/fakehome", nil }
+	t.Cleanup(func() { userHomeDir = origHomeDir })
+
+	fw := newMockFileWriter()
+	settingsPath := "/fakehome/.claude/settings.json"
+	fw.files[settingsPath] = []byte(`{"hooks": {"Stop": []}, "env": {"OTHER_VAR": "yes"}}`)
+	var buf bytes.Buffer
+
+	err := enableLspTool(&buf, fw)
+
+	require.NoError(t, err)
+	data := string(fw.files[settingsPath])
+	assert.Contains(t, data, `"ENABLE_LSP_TOOL": "1"`)
+	assert.Contains(t, data, `"OTHER_VAR": "yes"`)
+	assert.Contains(t, data, `"hooks"`)
+}
+
+func TestEnableLspTool_AlreadySet(t *testing.T) {
+	origHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return "/fakehome", nil }
+	t.Cleanup(func() { userHomeDir = origHomeDir })
+
+	fw := newMockFileWriter()
+	settingsPath := "/fakehome/.claude/settings.json"
+	fw.files[settingsPath] = []byte(`{"env": {"ENABLE_LSP_TOOL": "1"}}`)
+	var buf bytes.Buffer
+
+	err := enableLspTool(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), "already set")
+}
+
+func TestLspSetupStep_EnablesLspTool(t *testing.T) {
+	origHomeDir := userHomeDir
+	userHomeDir = func() (string, error) { return "/fakehome", nil }
+	t.Cleanup(func() { userHomeDir = origHomeDir })
+
+	gopls := LspRegistry()[0]
+	prompter := &mockPrompter{
+		selectedLsps: []LspPlugin{gopls},
+	}
+	installer := newTestInstaller()
+	installer.installed["gopls"] = true
+	step := NewLspSetupStep(prompter, installer, &WizardState{})
+	fw := newMockFileWriter()
+	var buf bytes.Buffer
+
+	hints, err := step.Run(&buf, fw)
+
+	require.NoError(t, err)
+	assert.Empty(t, hints)
+
+	settingsPath := "/fakehome/.claude/settings.json"
+	data, ok := fw.files[settingsPath]
+	require.True(t, ok, "settings.json should have been written with ENABLE_LSP_TOOL")
+	assert.Contains(t, string(data), `"ENABLE_LSP_TOOL": "1"`)
 }
 
 // --- helpers ---

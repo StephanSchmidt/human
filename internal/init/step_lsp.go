@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/StephanSchmidt/human/errors"
@@ -89,7 +91,6 @@ func LspRegistry() []LspPlugin {
 
 // LspPrompter abstracts TUI interactions for the LSP setup step.
 type LspPrompter interface {
-	ConfirmLspSetup() (bool, error)
 	SelectLspPlugins(available []LspPlugin) ([]LspPlugin, error)
 }
 
@@ -152,20 +153,13 @@ func NewLspSetupStep(p LspPrompter, installer LspInstaller, state *WizardState) 
 func (s *lspSetupStep) Name() string { return "lsp-setup" }
 
 func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) {
-	confirm, err := s.prompter.ConfirmLspSetup()
-	if err != nil {
-		return nil, errors.WrapWithDetails(err, "confirming LSP setup")
-	}
-	if !confirm {
-		return nil, nil
-	}
-
 	// Auto-select LSPs matching language stacks chosen in the devcontainer step.
 	var selected []LspPlugin
 	if len(s.state.SelectedStacks) > 0 {
 		selected = lspsForStacks(s.state.SelectedStacks)
 	}
 	if len(selected) == 0 {
+		var err error
 		selected, err = s.prompter.SelectLspPlugins(LspRegistry())
 		if err != nil {
 			return nil, errors.WrapWithDetails(err, "selecting LSP plugins")
@@ -224,6 +218,11 @@ func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 		appendLspToDevcontainer(w, fw, lspCmds)
 	}
 
+	// Enable the LSP tool in Claude Code settings.
+	if err := enableLspTool(w, fw); err != nil {
+		hints = append(hints, fmt.Sprintf("Failed to enable LSP tool. Manually add '\"env\": {\"ENABLE_LSP_TOOL\": \"1\"}' to ~/.claude/settings.json"))
+	}
+
 	return hints, nil
 }
 
@@ -244,6 +243,57 @@ func lspsForStacks(stacks []StackType) []LspPlugin {
 		}
 	}
 	return result
+}
+
+// userHomeDir is a package-level variable for testability (matches claude package pattern).
+var userHomeDir = os.UserHomeDir
+
+// enableLspTool sets ENABLE_LSP_TOOL=1 in ~/.claude/settings.json so that
+// Claude Code exposes the LSP tool to the model.
+func enableLspTool(w io.Writer, fw claude.FileWriter) error {
+	home, err := userHomeDir()
+	if err != nil {
+		return errors.WrapWithDetails(err, "resolving home directory")
+	}
+
+	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	settings := make(map[string]interface{})
+
+	data, err := fw.ReadFile(settingsPath)
+	if err == nil {
+		if jsonErr := json.Unmarshal(data, &settings); jsonErr != nil {
+			return errors.WrapWithDetails(jsonErr, "parsing settings.json", "path", settingsPath)
+		}
+	} else if !os.IsNotExist(err) {
+		return errors.WrapWithDetails(err, "reading settings.json", "path", settingsPath)
+	}
+
+	// Merge into the existing env map.
+	envMap, _ := settings["env"].(map[string]interface{})
+	if envMap == nil {
+		envMap = make(map[string]interface{})
+	}
+
+	if envMap["ENABLE_LSP_TOOL"] == "1" {
+		_, _ = fmt.Fprintf(w, "  ENABLE_LSP_TOOL already set in %s\n", settingsPath)
+		return nil
+	}
+
+	envMap["ENABLE_LSP_TOOL"] = "1"
+	settings["env"] = envMap
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return errors.WrapWithDetails(err, "marshaling settings.json")
+	}
+	out = append(out, '\n')
+
+	if err := fw.WriteFile(settingsPath, out, 0o644); err != nil {
+		return errors.WrapWithDetails(err, "writing settings.json", "path", settingsPath)
+	}
+
+	_, _ = fmt.Fprintf(w, "  Enabled ENABLE_LSP_TOOL in %s\n", settingsPath)
+	return nil
 }
 
 // appendLspToDevcontainer reads .devcontainer/devcontainer.json and appends

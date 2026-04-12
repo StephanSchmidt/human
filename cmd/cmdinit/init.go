@@ -272,18 +272,6 @@ func (h huhPrompter) PromptVaultAccount() (string, error) {
 	return account, err
 }
 
-func (h huhPrompter) ConfirmLspSetup() (bool, error) {
-	setup := true
-	err := huh.NewConfirm().
-		Title("Set up LSP servers for Claude Code?").
-		Description("Enables language intelligence (go-to-definition, references, diagnostics)").
-		Affirmative("Yes").
-		Negative("No").
-		Value(&setup).
-		Run()
-	return setup, err
-}
-
 func (h huhPrompter) SelectLspPlugins(available []initpkg.LspPlugin) ([]initpkg.LspPlugin, error) {
 	options := make([]huh.Option[int], len(available))
 	for i, lsp := range available {
