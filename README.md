@@ -310,3 +310,13 @@ See [documentation.md](docs/documentation.md) for full configuration details.
 ```bash
 make build
 ```
+
+## Star History
+
+<a href="https://www.star-history.com/#StephanSchmidt/human&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=StephanSchmidt/human&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=StephanSchmidt/human&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=StephanSchmidt/human&type=Date" />
+ </picture>
+</a>
