@@ -141,8 +141,15 @@ func (c *Client) listAllGroupStories(ctx context.Context) ([]scStory, error) {
 	}
 	c.groupsMu.Unlock()
 
+	// Collect and sort group IDs for deterministic output order.
+	ids := make([]string, 0, len(groups))
+	for _, id := range groups {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
 	var all []scStory
-	for _, gid := range groups {
+	for _, gid := range ids {
 		stories, err := c.listGroupStories(ctx, gid)
 		if err != nil {
 			return nil, err
