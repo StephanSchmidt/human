@@ -10,3 +10,5 @@ local/
 .human/
 .humanconfig
 .humanconfig.yaml
+humanconfig.bak
+tools/

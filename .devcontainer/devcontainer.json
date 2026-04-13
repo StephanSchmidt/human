@@ -1,7 +1,7 @@
 {
-  "name": "human secure container",
-  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "remoteUser": "vscode",
+  "capAdd": [
+    "NET_ADMIN"
+  ],
   "features": {
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {},
     "ghcr.io/devcontainers/features/go:1": {},
@@ -12,19 +12,16 @@
       "proxy": true
     }
   },
-  "mounts": [
-    "source=${localEnv:HOME}/.human/ca.crt,target=/home/vscode/.human/ca.crt,type=bind,readonly"
-  ],
-  "runArgs": [
-    "--add-host=host.docker.internal:host-gateway"
-  ],
-  "capAdd": [
-    "NET_ADMIN"
-  ],
   "forwardPorts": [
     19285,
     19286
   ],
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "mounts": [
+    "source=${localEnv:HOME}/.human/ca.crt,target=/home/vscode/.human/ca.crt,type=bind,readonly"
+  ],
+  "name": "human secure container",
+  "postStartCommand": "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 \u0026\u0026 sudo -E human-proxy-setup \u0026\u0026 sudo cp /home/vscode/.human/ca.crt /usr/local/share/ca-certificates/human-proxy.crt \u0026\u0026 sudo update-ca-certificates \u0026\u0026 human install --agent claude \u0026\u0026 human chrome-bridge \u0026\u0026 go install golang.org/x/tools/gopls@latest \u0026\u0026 go install golang.org/x/tools/gopls@latest \u0026\u0026 npm install -g @vtsls/language-server",
   "remoteEnv": {
     "BROWSER": "human-browser",
     "HUMAN_CHROME_ADDR": "host.docker.internal:19286",
@@ -33,5 +30,8 @@
     "HUMAN_PROXY_ADDR": "host.docker.internal:19287",
     "NODE_EXTRA_CA_CERTS": "/home/vscode/.human/ca.crt"
   },
-  "postStartCommand": "export HUMAN_PROXY_ADDR=$(getent hosts host.docker.internal | awk '{print $1}'):19287 && sudo -E human-proxy-setup && sudo cp /home/vscode/.human/ca.crt /usr/local/share/ca-certificates/human-proxy.crt && sudo update-ca-certificates && human install --agent claude && human chrome-bridge"
+  "remoteUser": "vscode",
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ]
 }
