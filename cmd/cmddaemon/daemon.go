@@ -197,6 +197,7 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		StatsWriter:      statsWriter,
 		StatsStore:       statsStore,
 		AgentCleaner:     &dockerAgentCleaner{},
+		VaultResolver:    vaultResolver,
 	}
 
 	return &daemonState{

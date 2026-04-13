@@ -23,6 +23,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/proxy"
 	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/tracker"
+	"github.com/StephanSchmidt/human/internal/vault"
 )
 
 // defaultBrowserOpener wraps browser.DefaultOpener for production use.
@@ -50,6 +51,7 @@ type Server struct {
 	StatsWriter      *stats.Writer                            // async SQLite writer for tool event persistence; nil disables
 	StatsStore       *stats.StatsStore                        // for query-time aggregation; nil disables tool-stats route
 	AgentCleaner     AgentCleaner                             // async agent cleanup; nil disables agent-stop-async route
+	VaultResolver    *vault.Resolver                          // session-scoped vault resolver; reused across requests to avoid repeated op.exe calls
 
 	wg sync.WaitGroup // tracks in-flight handler goroutines for graceful shutdown
 }
@@ -192,7 +194,9 @@ func (s *Server) executeCommand(conn net.Conn, req Request, projectDir string) {
 	cmd.SetArgs(req.Args)
 	cmd.SetOut(&stdoutBuf)
 	cmd.SetErr(&stderrBuf)
-	cmd.SetContext(env.WithEnv(context.Background(), req.Env))
+	ctx := env.WithEnv(context.Background(), req.Env)
+	ctx = vault.WithResolver(ctx, s.VaultResolver)
+	cmd.SetContext(ctx)
 
 	exitCode := 0
 	if err := cmd.Execute(); err != nil {
@@ -616,7 +620,9 @@ func (s *Server) handleDestructiveConfirm(conn net.Conn, req Request, op destruc
 	cmd.SetArgs(execArgs)
 	cmd.SetOut(&stdoutBuf)
 	cmd.SetErr(&stderrBuf)
-	cmd.SetContext(env.WithEnv(context.Background(), req.Env))
+	ctx := env.WithEnv(context.Background(), req.Env)
+	ctx = vault.WithResolver(ctx, s.VaultResolver)
+	cmd.SetContext(ctx)
 
 	exitCode := 0
 	if err := cmd.Execute(); err != nil {

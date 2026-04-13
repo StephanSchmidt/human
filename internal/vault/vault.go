@@ -20,7 +20,9 @@ type SecretProvider interface {
 }
 
 // Resolver coordinates multiple SecretProviders.
-// It is created once at daemon startup and shared across all config loading.
+// It is created once at daemon startup and injected into per-request
+// command contexts via WithResolver so all requests share one provider
+// instance (avoiding repeated op.exe subprocesses on WSL2).
 // Secrets are resolved on every call — no caching — so plaintext values
 // do not persist in daemon memory.
 type Resolver struct {

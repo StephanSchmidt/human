@@ -58,15 +58,21 @@ func LoadAllInstances(dir string) ([]tracker.Instance, error) {
 func LoadAllInstancesCtx(ctx context.Context, dir string) ([]tracker.Instance, error) {
 	dir = config.ResolveDirCtx(ctx, dir)
 
-	// Auto-detect vault config for the direct CLI path.
-	vcfg, vcfgErr := vault.ReadConfig(dir)
-	if vcfgErr != nil {
-		// Surface the parse error but continue without vault resolution so
-		// the caller still sees tracker instances get loaded — the tracker
-		// client will fail loudly if secrets are unresolved.
-		log.Warn().Err(vcfgErr).Str("dir", dir).Msg("vault config parse failed; resolution disabled")
+	// Prefer a resolver injected on the context (e.g. by the daemon) so
+	// per-request commands reuse the session-scoped provider instead of
+	// shelling out to op.exe on every call.
+	resolver := vault.ResolverFromContext(ctx)
+	if resolver == nil {
+		// Auto-detect vault config for the direct CLI path.
+		vcfg, vcfgErr := vault.ReadConfig(dir)
+		if vcfgErr != nil {
+			// Surface the parse error but continue without vault resolution so
+			// the caller still sees tracker instances get loaded — the tracker
+			// client will fail loudly if secrets are unresolved.
+			log.Warn().Err(vcfgErr).Str("dir", dir).Msg("vault config parse failed; resolution disabled")
+		}
+		resolver = vault.NewResolverFromConfig(vcfg)
 	}
-	resolver := vault.NewResolverFromConfig(vcfg)
 	var resolveFunc config.SecretResolveFunc
 	if resolver != nil {
 		resolveFunc = resolver.Resolve
