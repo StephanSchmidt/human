@@ -65,9 +65,13 @@ func (m *mockDockerClient) ListContainers(_ context.Context) ([]ContainerInfo, e
 }
 
 func (m *mockDockerClient) Exec(_ context.Context, containerID string, cmd []string) (int, io.Reader, error) {
-	key := containerID + "|" + strings.Join(cmd, " ")
+	joined := strings.Join(cmd, " ")
 	for k, v := range m.execResults {
-		if strings.Contains(key, k) {
+		parts := strings.SplitN(k, "|", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if strings.Contains(containerID, parts[0]) && strings.Contains(joined, parts[1]) {
 			return v.exitCode, bytes.NewReader(v.data), v.err
 		}
 	}
@@ -820,10 +824,9 @@ func TestDockerFinder_FindsContainerWithClaude(t *testing.T) {
 			{ID: "abc123def456", Name: "dev-myapp"},
 		},
 		execResults: map[string]mockExecResult{
-			"abc123def456|pgrep":    {exitCode: 0, data: []byte("1\n")},
-			"abc123def456|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"abc123def456|cat":      {exitCode: 0, data: jsonlData},
-			"abc123def456|printenv": {exitCode: 0, data: []byte("192.168.1.5:19287\n")},
+			"abc123def456|HUMAN_PROXY_ADDR": {exitCode: 0, data: []byte("192.168.1.5:19287\n\n")},
+			"abc123def456|find":        {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"abc123def456|cat":         {exitCode: 0, data: jsonlData},
 		},
 		statsResults: map[string]mockStatsResult{
 			"abc123def456": {mem: &MemoryInfo{Usage: 512 * 1024 * 1024, Limit: 2 * 1024 * 1024 * 1024}},
@@ -895,9 +898,9 @@ func TestDockerFinder_StateUsesNewestFile(t *testing.T) {
 			{ID: "statetest12345", Name: "state-test"},
 		},
 		execResults: map[string]mockExecResult{
-			"statetest12345|pgrep": {exitCode: 0, data: []byte("1\n")},
-			"statetest12345|sh":    {exitCode: 0, data: []byte(fileList)},
-			"statetest12345|cat":   {exitCode: 0, data: catData},
+			"statetest12345|HUMAN_PROXY_ADDR": {exitCode: 0, data: []byte("\n\n")},
+			"statetest12345|find":             {exitCode: 0, data: []byte(fileList)},
+			"statetest12345|cat":              {exitCode: 0, data: catData},
 		},
 	}
 
@@ -942,7 +945,7 @@ func TestDockerFinder_SkipsContainerWithoutClaude(t *testing.T) {
 			{ID: "xyz789", Name: "no-claude"},
 		},
 		execResults: map[string]mockExecResult{
-			"xyz789|pgrep": {exitCode: 1, data: nil},
+			"xyz789|HUMAN_PROXY_ADDR": {exitCode: 1, data: nil},
 		},
 	}
 
@@ -965,10 +968,9 @@ func TestDockerFinder_ProxyNotConfigured(t *testing.T) {
 			{ID: "noproxy123456", Name: "no-proxy"},
 		},
 		execResults: map[string]mockExecResult{
-			"noproxy123456|pgrep":    {exitCode: 0, data: []byte("1\n")},
-			"noproxy123456|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"noproxy123456|cat":      {exitCode: 0, data: jsonlData},
-			"noproxy123456|printenv": {exitCode: 1, data: nil},
+			"noproxy123456|HUMAN_PROXY_ADDR": {exitCode: 0, data: []byte("\n\n")},
+			"noproxy123456|find":             {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"noproxy123456|cat":              {exitCode: 0, data: jsonlData},
 		},
 	}
 
@@ -1000,10 +1002,9 @@ func TestDockerFinder_UsesProjectLabelAsCwd(t *testing.T) {
 			},
 		},
 		execResults: map[string]mockExecResult{
-			"labeled1234567|pgrep":    {exitCode: 0, data: []byte("1\n")},
-			"labeled1234567|sh":       {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
-			"labeled1234567|cat":      {exitCode: 0, data: jsonlData},
-			"labeled1234567|printenv": {exitCode: 1, data: nil},
+			"labeled1234567|HUMAN_PROXY_ADDR": {exitCode: 0, data: []byte("\n\n")},
+			"labeled1234567|find":             {exitCode: 0, data: []byte("1711000000 /root/.claude/projects/session.jsonl\n")},
+			"labeled1234567|cat":              {exitCode: 0, data: jsonlData},
 		},
 	}
 

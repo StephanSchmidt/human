@@ -12,6 +12,7 @@ import (
 	"github.com/StephanSchmidt/human/internal/claude/logparser"
 	"github.com/StephanSchmidt/human/internal/daemon"
 	"github.com/StephanSchmidt/human/internal/proxy"
+	"github.com/StephanSchmidt/human/internal/tracker"
 	"github.com/StephanSchmidt/human/internal/slack"
 	"github.com/StephanSchmidt/human/internal/stats"
 	"github.com/StephanSchmidt/human/internal/telegram"
@@ -40,11 +41,12 @@ func New(finder claude.InstanceFinder, dc claude.DockerClient) *Monitor {
 	}
 }
 
-// FetchFull performs complete discovery, JSONL parsing, and hook event reading.
-func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
-	now := time.Now()
-	snap := &Snapshot{FetchedAt: now}
-
+// FetchSkeleton returns a minimal snapshot from cheap local file reads.
+// The TUI renders immediately from this so the user sees the dashboard
+// layout (daemon status, status line) while heavier work runs in the
+// background via FetchHeavy.
+func (m *Monitor) FetchSkeleton() *Snapshot {
+	snap := &Snapshot{FetchedAt: time.Now()}
 	pid, alive := daemon.ReadAlivePid()
 	snap.Daemon = DaemonState{PID: pid, Alive: alive}
 	if info, err := daemon.ReadInfo(); err == nil {
@@ -53,55 +55,77 @@ func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
 	snap.Daemon.ProxyActiveConns = proxy.ReadStats(proxy.StatsPath()).ActiveConns
 	snap.Telegram = telegramStatus()
 	snap.Slack = slackStatus()
+	return snap
+}
+
+// FetchHeavy performs discovery, daemon RPCs, and JSONL parsing on top of
+// a skeleton snapshot. Independent daemon RPCs run in parallel with instance
+// discovery so the total time is max(discovery, RPCs) rather than a sum.
+func (m *Monitor) FetchHeavy(ctx context.Context, base *Snapshot) *Snapshot {
+	snap := *base
+	snap.FetchedAt = time.Now()
+
+	// Read daemon info once for all RPC calls.
+	var addr, token string
 	if snap.Daemon.Alive {
 		if info, err := daemon.ReadInfo(); err == nil {
-			snap.Trackers, _ = daemon.GetTrackerDiagnose(info.Addr, info.Token)
+			addr, token = info.Addr, info.Token
 		}
 	}
 
+	// Launch independent daemon RPCs in parallel with discovery.
+	var wg sync.WaitGroup
+	var (
+		trackers  []tracker.TrackerStatus
+		hookSnaps map[string]hookevents.SessionSnapshot
+		netEvents []daemon.NetworkEvent
+		toolStats *stats.ToolStats
+	)
+	if addr != "" {
+		wg.Add(4)
+		go func() { defer wg.Done(); trackers, _ = daemon.GetTrackerDiagnose(addr, token) }()
+		go func() { defer wg.Done(); hookSnaps, _ = daemon.GetHookSnapshot(addr, token) }()
+		go func() { defer wg.Done(); netEvents, _ = daemon.GetNetworkEvents(addr, token) }()
+		go func() { defer wg.Done(); toolStats, _ = daemon.GetToolStats(addr, token) }()
+	}
+
+	// Discovery runs in parallel with the daemon RPCs above.
 	instances, err := m.finder.FindInstances(ctx)
 	if err != nil {
 		snap.Err = err
-		return snap
+		wg.Wait()
+		return &snap
 	}
 
-	// Read daemon-connected PIDs for later matching.
+	wg.Wait()
+
+	snap.Trackers = trackers
+	snap.NetworkEvents = netEvents
+	snap.ToolStats = toolStats
 	snap.connectedPIDs = readConnectedPIDs()
 
-	usages := claude.CollectInstanceUsage(instances, now)
-
-	// Tmux panes (best-effort).
+	// Sequential: depends on instances.
+	usages := claude.CollectInstanceUsage(instances, snap.FetchedAt)
 	panes := m.findPanes(ctx, instances)
-
-	// JSONL session parsing.
 	sessionByPath := m.parseSessions(instances)
 
-	// Hook events from daemon in-memory store (authoritative for state).
-	hookSnaps := fetchDaemonHookSnapshots(snap.Daemon.Alive)
 	overlayHookState(sessionByPath, hookSnaps)
 	fillMissingFromHooks(instances, sessionByPath, hookSnaps)
 
-	// Ambient network activity for the TUI domains panel.
-	snap.NetworkEvents = fetchDaemonNetworkEvents(snap.Daemon.Alive)
-
-	// Historical tool call stats from daemon SQLite store.
-	snap.ToolStats = fetchDaemonToolStats(snap.Daemon.Alive)
-
-	// Match sessions to instances, then mark daemon-connected ones.
 	snap.Instances = matchInstances(usages, sessionByPath)
 	applyDaemonConnectedViews(snap.Instances, snap.connectedPIDs)
-
-	// Match pane states from sessions.
 	matchPaneStates(panes, sessionByPath, instances)
 	snap.Panes = panes
-
-	// Carry forward for fetchQuick.
 	snap.sessionByPath = sessionByPath
-
-	// Pre-compute total usage.
 	snap.TotalUsage = aggregateUsage(usages)
 
-	return snap
+	return &snap
+}
+
+// FetchFull performs complete discovery, JSONL parsing, and hook event reading.
+// Used for periodic full refreshes after the initial skeleton+heavy load.
+func (m *Monitor) FetchFull(ctx context.Context) *Snapshot {
+	return m.FetchHeavy(ctx, m.FetchSkeleton())
 }
 
 // FetchQuick updates daemon status, pane states, and hook-based working/idle
@@ -276,24 +300,6 @@ func fetchDaemonNetworkEvents(daemonAlive bool) []daemon.NetworkEvent {
 		return nil
 	}
 	return events
-}
-
-// fetchDaemonToolStats reads pre-aggregated tool call statistics from
-// the daemon's SQLite store. Returns nil when the daemon is unavailable
-// so the TUI panel collapses gracefully.
-func fetchDaemonToolStats(daemonAlive bool) *stats.ToolStats {
-	if !daemonAlive {
-		return nil
-	}
-	info, err := daemon.ReadInfo()
-	if err != nil || info.Addr == "" {
-		return nil
-	}
-	ts, err := daemon.GetToolStats(info.Addr, info.Token)
-	if err != nil {
-		return nil
-	}
-	return ts
 }
 
 // overlayHookState updates sessions in byPath from hook snapshots.

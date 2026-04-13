@@ -497,22 +497,57 @@ func (d *DockerFinder) FindInstances(ctx context.Context) ([]Instance, error) {
 		ttl = 2 * time.Second
 	}
 
-	var instances []Instance
+	type result struct {
+		inst Instance
+		ok   bool
+	}
+	ch := make(chan result, len(containers))
 	for _, ctr := range containers {
-		inst, ok := d.buildContainerInstance(ctx, ctr, ttl)
-		if ok {
-			instances = append(instances, inst)
+		go func(ctr ContainerInfo) {
+			inst, ok := d.buildContainerInstance(ctx, ctr, ttl)
+			ch <- result{inst, ok}
+		}(ctr)
+	}
+	var instances []Instance
+	for range containers {
+		r := <-ch
+		if r.ok {
+			instances = append(instances, r.inst)
 		}
 	}
 	return instances, nil
 }
 
+// containerProbeScript combines the Claude presence check, proxy env probe,
+// and cwd readlink into a single exec call to minimise Docker round-trips.
+// Output format (one value per line):
+//
+//	<HUMAN_PROXY_ADDR or empty>
+//	<cwd or empty>
+const containerProbeScript = `pgrep -x claude >/dev/null 2>&1 || exit 1
+printf '%s\n' "${HUMAN_PROXY_ADDR:-}"
+readlink "/proc/$(pgrep -x claude)/cwd" 2>/dev/null || true`
+
 // buildContainerInstance probes a single container for a running Claude process
 // and returns an Instance if found.
 func (d *DockerFinder) buildContainerInstance(ctx context.Context, ctr ContainerInfo, ttl time.Duration) (Instance, bool) {
-	exitCode, _, err := d.Client.Exec(ctx, ctr.ID, []string{"pgrep", "-x", "claude"})
+	// Single exec: check Claude is running + collect proxy addr and cwd.
+	exitCode, probeReader, err := d.Client.Exec(ctx, ctr.ID, []string{"sh", "-c", containerProbeScript})
 	if err != nil || exitCode != 0 {
 		return Instance{}, false
+	}
+
+	var proxyAddr, probedCwd string
+	if probeReader != nil {
+		if out, readErr := io.ReadAll(probeReader); readErr == nil {
+			lines := strings.SplitN(strings.TrimRight(string(out), "\n"), "\n", 3)
+			if len(lines) >= 1 {
+				proxyAddr = strings.TrimSpace(lines[0])
+			}
+			if len(lines) >= 2 {
+				probedCwd = strings.TrimSpace(lines[1])
+			}
+		}
 	}
 
 	data := d.getCached(ctr.ID, ttl)
@@ -538,16 +573,10 @@ func (d *DockerFinder) buildContainerInstance(ctx context.Context, ctr Container
 		log.Debug().Err(memErr).Str("container", shortID).Msg("container stats unavailable")
 	}
 
-	proxyExit, _, proxyErr := d.Client.Exec(ctx, ctr.ID, []string{"printenv", "HUMAN_PROXY_ADDR"})
-	if proxyErr != nil {
-		log.Debug().Err(proxyErr).Str("container", shortID).Msg("container proxy probe failed")
-	}
-
-	// Prefer the host project path from the container label so the TUI
-	// can match this instance to the correct project tab.
+	// Prefer the host project path from the container label.
 	cwd := ctr.Labels["dev.human.project"]
 	if cwd == "" {
-		cwd = d.probeContainerCwd(ctx, ctr.ID, shortID)
+		cwd = probedCwd
 	}
 
 	return Instance{
@@ -558,25 +587,8 @@ func (d *DockerFinder) buildContainerInstance(ctx context.Context, ctr Container
 		Memory:          mem,
 		ContainerID:     ctr.ID,
 		Cwd:             cwd,
-		ProxyConfigured: proxyExit == 0,
+		ProxyConfigured: proxyAddr != "",
 	}, true
-}
-
-// probeContainerCwd resolves Claude's working directory inside a container.
-func (d *DockerFinder) probeContainerCwd(ctx context.Context, containerID, shortID string) string {
-	cwdExit, cwdReader, cwdErr := d.Client.Exec(ctx, containerID, []string{"sh", "-c", "readlink /proc/$(pgrep -x claude)/cwd"})
-	if cwdErr != nil {
-		log.Debug().Err(cwdErr).Str("container", shortID).Msg("container cwd probe failed")
-		return ""
-	}
-	if cwdExit == 0 && cwdReader != nil {
-		if cwdBytes, readErr := io.ReadAll(cwdReader); readErr == nil {
-			return strings.TrimSpace(string(cwdBytes))
-		} else {
-			log.Debug().Err(readErr).Str("container", shortID).Msg("reading container cwd output failed")
-		}
-	}
-	return ""
 }
 
 func (d *DockerFinder) fetchContainerData(ctx context.Context, containerID string) []byte {
@@ -683,14 +695,25 @@ type CombinedFinder struct {
 }
 
 func (c *CombinedFinder) FindInstances(ctx context.Context) ([]Instance, error) {
-	var all []Instance
+	type result struct {
+		instances []Instance
+		err       error
+	}
+	ch := make(chan result, len(c.Finders))
 	for _, f := range c.Finders {
-		instances, err := f.FindInstances(ctx)
-		if err != nil {
-			log.Debug().Err(err).Msg("instance finder failed, skipping")
+		go func(f InstanceFinder) {
+			instances, err := f.FindInstances(ctx)
+			ch <- result{instances, err}
+		}(f)
+	}
+	var all []Instance
+	for range c.Finders {
+		r := <-ch
+		if r.err != nil {
+			log.Debug().Err(r.err).Msg("instance finder failed, skipping")
 			continue
 		}
-		all = append(all, instances...)
+		all = append(all, r.instances...)
 	}
 	return all, nil
 }

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -894,7 +895,12 @@ func trackerDiagnoserFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolver)
 
 func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolver) func() ([]daemon.TrackerIssuesResult, error) {
 	return func() ([]daemon.TrackerIssuesResult, error) {
-		var results []daemon.TrackerIssuesResult
+		// Collect all (instance, project) pairs first.
+		type fetchJob struct {
+			inst    tracker.Instance
+			project string
+		}
+		var jobs []fetchJob
 		for _, entry := range reg.Entries() {
 			instances, err := cmdutil.LoadAllInstancesWithResolver(entry.Dir, entry.EnvLookup(), resolver)
 			if err != nil {
@@ -905,32 +911,43 @@ func fetchTrackerIssuesFunc(reg *daemon.ProjectRegistry, resolver *vault.Resolve
 				if len(projects) == 0 {
 					projects = []string{""}
 				}
-				for _, project := range projects {
-					ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-					issues, fetchErr := inst.Provider.ListIssues(ctx, tracker.ListOptions{
-						Project:    project,
-						MaxResults: 20,
-						IncludeAll: false,
-					})
-					cancel()
-					label := project
-					if label == "" {
-						label = inst.Name
-					}
-					r := daemon.TrackerIssuesResult{
-						TrackerName: inst.Name,
-						TrackerKind: inst.Kind,
-						TrackerRole: inst.InferRole(),
-						Project:     label,
-						Issues:      issues,
-					}
-					if fetchErr != nil {
-						r.Err = fetchErr.Error()
-					}
-					results = append(results, r)
+				for _, p := range projects {
+					jobs = append(jobs, fetchJob{inst: inst, project: p})
 				}
 			}
 		}
+
+		// Fetch all tracker/project combinations in parallel.
+		results := make([]daemon.TrackerIssuesResult, len(jobs))
+		var wg sync.WaitGroup
+		for i, job := range jobs {
+			wg.Add(1)
+			go func(i int, job fetchJob) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				issues, fetchErr := job.inst.Provider.ListIssues(ctx, tracker.ListOptions{
+					Project:    job.project,
+					MaxResults: 20,
+					IncludeAll: false,
+				})
+				label := job.project
+				if label == "" {
+					label = job.inst.Name
+				}
+				results[i] = daemon.TrackerIssuesResult{
+					TrackerName: job.inst.Name,
+					TrackerKind: job.inst.Kind,
+					TrackerRole: job.inst.InferRole(),
+					Project:     label,
+					Issues:      issues,
+				}
+				if fetchErr != nil {
+					results[i].Err = fetchErr.Error()
+				}
+			}(i, job)
+		}
+		wg.Wait()
 		return results, nil
 	}
 }

@@ -155,9 +155,10 @@ type model struct {
 	width    int
 	height   int
 	quitting bool
-	fetchGen uint64 // monotonic counter; assigned when dispatching a fetch
-	fetching bool   // true while a fetch command is in flight
-	logMode  string // traffic log mode: "off", "meta", "full"
+	fetchGen  uint64 // monotonic counter; assigned when dispatching a fetch
+	fetching  bool   // true while a fetch command is in flight
+	showSplash bool  // true during the initial logo display period
+	logMode   string // traffic log mode: "off", "meta", "full"
 
 	issues        []trackerIssues // issues from configured tracker projects
 	issuesLoading bool            // true while issue fetch is in flight
@@ -195,17 +196,19 @@ type model struct {
 func newModel(mon *monitor.Monitor) model {
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	sp.Style = lipgloss.NewStyle().Foreground(humanRed)
-	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true, logMode: "off", prevStatuses: make(map[string]logparser.SessionStatus)}
+	return model{mon: mon, spinner: sp, width: defaultWidth, fetchGen: 1, fetching: true, showSplash: true, logMode: "off", prevStatuses: make(map[string]logparser.SessionStatus)}
 }
 
 // --- messages ---
 
 type fastTickMsg time.Time
 type fullTickMsg time.Time
+type splashDoneMsg struct{} // fired after the splash logo display period
 
 type snapshotMsg struct {
-	snap *monitor.Snapshot
-	gen  uint64
+	snap     *monitor.Snapshot
+	gen      uint64
+	skeleton bool // true when this is a fast skeleton that needs a heavy follow-up
 }
 
 type logModeMsg string                // result of log-mode set/get from daemon
@@ -227,7 +230,8 @@ type createResultMsg struct {
 // --- tea.Model ---
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(fetchFull(m.mon, 1), m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd(), fetchProjectsCmd())
+	splashTimer := tea.Tick(2*time.Second, func(_ time.Time) tea.Msg { return splashDoneMsg{} })
+	return tea.Batch(fetchSkeleton(m.mon, 1), splashTimer, m.spinner.Tick, fastTickCmd(), fullTickCmd(), fetchLogModeCmd(), fetchIssuesCmd(), issueTickCmd(), fetchProjectsCmd())
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -309,6 +313,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFullTick()
 	case snapshotMsg:
 		return m.handleSnapshot(msg)
+	case splashDoneMsg:
+		m.showSplash = false
 	case issueTickMsg:
 		return m.handleIssueTick()
 	case issuesResultMsg, dispatchResultMsg, openBrowserMsg, spawnAgentMsg, pendingConfirmsMsg, confirmDecisionMsg:
@@ -341,6 +347,15 @@ func (m model) handleSnapshot(msg snapshotMsg) (tea.Model, tea.Cmd) {
 	m.snap = msg.snap
 	m.fetching = false
 	m.checkIdleTransitions()
+
+	// Skeleton rendered instantly; now chain the heavy fetch to fill in
+	// instances, trackers, tool stats, and network events.
+	if msg.skeleton {
+		m.fetching = true
+		return m, fetchHeavy(m.mon, msg.snap, msg.gen)
+	}
+	// Heavy fetch done; show the dashboard even if splash timer hasn't fired.
+	m.showSplash = false
 	return m, nil
 }
 
@@ -944,6 +959,12 @@ func (m model) handleIssueTick() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(fetchIssuesCmd(), issueTickCmd())
 }
 
+// showingLoading returns true when the TUI should display the logo splash
+// screen instead of the dashboard (no snapshot yet, or splash period active).
+func (m model) showingLoading() bool {
+	return m.snap == nil || m.showSplash
+}
+
 func (m model) View() string {
 	if m.quitting {
 		return ""
@@ -969,7 +990,7 @@ func (m model) View() string {
 	b.WriteString(m.renderHeader(w))
 	b.WriteByte('\n')
 
-	if m.snap == nil {
+	if m.showingLoading() {
 		b.WriteByte('\n')
 		b.WriteString(logo.Render())
 		b.WriteByte('\n')
@@ -984,6 +1005,9 @@ func (m model) View() string {
 	// Tracker status.
 	if ts := renderTrackers(m.snap.Trackers, w); ts != "" {
 		b.WriteString(ts)
+		b.WriteByte('\n')
+	} else if m.fetching && m.snap.Trackers == nil {
+		b.WriteString("  " + m.spinner.View() + subtleStyle.Render(" Connecting trackers..."))
 		b.WriteByte('\n')
 	}
 
@@ -1047,6 +1071,21 @@ func fastTickCmd() tea.Cmd {
 
 func fullTickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return fullTickMsg(t) })
+}
+
+// fetchSkeleton returns a fast snapshot from local file reads so the TUI
+// can render the dashboard layout immediately while heavy work continues.
+func fetchSkeleton(mon *monitor.Monitor, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return snapshotMsg{snap: mon.FetchSkeleton(), gen: gen, skeleton: true}
+	}
+}
+
+// fetchHeavy runs discovery and daemon RPCs on top of a skeleton snapshot.
+func fetchHeavy(mon *monitor.Monitor, base *monitor.Snapshot, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		return snapshotMsg{snap: mon.FetchHeavy(context.Background(), base), gen: gen}
+	}
 }
 
 func fetchFull(mon *monitor.Monitor, gen uint64) tea.Cmd {
@@ -1126,7 +1165,11 @@ func renderStatusLine(snap *monitor.Snapshot, w int) string {
 func (m model) renderInstancesAndPanes(b *strings.Builder, w int) {
 	filtered := m.filterInstances(m.snap.Instances)
 	if len(filtered) == 0 {
-		b.WriteString(subtleStyle.Render("  No active instances"))
+		if m.fetching {
+			b.WriteString("  " + m.spinner.View() + subtleStyle.Render(" Discovering instances..."))
+		} else {
+			b.WriteString(subtleStyle.Render("  No active instances"))
+		}
 		b.WriteByte('\n')
 	} else {
 		for _, iv := range filtered {

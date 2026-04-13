@@ -30,7 +30,9 @@ func (s *stubFinder) FindInstances(_ context.Context) ([]claude.Instance, error)
 }
 
 func testModel() model {
-	return newModel(monitor.New(&stubFinder{}, nil))
+	m := newModel(monitor.New(&stubFinder{}, nil))
+	m.showSplash = false // tests skip the splash screen
+	return m
 }
 
 func testSnapshot(opts ...func(*monitor.Snapshot)) *monitor.Snapshot {
