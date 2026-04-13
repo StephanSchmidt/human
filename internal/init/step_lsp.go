@@ -220,7 +220,7 @@ func (s *lspSetupStep) Run(w io.Writer, fw claude.FileWriter) ([]string, error) 
 
 	// Enable the LSP tool in Claude Code settings.
 	if err := enableLspTool(w, fw); err != nil {
-		hints = append(hints, fmt.Sprintf("Failed to enable LSP tool. Manually add '\"env\": {\"ENABLE_LSP_TOOL\": \"1\"}' to ~/.claude/settings.json"))
+		hints = append(hints, "Failed to enable LSP tool. Manually add '\"env\": {\"ENABLE_LSP_TOOL\": \"1\"}' to ~/.claude/settings.json")
 	}
 
 	return hints, nil
