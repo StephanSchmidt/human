@@ -12,14 +12,21 @@ import (
 // Runner abstracts external process execution so daemon lifecycle helpers
 // (StopIfRunning, StartForProject) are unit-testable without spawning a
 // real `human` process. execRunner is the production implementation.
+//
+// dir is the child's working directory; empty inherits the caller's. It is part
+// of the interface rather than left to the caller's own cwd because a daemon
+// spawned by the desktop app inherits "/" and any subsystem that reads the
+// project from its working directory then reads nothing (SC-4819).
 type Runner interface {
-	Run(ctx context.Context, name string, args ...string) ([]byte, error)
+	Run(ctx context.Context, dir, name string, args ...string) ([]byte, error)
 }
 
 type execRunner struct{}
 
-func (execRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output() // #nosec G204 -- name is a CLI path resolved by ResolveCLIPath, args are fixed subcommand literals
+func (execRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...) // #nosec G204 -- name is a CLI path resolved by ResolveCLIPath, args are fixed subcommand literals
+	cmd.Dir = dir
+	return cmd.Output()
 }
 
 // DefaultRunner is the production Runner (real subprocesses).
@@ -53,7 +60,7 @@ func StopIfRunning(runner Runner, cliPath string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
 	defer cancel()
-	if _, err := runner.Run(ctx, cliPath, "daemon", "stop"); err != nil {
+	if _, err := runner.Run(ctx, "", cliPath, "daemon", "stop"); err != nil {
 		return wrapCLIError(err, "stopping daemon")
 	}
 	return nil
@@ -62,10 +69,15 @@ func StopIfRunning(runner Runner, cliPath string) error {
 // StartForProject launches a background daemon scoped to dir (via `<cliPath>
 // daemon start --project dir`) and polls until it is reachable or timeout
 // elapses. Callers must validate dir (config.HasConfigFile) first.
+//
+// The child runs IN dir as well as being told about it: --project is what the
+// daemon is scoped by, but a launcher that itself runs in "/" — the desktop app
+// — would otherwise hand its own working directory to every subsystem that
+// still reads one (SC-4819).
 func StartForProject(runner Runner, cliPath, dir string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cliTimeout)
 	defer cancel()
-	if _, err := runner.Run(ctx, cliPath, "daemon", "start", "--project", dir); err != nil {
+	if _, err := runner.Run(ctx, dir, cliPath, "daemon", "start", "--project", dir); err != nil {
 		return wrapCLIError(err, "starting daemon", "dir", dir)
 	}
 	deadline := time.Now().Add(timeout)

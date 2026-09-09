@@ -408,7 +408,7 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		confirms: confirmDB != nil,
 	}))
 	// launchGate lets the autonomous stage launcher refuse work when this host
-	// fails a launch-critical doctor check (docker, agent-skills, claude-auth): it
+	// fails a launch-critical doctor check (docker, agent-skills, claude-auth, egress): it
 	// leaves the handoff for a healthy daemon rather than claiming and failing it
 	// (SC-912). Built from the same LaunchCriticalChecks the synchronous refusal
 	// path uses; Blockers is nil-safe, so a doctor-less daemon disables cleanly.
@@ -572,8 +572,8 @@ func removeStatsFilesUnlessHandedOver(handedOver *atomic.Bool, statsPath, connec
 // startProxyServer builds the HTTPS proxy on the pre-owned listener, prints its
 // one-line status, and serves it in the background. It returns the server so the
 // stats writer can report on it.
-func startProxyServer(ctx context.Context, proxyAddr string, interactive bool, logger zerolog.Logger, emitter proxy.NetworkEventEmitter, recorder proxy.ModelOutcomeRecorder, attribute proxy.ConnAttributor, markInflight func(remoteAddr string, delta int), ln net.Listener, out io.Writer) (*proxy.Server, error) {
-	proxySrv, proxyStatus, err := buildProxyServer(proxyAddr, interactive, logger, emitter, recorder, attribute, markInflight)
+func startProxyServer(ctx context.Context, reg *daemon.ProjectRegistry, proxyAddr string, interactive bool, logger zerolog.Logger, emitter proxy.NetworkEventEmitter, recorder proxy.ModelOutcomeRecorder, attribute proxy.ConnAttributor, markInflight func(remoteAddr string, delta int), ln net.Listener, out io.Writer) (*proxy.Server, error) {
+	proxySrv, proxyStatus, err := buildProxyServer(reg, proxyAddr, interactive, logger, emitter, recorder, attribute, markInflight)
 	if err != nil {
 		return nil, err
 	}
@@ -671,7 +671,7 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	pendingModelRequests := ds.pendingModelRequests
 	markInflight := daemon.NewInflightMarker(inflight, ds.agentIPs, pendingModelRequests)
 
-	proxySrv, err := startProxyServer(ctx, proxyAddr, interactive, logger, ds.networkStore, ds.modelSink.Record, ds.agentIPs.Attribute, markInflight, listeners.proxy, out)
+	proxySrv, err := startProxyServer(ctx, ds.srv.Projects, proxyAddr, interactive, logger, ds.networkStore, ds.modelSink.Record, ds.agentIPs.Attribute, markInflight, listeners.proxy, out)
 	if err != nil {
 		return err
 	}
@@ -1082,6 +1082,19 @@ func startChromeServices(ctx context.Context, chromeAddr, token string, chromeLn
 	return chromeServices{relay: relay, server: chromeSrv}
 }
 
+// daemonChildDir is the working directory for the re-exec'd foreground child:
+// the first registered project that still exists, or "" to inherit the
+// launcher's. A directory that has gone away is not passed on — exec would fail
+// the start outright, and an inherited cwd is the pre-existing behaviour.
+func daemonChildDir(projectDirs []string) string {
+	for _, dir := range projectDirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return ""
+}
+
 // runDaemonBackground re-execs the current binary as a detached child process.
 func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, debug bool, projectDirs []string) error {
 	out := cmd.OutOrStdout()
@@ -1120,6 +1133,11 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 
 	child := exec.Command(exe, args...) // #nosec G204 -- re-exec of own binary via os.Executable()
+	// Run the foreground child IN the project rather than wherever the launcher
+	// happened to stand. A desktop-launched daemon inherits "/", and a subsystem
+	// that still reads its project from the working directory then reads nothing
+	// (SC-4819). Empty leaves the inherited directory, as before.
+	child.Dir = daemonChildDir(projectDirs)
 	child.Env = append(os.Environ(), daemonChildEnv+"=1")
 	child.Stderr = logFile
 	child.Stdout = logFile
@@ -1584,28 +1602,30 @@ func writeDaemonStats(ctx context.Context, proxySrv *proxy.Server, tracker *daem
 }
 
 // buildProxyServer creates the HTTPS proxy server with policy and optional
-// MITM interceptor. Returns a status string for the startup banner.
+// MITM interceptor. Returns a status string for the startup banner — non-empty
+// whenever the policy blocks every hostname, so a daemon that can reach nothing
+// says so instead of presenting as healthy (SC-4819).
+// The policy comes from the registered project directory, never from the
+// process working directory: a desktop-launched daemon runs with cwd "/".
 // emitter is injected so the proxy can publish ambient network activity to
 // the daemon's in-memory store without circular imports.
-func buildProxyServer(addr string, interactive bool, logger zerolog.Logger, emitter proxy.NetworkEventEmitter, recorder proxy.ModelOutcomeRecorder, attribute proxy.ConnAttributor, markInflight func(remoteAddr string, delta int)) (*proxy.Server, string, error) {
-	proxyCfg, _ := proxy.LoadConfig(".")
-
-	var policy proxy.Decider
-	var err error
-	if proxyCfg != nil {
-		policy, err = proxy.NewPolicy(proxyCfg.Mode, proxyCfg.Domains)
-		if err != nil {
-			return nil, "", errors.WrapWithDetails(err, "invalid proxy policy")
-		}
-	} else {
-		policy = proxy.BlockAllPolicy()
+func buildProxyServer(reg *daemon.ProjectRegistry, addr string, interactive bool, logger zerolog.Logger, emitter proxy.NetworkEventEmitter, recorder proxy.ModelOutcomeRecorder, attribute proxy.ConnAttributor, markInflight func(remoteAddr string, delta int)) (*proxy.Server, string, error) {
+	resolved, err := resolveProxyPolicy(reg)
+	if err != nil {
+		return nil, "", err
 	}
+	proxyCfg := resolved.Config
+	policy := resolved.Decider
 
 	var status string
+	if resolved.BlockAllReason != "" {
+		logger.Warn().Str("reason", resolved.BlockAllReason).Msg("proxy policy blocks all egress")
+		status = blockAllStatus(resolved.BlockAllReason) + "\n"
+	}
 	if interactive {
 		prompt := proxy.NewTerminalPrompt(os.Stdin, os.Stderr)
 		policy = proxy.NewInteractiveDecider(policy, prompt)
-		status = "Interactive proxy mode: unknown domains will prompt for approval\n"
+		status += "Interactive proxy mode: unknown domains will prompt for approval\n"
 	}
 
 	// The agent container bind-mounts ~/.human/ca.crt and points

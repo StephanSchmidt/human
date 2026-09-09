@@ -84,6 +84,20 @@ proxy:
 
 Wildcard `*.example.com` matches subdomains but not `example.com` itself.
 
+The policy is read from the **registered project directory** (`--project`, or the
+working directory when the daemon is started without one) — never from the
+daemon's own working directory, which is `/` when the desktop app launches it.
+Register several projects and no policy is chosen at all: one project's
+allowlist must not widen another's egress, so the daemon keeps blocking and
+prints why. Run one daemon per project.
+
+A block-all policy announces itself on the startup banner and in the daemon log
+(`proxy: blocking all egress — <reason>`), and the `egress` doctor check goes
+red when the effective policy blocks the model API for a project whose
+containers are redirected through the proxy. That check is launch-critical: the
+daemon starts no agents while it fails, because a container that cannot reach
+the model API only burns a stage's retry budget to rediscover it.
+
 ### Environment variables
 
 | Variable | Description |
