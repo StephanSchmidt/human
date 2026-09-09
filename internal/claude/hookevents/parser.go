@@ -43,7 +43,7 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 		return
 	}
 	switch evt.EventName {
-	case "UserPromptSubmit", "SubagentStart":
+	case "UserPromptSubmit", EventSubagentStart:
 		snap.Status = logparser.StatusWorking
 		snap.ErrorType = ""
 		snap.CurrentTool = ""
@@ -62,7 +62,7 @@ func ApplyEvent(snap *SessionSnapshot, evt *Event) {
 		snap.BlockedTool = ""
 		snap.Status = logparser.StatusWorking
 
-	case EventStop, "SubagentStop":
+	case EventStop, EventSubagentStop:
 		// Stop after StopFailure keeps error visible.
 		if snap.Status != logparser.StatusError {
 			snap.Status = logparser.StatusReady

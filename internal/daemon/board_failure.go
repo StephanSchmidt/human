@@ -949,9 +949,11 @@ const MaxSilenceReaps = 3
 // must not leave a reader guessing between a crash, a kill, and a restart
 // (SC-2447's third and fourth wanted outcomes). "no outstanding model
 // request" names the SC-3074 signal directly, replacing the disproven
-// transcript-output heuristic in the sentence.
+// transcript-output heuristic in the sentence, and the dispatch clause names
+// the third input the budget reads (SC-4900) — a reader who knows a subagent
+// was running would otherwise take this line for a lie.
 func silenceReapReason(idle string) string {
-	return "the daemon observed " + idle + " with no sign of life — no tool activity and no outstanding " +
+	return "the daemon observed " + idle + " with no sign of life — no tool activity, no subagent running and no outstanding " +
 		"model request — past the idle budget, and stopped the stage. This is a " + silenceReapSentinel + ", not a stage " +
 		"failure, so it is not charged against the retry budget. The stage was relaunched automatically."
 }

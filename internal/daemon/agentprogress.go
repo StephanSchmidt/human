@@ -10,11 +10,11 @@ import (
 //
 // They are deliberately two numbers, not one rule with a single input: "no
 // event for N minutes" means something different depending on whether the
-// agent has outstanding work. Waiting on a local tool call and waiting on the
-// model are the same thing from the outside — outstanding work, from two
-// sources — so either one earns the generous bound; genuine idleness, with
-// neither, gets the short one and the short bound is finally telling the
-// truth (SC-3074).
+// agent has outstanding work. Waiting on a local tool call, waiting on a
+// dispatched subagent and waiting on the model are the same thing from the
+// outside — outstanding work, from three sources — so any one of them earns
+// the generous bound; genuine idleness, with none, gets the short one and the
+// short bound is finally telling the truth (SC-3074, SC-4900).
 //
 // A single fixed timeout cannot serve both, which is exactly why the wall-clock
 // grace it replaces was wrong in both directions at once.
@@ -22,7 +22,8 @@ var (
 	// IdleGrace bounds silence when the agent has no outstanding work at all.
 	IdleGrace = 3 * time.Minute
 	// WorkingIdleGrace bounds silence while the agent has outstanding work —
-	// inside a tool call or waiting on a model response. Generous on purpose:
+	// inside a tool call, waiting on a subagent, or waiting on a model
+	// response. Generous on purpose:
 	// killing a running suite, or a run composing a long answer, is far worse
 	// than noticing a genuine hang a few minutes later.
 	WorkingIdleGrace = 30 * time.Minute
@@ -93,18 +94,27 @@ type AgentProgress struct {
 	// Blocked reports the agent is waiting on a human (a permission prompt).
 	// That is neither progress nor a hang — it needs an answer, not a retry.
 	Blocked bool
+	// Subagents is how many dispatches this agent is waiting on. It is counted
+	// rather than derived from InsideTool because a subagent's hook events
+	// carry its PARENT's agent name, session and run id — nothing in the event
+	// separates them — so the subagent's own PostToolUse erases the parent's
+	// record of being inside the Agent call that spawned it. Counting the
+	// SubagentStart/SubagentStop brackets keeps the parent's outstanding work
+	// visible for exactly as long as it is outstanding (SC-4900).
+	Subagents int
 }
 
-// hasOutstandingWork reports whether the agent has work in flight of either
-// kind — a local tool call or a request to the model — that no event can
-// arrive to signal until it completes (SC-3074).
+// hasOutstandingWork reports whether the agent has work in flight of any of
+// three kinds — a local tool call, a request to the model, or a subagent it
+// dispatched — that no event can arrive to signal until it completes (SC-3074,
+// SC-4900).
 //
 // An UNKNOWN model-request state counts as work in flight. That is the same
 // rule stageStalled states for the other input: absent evidence is never read
 // as evidence of death, because killing live work on a bookkeeping failure is
 // the one direction this must never fail in (SC-3853).
 func (p AgentProgress) hasOutstandingWork() bool {
-	return p.InsideTool || p.ModelRequest != ModelRequestNone
+	return p.InsideTool || p.Subagents > 0 || p.ModelRequest != ModelRequestNone
 }
 
 // IdleBudget is how long this agent may stay silent before it counts as hung.
@@ -169,6 +179,22 @@ func trackProgress(progress map[string]AgentProgress, evt hookevents.Event) {
 	case "PostToolUse":
 		p.InsideTool = false
 		p.Tool = ""
+		p.Blocked = false
+	case hookevents.EventSubagentStart:
+		// The parent is now inside a dispatch whose only other sign of life is
+		// the subagent's own events — which arrive under the parent's name and
+		// would otherwise clear InsideTool. Depth, not a flag: a subagent may
+		// dispatch its own.
+		p.Subagents++
+		p.Blocked = false
+	case hookevents.EventSubagentStop:
+		// Floored because a dropped Stop must not push the count negative and
+		// silently cancel a later dispatch. A Stop that never arrives leaves
+		// the generous budget in place until the run ends and the entry is
+		// dropped — the safe direction, the same one SC-3853 chose.
+		if p.Subagents > 0 {
+			p.Subagents--
+		}
 		p.Blocked = false
 	case "Notification":
 		// Claude is asking for permission: the agent is waiting on a human.

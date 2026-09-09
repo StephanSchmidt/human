@@ -22,6 +22,15 @@ const (
 	EventStopFailure = "StopFailure"
 )
 
+// The dispatch brackets. They are named for the same reason as the run-end
+// names: the daemon's liveness record reads them to know a parent is waiting
+// on a subagent (SC-4900), so a second package now has to agree with this one
+// on the spelling.
+const (
+	EventSubagentStart = "SubagentStart"
+	EventSubagentStop  = "SubagentStop"
+)
+
 // IsRunEnd reports whether an event name means the run ended, cleanly or not.
 // The three readers that used to spell the disjunction by hand are the reason
 // it exists: they must agree, and nothing made them.
