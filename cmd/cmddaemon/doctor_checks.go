@@ -13,6 +13,7 @@ import (
 	"github.com/gethuman-sh/human/internal/codenav/store"
 	"github.com/gethuman-sh/human/internal/daemon"
 	"github.com/gethuman-sh/human/internal/devcontainer"
+	"github.com/gethuman-sh/human/internal/proxy"
 	"github.com/gethuman-sh/human/internal/tracker"
 	"github.com/gethuman-sh/human/internal/vault"
 )
@@ -50,6 +51,9 @@ func buildDoctorChecks(reg *daemon.ProjectRegistry, resolver *vault.Resolver, pe
 		}},
 		{ID: "claude-auth", Name: "Claude authentication", Run: func(context.Context) (bool, string) {
 			return checkClaudeAuth(reg)
+		}},
+		{ID: "egress", Name: "container egress", Run: func(context.Context) (bool, string) {
+			return checkEgress(reg)
 		}},
 		{ID: "codenav-index", Name: "code navigation index", Run: func(context.Context) (bool, string) {
 			return checkCodenavIndex(reg, codenav.DefaultDBPath())
@@ -142,6 +146,65 @@ func checkCACert(path string) (bool, string) {
 		return false, path + " exists but is not a valid PEM certificate — delete it and restart the daemon to regenerate"
 	}
 	return true, "valid"
+}
+
+// checkEgress catches SC-4819's failure mode: the daemon's proxy runs a policy
+// that blocks the model API, so every container starts, retries for three
+// minutes and dies reporting a certificate error — the SNI rejection closes the
+// connection mid-handshake and the client can say nothing better about it. It
+// is launch-critical: an agent that cannot reach the model does no work at all,
+// and letting it run spends a stage's retry budget on a host misconfiguration.
+//
+// It judges the policy the daemon actually resolved, and only for projects
+// whose containers are redirected through the proxy. A project that does not
+// redirect reaches the network directly, so a blocking host policy is no
+// evidence about its agents — and this check refuses launches, so blaming a
+// host where egress is in fact fine would stop all work (the trade named in
+// SC-4819's own options table). Everything unjudgeable degrades to ok, the same
+// fail-open checkClaudeAuth takes.
+//
+// The interactive decider is deliberately not consulted: it prompts a terminal
+// operator per domain, which a background probe must never do.
+func checkEgress(reg *daemon.ProjectRegistry) (bool, string) {
+	resolved, err := resolveProxyPolicy(reg)
+	if err != nil {
+		return false, "proxy policy cannot be loaded: " + err.Error() +
+			" — fix the proxy section of .humanconfig.yaml and restart the daemon"
+	}
+	if resolved.Decider.Allowed(proxy.DefaultModelAPIHost) {
+		return true, proxy.DefaultModelAPIHost + " allowed"
+	}
+	redirected := projectsRedirectingEgress(reg)
+	if len(redirected) == 0 {
+		return true, "no project redirects container traffic through the proxy"
+	}
+	reason := resolved.BlockAllReason
+	if reason == "" {
+		reason = "the policy in " + resolved.Dir + " does not list it — add it to proxy.domains"
+	}
+	return false, "containers of " + strings.Join(redirected, ", ") + " cannot reach " +
+		proxy.DefaultModelAPIHost + ": " + reason
+}
+
+// projectsRedirectingEgress lists the registered projects whose devcontainer
+// enables the human feature's proxy redirect. A project whose devcontainer.json
+// is missing or unreadable is left out: it is not evidence that a container is
+// gated on the proxy, and this feeds a check that refuses launches.
+func projectsRedirectingEgress(reg *daemon.ProjectRegistry) []string {
+	if reg == nil {
+		return nil
+	}
+	var dirs []string
+	for _, entry := range reg.Entries() {
+		cfg, err := devcontainer.ReadConfig(entry.Dir)
+		if err != nil {
+			continue
+		}
+		if devcontainer.ProxyRedirectEnabled(cfg) {
+			dirs = append(dirs, entry.Dir)
+		}
+	}
+	return dirs
 }
 
 // checkAgentSkills catches ticket 478's failure mode: worktree provisioning

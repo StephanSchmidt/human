@@ -408,7 +408,7 @@ func initDaemon(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, de
 		confirms: confirmDB != nil,
 	}))
 	// launchGate lets the autonomous stage launcher refuse work when this host
-	// fails a launch-critical doctor check (docker, agent-skills, claude-auth): it
+	// fails a launch-critical doctor check (docker, agent-skills, claude-auth, egress): it
 	// leaves the handoff for a healthy daemon rather than claiming and failing it
 	// (SC-912). Built from the same LaunchCriticalChecks the synchronous refusal
 	// path uses; Blockers is nil-safe, so a doctor-less daemon disables cleanly.

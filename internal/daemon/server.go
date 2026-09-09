@@ -1822,10 +1822,12 @@ const doctorCacheAge = 2 * time.Minute
 // survive without: launching anyway would burn a full agent run to rediscover
 // a failure the doctor already knows, and the card would blame the ticket.
 // claude-auth joins docker and agent-skills so a daemon with an expired Claude
-// session neither claims nor chains board work (SC-912). Exported so the
+// session neither claims nor chains board work (SC-912); egress joins them so a
+// daemon whose proxy policy blocks the model API does not launch containers
+// that can only die reporting a certificate error (SC-4819). Exported so the
 // autonomous stage gate (BoardTransitionDeps.LaunchGate) builds its blocker set
 // from the same source of truth as the synchronous launch-refusal path.
-var LaunchCriticalChecks = []string{"docker", "agent-skills", "claude-auth"}
+var LaunchCriticalChecks = []string{"docker", "agent-skills", "claude-auth", "egress"}
 
 // LaunchHeldChecks additionally refuse a launch WITHOUT marking the check as
 // gating in the report.

@@ -207,7 +207,7 @@ type BoardTransitionDeps struct {
 	// line. nil disables diagnosis (the package's "nil disables" convention).
 	Diagnose BoardFailureDiagnoser
 	// LaunchGate reports the launch-critical doctor checks currently failing on
-	// this daemon's host (docker, agent-skills, claude-auth). When it returns a
+	// this daemon's host (docker, agent-skills, claude-auth, egress). When it returns a
 	// non-empty slice the stage launcher neither claims nor launches — it silently
 	// leaves the work for a healthy daemon, and the failure surfaces only on this
 	// host (doctor / rail LED), never as a ticket marker (SC-912). nil disables.
@@ -682,7 +682,7 @@ func (d BoardTransitionDeps) setTicketOwner(pmKey string) {
 // their plan within the run.
 func (d BoardTransitionDeps) startAgentStage(ctx context.Context, pmKey string, stage BoardStage, startedHeader, prompt string, cause WaitCause, requiresPlan bool) (launched bool, err error) {
 	// Launch gate: a daemon whose host fails a launch-critical doctor check
-	// (docker, agent-skills, claude-auth) cannot serve this stage. Refuse before
+	// (docker, agent-skills, claude-auth, egress) cannot serve this stage. Refuse before
 	// the claim so NO [human:claim] is posted — the work is left unclaimed for a
 	// healthy daemon and the failure surfaces only on this host, never as a ticket
 	// marker (SC-912). Returning nil is a silent skip-and-leave, not an error.

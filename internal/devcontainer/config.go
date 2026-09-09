@@ -142,6 +142,38 @@ func ReadConfig(projectDir string) (*DevcontainerConfig, error) {
 	return ParseConfig(data)
 }
 
+// humanFeatureMarker identifies the human devcontainer feature by the stable
+// part of its OCI reference. The org and the version tag both vary across
+// installs (gethuman-sh/... and stephanschmidt/... are both in the wild), so
+// matching the whole ref would answer "no proxy" for a container that has one.
+const humanFeatureMarker = "treehouse/human"
+
+// ProxyRedirectEnabled reports whether this devcontainer routes its outbound
+// HTTPS through the daemon's proxy — the human feature's `proxy` option, which
+// installs the iptables redirect at container start.
+//
+// It is what makes the daemon's egress policy matter to a container at all: a
+// project that does not redirect reaches the network directly, so a blocking
+// policy on the host says nothing about whether its agents can work (SC-4819).
+func ProxyRedirectEnabled(cfg *DevcontainerConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	for ref, raw := range cfg.Features {
+		if !strings.Contains(ref, humanFeatureMarker) {
+			continue
+		}
+		opts, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if enabled, ok := opts["proxy"].(bool); ok && enabled {
+			return true
+		}
+	}
+	return false
+}
+
 // ResolveVariables replaces devcontainer.json variable placeholders in string
 // fields. Supported: ${localEnv:VAR}, ${localWorkspaceFolder},
 // ${localWorkspaceFolderBasename}.
