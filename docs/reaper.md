@@ -58,14 +58,24 @@ definition of "hung", and it is two numbers, not one:
 | Condition | Budget | Constant |
 | --- | --- | --- |
 | No outstanding work at all | **3 minutes** of silence | `IdleGrace` |
-| Inside a tool call **or** a model request in flight **or** the model-request state unknown | **30 minutes** of silence | `WorkingIdleGrace` |
+| Inside a tool call **or** waiting on a dispatched subagent **or** a model request in flight **or** the model-request state unknown | **30 minutes** of silence | `WorkingIdleGrace` |
 | Waiting on a human (`Notification` — a permission prompt) | **never stalls** | `Blocked` |
 
-Waiting on a local tool call and waiting on the model are the same thing from
-the outside — outstanding work, from two sources — so either earns the generous
-bound. Genuine idleness, with neither, gets the short one. A single fixed
-timeout was wrong in both directions at once: it killed running test suites and
-still made real hangs wait.
+Waiting on a local tool call, waiting on a subagent and waiting on the model
+are the same thing from the outside — outstanding work, from three sources — so
+any of them earns the generous bound. Genuine idleness, with none, gets the
+short one. A single fixed timeout was wrong in both directions at once: it
+killed running test suites and still made real hangs wait.
+
+The dispatch is counted rather than inferred. A subagent's hook events arrive
+under its PARENT's agent name, session and run id — nothing in the event
+separates them — so the subagent's own `PostToolUse` clears the parent's
+`InsideTool` and, before SC-4900, dropped a run that was waiting on a dispatch
+to the 3-minute budget. `AgentProgress.Subagents` counts the
+`SubagentStart`/`SubagentStop` brackets instead, as a depth, since a subagent
+may dispatch its own. A `SubagentStop` that never arrives leaves the generous
+budget in place until the run ends and the entry is dropped: the same safe
+direction unknown takes below.
 
 Unknown takes the generous bound deliberately. The machine must never kill live
 work because it lost its own bookkeeping — the same rule reconcile already

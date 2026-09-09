@@ -82,12 +82,16 @@ type WhereAgent struct {
 	// Known is false when the daemon has no record — it restarted, or the agent
 	// has yet to emit anything. Reported rather than folded into "not alive",
 	// because absent evidence and evidence of absence lead to opposite actions.
-	Known           bool   `json:"known"`
-	LastEventAt     string `json:"last_event_at,omitempty"`
-	IdleSeconds     int    `json:"idle_seconds,omitempty"`
-	Stalled         bool   `json:"stalled"`
-	InsideTool      bool   `json:"inside_tool,omitempty"`
-	OutstandingCall bool   `json:"outstanding_model_request,omitempty"`
+	Known       bool   `json:"known"`
+	LastEventAt string `json:"last_event_at,omitempty"`
+	IdleSeconds int    `json:"idle_seconds,omitempty"`
+	Stalled     bool   `json:"stalled"`
+	InsideTool  bool   `json:"inside_tool,omitempty"`
+	// Subagents explains a generous budget that inside_tool and model_request
+	// alone cannot: a run waiting on a dispatch is working, and a reader
+	// otherwise sees an idle-looking agent the machine declines to reap.
+	Subagents       int  `json:"subagents,omitempty"`
+	OutstandingCall bool `json:"outstanding_model_request,omitempty"`
 	// ModelRequest is the same signal with its third answer visible: "open",
 	// "none", or "unknown" — the daemon could not resolve this agent's
 	// connections and so cannot say. Reported because a run reaped while
@@ -387,6 +391,7 @@ func whereAgent(key string, card BoardCard, deps WhereDeps) *WhereAgent {
 		IdleSeconds:     int(idle.Seconds()),
 		Stalled:         stalled,
 		InsideTool:      p.InsideTool,
+		Subagents:       p.Subagents,
 		OutstandingCall: p.ModelRequest == ModelRequestOpen,
 		ModelRequest:    p.ModelRequest.String(),
 		Blocked:         p.Blocked,

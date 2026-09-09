@@ -186,3 +186,100 @@ func TestHookEventStore_UnknownAgentIsNotKnown(t *testing.T) {
 	_, ok := s.AgentProgress("board-SC-9-planning")
 	require.False(t, ok)
 }
+
+// The SC-4900 regression, replayed from board-SC-4820-implementation run
+// 97ffc408: a subagent's tool events arrive under the PARENT's agent name, so
+// the subagent's last PostToolUse used to clear InsideTool and drop a run that
+// was waiting on a dispatch to the 3-minute budget. It was killed at 3m4s,
+// three times, always at the planning subagent's last tool call.
+func TestAgentProgress_WaitingOnASubagentIsNotIdle(t *testing.T) {
+	progress := map[string]AgentProgress{}
+	start := time.Unix(1000, 0)
+	const agent = "board-SC-4820-implementation"
+
+	trackProgress(progress, evt("PreToolUse", agent, "Agent", start))
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start.Add(time.Second)))
+	// The subagent works for ten minutes under its parent's name.
+	last := start.Add(10 * time.Minute)
+	trackProgress(progress, evt("PreToolUse", agent, "Bash", last.Add(-time.Second)))
+	trackProgress(progress, evt("PostToolUse", agent, "Bash", last))
+
+	p := progress[agent]
+	p.ModelRequest = ModelRequestNone // the proxy answered: nothing open right now
+	require.False(t, p.InsideTool, "the subagent's own tool call did finish")
+	require.Equal(t, 1, p.Subagents, "but the dispatch it belongs to has not")
+	require.Equal(t, WorkingIdleGrace, p.IdleBudget())
+
+	stalled, _ := p.Stalled(last.Add(3*time.Minute + 4*time.Second))
+	require.False(t, stalled, "the exact idle that killed the SC-4820 runs")
+
+	stalled, _ = p.Stalled(last.Add(WorkingIdleGrace + time.Minute))
+	require.True(t, stalled, "a dispatch that never returns is still a hang, later")
+}
+
+// The dispatch brackets close: once the subagent returns, the parent is
+// thinking between tool calls again and the short budget is the honest one.
+func TestAgentProgress_ReturnedSubagentRestoresTheShortBudget(t *testing.T) {
+	progress := map[string]AgentProgress{}
+	start := time.Unix(1000, 0)
+	const agent = "a"
+
+	trackProgress(progress, evt("PreToolUse", agent, "Agent", start))
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start.Add(time.Second)))
+	trackProgress(progress, evt(hookevents.EventSubagentStop, agent, "", start.Add(2*time.Minute)))
+	trackProgress(progress, evt("PostToolUse", agent, "Agent", start.Add(2*time.Minute+time.Second)))
+
+	p := progress[agent]
+	p.ModelRequest = ModelRequestNone
+	require.Equal(t, 0, p.Subagents)
+	require.Equal(t, IdleGrace, p.IdleBudget())
+}
+
+// A subagent may dispatch its own, and every bracket arrives under the same
+// name — so the count is a depth, not a flag. An inner return must not report
+// the outer dispatch as finished.
+func TestAgentProgress_NestedSubagentsCountAsDepth(t *testing.T) {
+	progress := map[string]AgentProgress{}
+	start := time.Unix(1000, 0)
+	const agent = "a"
+
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start))
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start.Add(time.Second)))
+	trackProgress(progress, evt(hookevents.EventSubagentStop, agent, "", start.Add(2*time.Second)))
+
+	p := progress[agent]
+	p.ModelRequest = ModelRequestNone
+	require.Equal(t, 1, p.Subagents, "the outer dispatch is still outstanding")
+	require.Equal(t, WorkingIdleGrace, p.IdleBudget())
+}
+
+// A Stop that never arrives must not push the count below zero, where a later
+// dispatch would be cancelled by a bracket that had already closed.
+func TestAgentProgress_UnpairedSubagentStopFloorsAtZero(t *testing.T) {
+	progress := map[string]AgentProgress{}
+	start := time.Unix(1000, 0)
+	const agent = "a"
+
+	trackProgress(progress, evt(hookevents.EventSubagentStop, agent, "", start))
+	require.Equal(t, 0, progress[agent].Subagents)
+
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start.Add(time.Second)))
+	p := progress[agent]
+	p.ModelRequest = ModelRequestNone
+	require.Equal(t, 1, p.Subagents, "the next dispatch still counts")
+	require.Equal(t, WorkingIdleGrace, p.IdleBudget())
+}
+
+// A run that ends drops its entry, so a dispatch left outstanding by a kill
+// cannot outlive the run and hold the generous budget open for the relaunch.
+func TestAgentProgress_RunEndClearsAnOutstandingSubagent(t *testing.T) {
+	progress := map[string]AgentProgress{}
+	start := time.Unix(1000, 0)
+	const agent = "a"
+
+	trackProgress(progress, evt(hookevents.EventSubagentStart, agent, "", start))
+	trackProgress(progress, evt(hookevents.EventStopFailure, agent, "", start.Add(time.Minute)))
+
+	_, ok := progress[agent]
+	require.False(t, ok)
+}
