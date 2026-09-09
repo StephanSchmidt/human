@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,11 +18,13 @@ import (
 // fakeLifecycleRunner records every Run call and returns queued output/error.
 type fakeLifecycleRunner struct {
 	calls [][]string
+	dirs  []string
 	err   error
 }
 
-func (f *fakeLifecycleRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+func (f *fakeLifecycleRunner) Run(_ context.Context, dir, name string, args ...string) ([]byte, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
+	f.dirs = append(f.dirs, dir)
 	return nil, f.err
 }
 
@@ -117,4 +121,44 @@ func TestStartForProject_BecomesReachable(t *testing.T) {
 	err = StartForProject(runner, "/usr/local/bin/human", "/some/dir", 2*time.Second)
 
 	require.NoError(t, err)
+}
+
+// The daemon must run IN the project it is started for. A desktop-launched
+// daemon inherits cwd "/", and that is how the proxy policy came to be read
+// from a directory holding no .humanconfig.yaml (SC-4819).
+func TestStartForProject_runsTheChildInTheProjectDir(t *testing.T) {
+	runner := &fakeLifecycleRunner{err: errors.New("stop after the spawn")}
+	_ = StartForProject(runner, "/usr/local/bin/human", "/some/dir", time.Second)
+
+	require.Len(t, runner.dirs, 1)
+	assert.Equal(t, "/some/dir", runner.dirs[0])
+}
+
+// Stopping is not scoped to a project: it acts on the PID file, so it keeps
+// inheriting the caller's directory.
+func TestStopIfRunning_inheritsTheCallerDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	require.NoError(t, WritePidFile(os.Getpid()))
+	defer RemovePidFile()
+
+	runner := &fakeLifecycleRunner{}
+	require.NoError(t, StopIfRunning(runner, "/usr/local/bin/human"))
+
+	require.Len(t, runner.dirs, 1)
+	assert.Empty(t, runner.dirs[0])
+}
+
+// The real runner must actually apply the directory — a field the interface
+// carries but the implementation drops would pass every faked test.
+func TestExecRunner_runsInTheGivenDir(t *testing.T) {
+	dir := t.TempDir()
+	out, err := execRunner{}.Run(t.Context(), dir, "pwd")
+	require.NoError(t, err)
+
+	resolved, err := filepath.EvalSymlinks(strings.TrimSpace(string(out)))
+	require.NoError(t, err)
+	expected, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+	assert.Equal(t, expected, resolved)
 }

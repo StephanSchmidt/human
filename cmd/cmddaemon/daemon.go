@@ -1082,6 +1082,19 @@ func startChromeServices(ctx context.Context, chromeAddr, token string, chromeLn
 	return chromeServices{relay: relay, server: chromeSrv}
 }
 
+// daemonChildDir is the working directory for the re-exec'd foreground child:
+// the first registered project that still exists, or "" to inherit the
+// launcher's. A directory that has gone away is not passed on — exec would fail
+// the start outright, and an inherited cwd is the pre-existing behaviour.
+func daemonChildDir(projectDirs []string) string {
+	for _, dir := range projectDirs {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return dir
+		}
+	}
+	return ""
+}
+
 // runDaemonBackground re-execs the current binary as a detached child process.
 func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string, safe, debug bool, projectDirs []string) error {
 	out := cmd.OutOrStdout()
@@ -1120,6 +1133,11 @@ func runDaemonBackground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 	}
 
 	child := exec.Command(exe, args...) // #nosec G204 -- re-exec of own binary via os.Executable()
+	// Run the foreground child IN the project rather than wherever the launcher
+	// happened to stand. A desktop-launched daemon inherits "/", and a subsystem
+	// that still reads its project from the working directory then reads nothing
+	// (SC-4819). Empty leaves the inherited directory, as before.
+	child.Dir = daemonChildDir(projectDirs)
 	child.Env = append(os.Environ(), daemonChildEnv+"=1")
 	child.Stderr = logFile
 	child.Stdout = logFile
