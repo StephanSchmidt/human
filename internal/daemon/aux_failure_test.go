@@ -98,7 +98,9 @@ func TestRunAuxFailureWatch_NonZeroExitOnACleanEventStillPosts(t *testing.T) {
 		store := NewHookEventStore()
 		c := &syncCommenter{addCh: make(chan string, 4)}
 		commenterFor := func() (tracker.Commenter, error) { return c, nil }
-		lookup := func(string) AuxRunRecord { return AuxRunRecord{Known: true, ProcessFailed: true, StartedAt: time.Now()} }
+		lookup := func(string) AuxRunRecord {
+			return AuxRunRecord{Known: true, ProcessFailed: true, StartedAt: time.Now()}
+		}
 
 		go RunAuxFailureWatch(t.Context(), store, AuxFailureDeps{CommenterFor: commenterFor, Lookup: lookup, Logger: zerolog.Nop()})
 		time.Sleep(50 * time.Millisecond)
@@ -146,7 +148,9 @@ func TestRunAuxFailureWatch_RelatePostsIncomplete(t *testing.T) {
 		store := NewHookEventStore()
 		c := &syncCommenter{addCh: make(chan string, 4)}
 		commenterFor := func() (tracker.Commenter, error) { return c, nil }
-		lookup := func(string) AuxRunRecord { return AuxRunRecord{Known: true, ProcessFailed: true, StartedAt: time.Now()} }
+		lookup := func(string) AuxRunRecord {
+			return AuxRunRecord{Known: true, ProcessFailed: true, StartedAt: time.Now()}
+		}
 
 		go RunAuxFailureWatch(t.Context(), store, AuxFailureDeps{CommenterFor: commenterFor, Lookup: lookup, Logger: zerolog.Nop()})
 		time.Sleep(50 * time.Millisecond)

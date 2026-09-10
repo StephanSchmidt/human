@@ -159,40 +159,48 @@ func auxStartedHeader(prefix string) string {
 // duplicate exit event for the same run a no-op.
 func auxRunRecorded(prefix string, comments []tracker.Comment, since time.Time) bool {
 	terminal := auxTerminalHeaders(prefix)
-	started := auxStartedHeader(prefix)
 	if len(terminal) == 0 {
 		return false
 	}
-
-	isTerminal := func(c tracker.Comment) bool {
-		trimmed := strings.TrimSpace(c.Body)
-		for _, h := range terminal {
-			if strings.HasPrefix(trimmed, h) {
-				return true
-			}
-		}
-		return false
-	}
-	isStarted := func(c tracker.Comment) bool {
-		return started != "" && strings.HasPrefix(strings.TrimSpace(c.Body), started)
-	}
-
 	if !since.IsZero() {
-		for _, c := range comments {
-			if isTerminal(c) && !c.Created.Before(since) {
-				return true
-			}
-		}
-		return false
+		return auxRunRecordedSince(terminal, comments, since)
 	}
+	return auxRunRecordedByNewest(terminal, auxStartedHeader(prefix), comments)
+}
 
+// auxHasHeader reports whether c's trimmed body starts with any of headers.
+func auxHasHeader(c tracker.Comment, headers []string) bool {
+	trimmed := strings.TrimSpace(c.Body)
+	for _, h := range headers {
+		if strings.HasPrefix(trimmed, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// auxRunRecordedSince answers when the run's launch time is known: any
+// terminal comment at or after it is this run's own record.
+func auxRunRecordedSince(terminal []string, comments []tracker.Comment, since time.Time) bool {
+	for _, c := range comments {
+		if auxHasHeader(c, terminal) && !c.Created.Before(since) {
+			return true
+		}
+	}
+	return false
+}
+
+// auxRunRecordedByNewest is the no-launch-time fallback: the newest terminal
+// comment counts as this run's own record unless a strictly newer start
+// comment supersedes it (a re-run already in flight).
+func auxRunRecordedByNewest(terminal []string, started string, comments []tracker.Comment) bool {
 	var newestStart, newestTerminal *tracker.Comment
 	for i := range comments {
 		c := comments[i]
-		if isStarted(c) && (newestStart == nil || commentNewer(c, *newestStart)) {
+		if started != "" && auxHasHeader(c, []string{started}) && (newestStart == nil || commentNewer(c, *newestStart)) {
 			newestStart = &comments[i]
 		}
-		if isTerminal(c) && (newestTerminal == nil || commentNewer(c, *newestTerminal)) {
+		if auxHasHeader(c, terminal) && (newestTerminal == nil || commentNewer(c, *newestTerminal)) {
 			newestTerminal = &comments[i]
 		}
 	}
