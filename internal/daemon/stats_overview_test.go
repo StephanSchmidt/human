@@ -69,11 +69,21 @@ func TestReadAgentRunStats_shape(t *testing.T) {
 	writeAgentRun(t, home, "reviewer", "b1", now.Add(-30*time.Minute), "")
 	// Out of range: older than the since bound → excluded.
 	writeAgentRun(t, home, "coder", "old", now.Add(-48*time.Hour), "completed")
+	// SC-4820: the fuller record a split writer now produces — reason is still
+	// what this side reads, so exit_code/disposition alongside it change nothing.
+	c4dir := filepath.Join(home, ".human", "agent-logs", "coder", "c4820")
+	require.NoError(t, os.MkdirAll(c4dir, 0o700))
+	lb, err := json.Marshal(map[string]any{"id": "c4820", "agent": "coder", "started_at": now.Add(-4 * time.Hour).Format(time.RFC3339Nano)})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(c4dir, "launch.json"), lb, 0o600))
+	ob, err := json.Marshal(map[string]any{"reason": "failed", "exit_code": 1, "disposition": "reaped"})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(c4dir, "outcome.json"), ob, 0o600))
 
 	got := readAgentRunStats(now.Add(-24 * time.Hour))
-	assert.Equal(t, 4, got.Total, "four in-range runs")
+	assert.Equal(t, 5, got.Total, "five in-range runs")
 	assert.Equal(t, 1, got.Success, "only the completed run is a success")
-	assert.Equal(t, 3, got.Failure, "failed + reaped + no-outcome are failures")
+	assert.Equal(t, 4, got.Failure, "failed + reaped + no-outcome + the exit-1-reaped record are failures")
 }
 
 func TestReadAgentRunStats_missingDir(t *testing.T) {

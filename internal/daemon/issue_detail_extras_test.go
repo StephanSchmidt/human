@@ -112,6 +112,58 @@ func TestBuildIssueDetailExtras_emptyComments(t *testing.T) {
 	assert.Equal(t, IssueDetailExtras{}, extras)
 }
 
+// TestBuildIssueDetailExtras_DraftState covers SC-4820's four draft-thread
+// shapes: the newest of the drafter's three markers decides what an empty
+// description means.
+func TestBuildIssueDetailExtras_DraftState(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	t1 := time.Unix(2000, 0)
+
+	t.Run("only started: drafting", func(t *testing.T) {
+		extras := BuildIssueDetailExtras([]tracker.Comment{
+			{Body: IdeaDraftStartedHeader, Created: t0},
+		})
+		assert.Equal(t, DraftStateDrafting, extras.DraftState)
+		assert.Empty(t, extras.DraftFailureReason)
+	})
+
+	t.Run("started then failed: failed with reason", func(t *testing.T) {
+		extras := BuildIssueDetailExtras([]tracker.Comment{
+			{Body: IdeaDraftStartedHeader, Created: t0},
+			{Body: IdeaDraftFailedHeader + "\nreason: the run stopped before finishing this stage", Created: t1},
+		})
+		assert.Equal(t, DraftStateFailed, extras.DraftState)
+		assert.Contains(t, extras.DraftFailureReason, "the run stopped before finishing this stage")
+	})
+
+	t.Run("failed then a newer started: drafting (re-run in flight)", func(t *testing.T) {
+		extras := BuildIssueDetailExtras([]tracker.Comment{
+			{Body: IdeaDraftFailedHeader + "\nreason: boom", Created: t0},
+			{Body: IdeaDraftStartedHeader, Created: t1},
+		})
+		assert.Equal(t, DraftStateDrafting, extras.DraftState)
+	})
+
+	t.Run("failed then a newer provenance record: empty (a draft landed)", func(t *testing.T) {
+		extras := BuildIssueDetailExtras([]tracker.Comment{
+			{Body: IdeaDraftFailedHeader + "\nreason: boom", Created: t0},
+			{Body: IdeaDraftHeader + "\nauthor: idea-draft-SC-1", Created: t1},
+		})
+		assert.Empty(t, extras.DraftState)
+	})
+}
+
+// TestBuildIssueDetailExtras_FailedDraftIsNotAStageFailure: idea-draft-failed
+// is deliberately unclassified, so it must never leak into the stage-failure
+// section the card's badge reads.
+func TestBuildIssueDetailExtras_FailedDraftIsNotAStageFailure(t *testing.T) {
+	extras := BuildIssueDetailExtras([]tracker.Comment{
+		{Body: IdeaDraftFailedHeader + "\nreason: boom", Created: time.Now()},
+	})
+	assert.Empty(t, extras.FailureReason)
+	assert.Equal(t, DraftStateFailed, extras.DraftState)
+}
+
 // Once reconcile posts [human:deployed] for a confirmed-shipped PR, the detail
 // pane's failure reason clears via the same supersession guard as the card
 // (SC-910, 695 class).

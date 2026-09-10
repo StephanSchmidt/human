@@ -70,7 +70,11 @@ func DiagnoseFailure(agentName, hookErrorType string) FailureDiagnosis {
 	exitCode, haveExit := parseExitTrailer(scan)
 	errLine := redact.Text(lastErrorLine(scan))
 
-	reaped := outcome != nil && outcome.Reason == "reaped"
+	// A reap is now recorded as a container DISPOSITION, so an exit-1 run that
+	// was later reaped reports reason "failed" and still reads as reaped here
+	// (SC-4820). The Reason fallback keeps a record written before that change
+	// diagnosable.
+	reaped := outcome != nil && (outcome.Disposition == DispositionReaped || outcome.Reason == "reaped")
 	headline := truncateRunes(headlineFor(hookErrorType, reaped, exitCode, haveExit, errLine), diagnoseMaxHeadline)
 	detail := truncateRunes(detailFor(exe, outcome, exitCode, haveExit, scan), diagnoseMaxDetail)
 	return FailureDiagnosis{Headline: headline, Detail: detail}

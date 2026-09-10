@@ -36,6 +36,21 @@ export function buildDescriptionPreview(saved, proposal, state) {
     }
     return { text: saved, isPreview: false };
 }
+export function draftNotice(state, hasDescription) {
+    if (state === "failed") {
+        return {
+            kind: "failed",
+            text: "The background draft failed — nothing was written. Ask for a rewrite below, or write the description yourself.",
+        };
+    }
+    if (state === "drafting") {
+        return { kind: "drafting", text: "A background draft is still being written…" };
+    }
+    if (!hasDescription) {
+        return { kind: "none", text: "No draft has been written for this ticket yet." };
+    }
+    return { kind: "none", text: "" };
+}
 // descEditAllowedFor is the description editor's lane gate. A click opens it
 // only on a Product-Backlog feature card; a promotion opens it on a card the
 // board is still rendering in Ideas, because the labels have come off the

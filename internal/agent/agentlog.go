@@ -83,13 +83,104 @@ type LaunchRecord struct {
 	RepoDir string `json:"repo_dir,omitempty"`
 }
 
-// OutcomeRecord is written on completion/reap: why and when a run ended.
+// The two dispositions a container ends in. A disposition is what happened to
+// the CONTAINER; it says nothing about how the process inside it ended, which
+// is why recording one used to destroy the other (SC-4820).
+const (
+	DispositionReaped  = "reaped"
+	DispositionStopped = "stopped"
+)
+
+// OutcomeRecord is written on completion/reap. It records TWO subjects with
+// two owners: how the process ended (Process/ExitCode/ExitKnown — only the tee
+// ever knows these) and how the container was disposed of (Disposition — only
+// teardown knows this). Reason is DERIVED from both at every write, so the
+// three readers that key off it (DiagnoseFailure, readAgentRunStats, `human
+// agent logs`) keep working while neither writer can erase the other's half.
 type OutcomeRecord struct {
-	Reason     string    `json:"reason"` // "completed" | "failed" | "reaped"
-	ExitCode   int       `json:"exit_code"`
-	DurationMs int64     `json:"duration_ms"`
-	Result     string    `json:"result,omitempty"`
-	EndedAt    time.Time `json:"ended_at"`
+	Reason string `json:"reason"` // derived: "completed" | "failed" | "reaped"
+	// ExitCode is meaningful only when ExitKnown; a zero with ExitKnown false
+	// is "nobody could establish a code", never a clean exit.
+	ExitCode  int  `json:"exit_code"`
+	ExitKnown bool `json:"exit_known,omitempty"`
+	// Process is "completed" | "failed", empty until the process's own ending
+	// has been observed.
+	Process string `json:"process,omitempty"`
+	// Disposition is DispositionReaped | DispositionStopped, empty when the
+	// container was never torn down (an exec that ended in a warm container).
+	Disposition string    `json:"disposition,omitempty"`
+	DurationMs  int64     `json:"duration_ms"`
+	Result      string    `json:"result,omitempty"`
+	EndedAt     time.Time `json:"ended_at"`
+}
+
+// deriveReason answers the one question every reader asks, from whichever
+// halves are on record. The process's own ending wins whenever it is known:
+// how a container was disposed of is not evidence about how its process ended,
+// and treating it as such is what filed an exit-1 run as "reaped"/0 (SC-4820).
+func deriveReason(o OutcomeRecord) string {
+	if o.Process != "" {
+		return o.Process
+	}
+	if o.Disposition == DispositionReaped {
+		return "reaped"
+	}
+	if o.Disposition == DispositionStopped {
+		return "completed"
+	}
+	return "failed"
+}
+
+// mergeOutcome applies one writer's half to outcome.json without disturbing the
+// other's, re-derives Reason, and writes the whole record back. A missing file
+// starts from the zero value; an unreadable one is overwritten rather than
+// allowed to block the write, because a record nobody can parse is worth less
+// than the half we hold.
+func (e *Execution) mergeOutcome(apply func(*OutcomeRecord)) error {
+	path := filepath.Join(e.dir, "outcome.json")
+	var o OutcomeRecord
+	_ = readJSONFile(path, &o)
+	apply(&o)
+	o.Reason = deriveReason(o)
+	return writeJSONFile(path, o)
+}
+
+// RecordProcessEnd records how the PROCESS ended. The tee at stream EOF is the
+// only observer that ever holds the exit code, so it owns these fields
+// outright: a later teardown adds its disposition beside them and never over
+// them. A clean exit (code 0) is "completed"; anything else — including a code
+// that could not be established — is "failed".
+func (e *Execution) RecordProcessEnd(code int, haveExit bool, endedAt time.Time, duration time.Duration) error {
+	return e.mergeOutcome(func(o *OutcomeRecord) {
+		o.Process = "failed"
+		if haveExit && code == 0 {
+			o.Process = "completed"
+		}
+		o.ExitCode, o.ExitKnown = code, haveExit
+		setEndingIfUnset(o, endedAt, duration)
+	})
+}
+
+// RecordDisposition records what happened to the CONTAINER. It deliberately
+// touches no process field: teardown does not know how the process ended, and
+// writing a zero-valued exit code here is the whole of SC-4820.
+func (e *Execution) RecordDisposition(disposition string, endedAt time.Time, duration time.Duration) error {
+	return e.mergeOutcome(func(o *OutcomeRecord) {
+		o.Disposition = disposition
+		setEndingIfUnset(o, endedAt, duration)
+	})
+}
+
+// setEndingIfUnset lets the FIRST writer fix when the run ended. The earlier of
+// the two observations is the nearer one to the actual ending, and a second
+// write would only push the timestamp out by the length of the teardown.
+func setEndingIfUnset(o *OutcomeRecord, endedAt time.Time, duration time.Duration) {
+	if o.EndedAt.IsZero() {
+		o.EndedAt = endedAt
+	}
+	if o.DurationMs == 0 {
+		o.DurationMs = duration.Milliseconds()
+	}
 }
 
 // Execution is the on-disk root for one run: <logsDir>/<agent>/<id>/.
@@ -138,22 +229,6 @@ func (e *Execution) OutputWriter() (io.WriteCloser, error) {
 // session transcript. Created lazily by the copy-out.
 func (e *Execution) TranscriptDir() string {
 	return filepath.Join(e.dir, "transcript")
-}
-
-// RecordOutcome writes outcome.json.
-func (e *Execution) RecordOutcome(o OutcomeRecord) error {
-	return writeJSONFile(filepath.Join(e.dir, "outcome.json"), o)
-}
-
-// HasOutcome reports whether outcome.json already exists for this execution.
-// PreserveExecutionArtifacts (the teardown path) is the authoritative writer
-// and always runs before the container is destroyed; recordExecOutcome (the
-// tee, at stream EOF) checks this first so it never clobbers a
-// teardown-written classification like "reaped" (SC-1688) — the tee is the
-// sole writer only in the no-teardown case, where no file exists yet.
-func (e *Execution) HasOutcome() bool {
-	_, err := os.Stat(filepath.Join(e.dir, "outcome.json"))
-	return err == nil
 }
 
 // ExecutionSummary is one run as surfaced to `human agent logs`.
@@ -234,26 +309,25 @@ func lookupExecution(meta Meta) *Execution {
 // whether or not anything could be preserved, so failures are swallowed. Every
 // remove path (Manager stop/delete and the daemon's async decommission bypass)
 // funnels through this one preservation step.
-func PreserveExecutionArtifacts(ctx context.Context, docker devcontainer.DockerClient, meta Meta, reason string) {
+func PreserveExecutionArtifacts(ctx context.Context, docker devcontainer.DockerClient, meta Meta) {
 	exe := lookupExecution(meta)
 	if exe == nil {
 		return
 	}
 	_ = CopyTranscript(ctx, docker, meta.ContainerID, meta.RemoteUser, exe.Launch.Worktree, exe.TranscriptDir())
-	_ = exe.RecordOutcome(OutcomeRecord{
-		Reason: reason, EndedAt: time.Now(),
-		DurationMs: time.Since(meta.CreatedAt).Milliseconds(),
-	})
+	_ = exe.RecordDisposition(stopDisposition(meta), time.Now(), time.Since(meta.CreatedAt))
 }
 
-// stopReason classifies why a run is ending at the remove choke point. The
-// zombie sweep marks reaped agents with StatusFailed; a plain stop is a
-// completion.
-func stopReason(meta Meta) string {
+// stopDisposition classifies what happened to the CONTAINER at the remove
+// choke point. The zombie sweep marks a reaped agent StatusFailed before
+// teardown; every other path through here is an ordinary stop. It answers
+// about the container alone — inferring the process's fate from the
+// container's status is what recorded a failed run as "completed" (SC-4820).
+func stopDisposition(meta Meta) string {
 	if meta.Status == StatusFailed {
-		return "reaped"
+		return DispositionReaped
 	}
-	return "completed"
+	return DispositionStopped
 }
 
 // PruneExecutions deletes execution dirs whose launch is older than

@@ -874,6 +874,15 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		DaemonID:         ds.daemonID,
 		Logger:           logger,
 	})
+	// An auxiliary per-ticket run (idea-draft, relate) is not a board stage, so
+	// its death is watched separately: it records on the ticket and spends no
+	// stage retry (SC-4820).
+	go daemon.RunAuxFailureWatch(ctx, ds.srv.HookEvents, daemon.AuxFailureDeps{
+		CommenterFor: boardPMCommenterFunc(ds.srv.Projects, ds.vaultResolver, ds.daemonID),
+		Lookup:       auxRunLookup,
+		Diagnose:     diagnoseFailure,
+		Logger:       logger,
+	})
 	// The live chain fires only on the one-shot exit hook; this pass re-scans
 	// comments to recover a handoff orphaned by a daemon restart or lost hook
 	// (SC-430).
@@ -2579,7 +2588,7 @@ func (c *dockerAgentCleaner) DecommissionAgent(name string) (string, error) {
 	if containerID != "" {
 		if docker, dErr := devcontainer.NewDockerClient(); dErr == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			agent.PreserveExecutionArtifacts(ctx, docker, meta, "reaped")
+			agent.PreserveExecutionArtifacts(ctx, docker, meta)
 			cancel()
 			_ = docker.Close()
 		}
@@ -4359,6 +4368,22 @@ func descEditEngine(reg *daemon.ProjectRegistry, resolver *vault.Resolver, daemo
 	}
 }
 
+// auxRunLookup reads an aux run's own execution record — the daemon package
+// cannot import internal/agent (import cycle), so it arrives as a function like
+// every other agent collaborator.
+func auxRunLookup(agentName string) daemon.AuxRunRecord {
+	execs, err := agent.ListExecutions(agentName)
+	if err != nil || len(execs) == 0 {
+		return daemon.AuxRunRecord{}
+	}
+	rec := daemon.AuxRunRecord{StartedAt: execs[0].Launch.StartedAt}
+	if oc := execs[0].Outcome; oc != nil {
+		rec.Known = true
+		rec.ProcessFailed = oc.Reason != "completed"
+	}
+	return rec
+}
+
 // boardPMCommenterFunc resolves the PM commenter for the board failure watcher,
 // signed so every marker it posts carries the daemon id as its machine: field
 // and BuildRevision as its build: field — the same choke-point signing the
@@ -4522,10 +4547,11 @@ func (s *dockerAgentSweeper) DeleteAgent(ctx context.Context, name string) error
 	defer func() { _ = docker.Close() }()
 
 	// The zombie sweep reaps a run that is gone/unresponsive: mark it StatusFailed
-	// before teardown so stopReason records outcome.json Reason:"reaped" (correct
-	// diagnosis) — never a spurious "completed". No handoff was posted, so the
-	// worktree is preserved for forensics regardless (SC-731). Best-effort: a
-	// missing meta just means it was already torn down.
+	// before teardown so stopDisposition records outcome.json
+	// disposition:"reaped" — the container's fate. How the PROCESS ended is the
+	// tee's to record and is no longer inferred from this status (SC-4820). No
+	// handoff was posted, so the worktree is preserved for forensics regardless
+	// (SC-731). Best-effort: a missing meta just means it was already torn down.
 	if meta, readErr := agent.ReadMeta(name); readErr == nil && meta.Status != agent.StatusFailed {
 		meta.Status = agent.StatusFailed
 		_ = agent.WriteMeta(meta)

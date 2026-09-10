@@ -308,6 +308,10 @@ type agentLaunchShape struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
+// agentOutcomeShape mirrors the one field readAgentRunStats needs. reason is
+// DERIVED on the agent side from how the process ended and how the container
+// was disposed of (SC-4820); this side reads only the summary, which is why the
+// split needed no change here.
 type agentOutcomeShape struct {
 	Reason string `json:"reason"` // "completed" | "failed" | "reaped"
 }

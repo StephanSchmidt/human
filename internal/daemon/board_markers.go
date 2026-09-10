@@ -240,7 +240,11 @@ const RunCancelledHeader = "[human:" + MarkerRunCancelled + "]"
 // "incomplete" (the run could not finish). found/none are terminal-complete;
 // incomplete is a visible record that still invites a manual re-run.
 const RelatedStartedHeader = "[human:related-started]"
-const RelatedHeader = "[human:related]"
+
+// MarkerRelated is the type behind RelatedHeader, named so a writer composing
+// the marker reads the same constant the header is built from.
+const MarkerRelated = "related"
+const RelatedHeader = "[human:" + MarkerRelated + "]"
 
 // MarkerIdeaDraft / IdeaDraftStartedHeader / IdeaDraftHeader bracket a
 // background idea-drafting run (SC-4608). Neither header moves the card: the
@@ -252,6 +256,14 @@ const RelatedHeader = "[human:related]"
 const MarkerIdeaDraft = "idea-draft"
 const IdeaDraftStartedHeader = "[human:idea-draft-started]"
 const IdeaDraftHeader = "[human:" + MarkerIdeaDraft + "]"
+
+// MarkerIdeaDraftFailed / IdeaDraftFailedHeader record a drafting run that died
+// without producing a draft (SC-4820). The daemon's aux failure watcher posts it,
+// because a run that dies on its first API call never gets a turn in which to
+// report. Like the other two drafter markers it is deliberately kept OUT of
+// orderedMarkerSpecs: it decorates an idea, it never moves it.
+const MarkerIdeaDraftFailed = "idea-draft-failed"
+const IdeaDraftFailedHeader = "[human:" + MarkerIdeaDraftFailed + "]"
 
 // ShippedPartialHeader marks the durable shipped-partial trace (SC-2910): the
 // PM ticket shipped with one or more acceptance criteria deliberately deferred
@@ -410,6 +422,8 @@ var daemonMarkerTypes = []string{
 	MarkerHandoffCheckUnreadable,
 	MarkerLateResultReconciled,
 	MarkerIdeaDraft,
+	MarkerIdeaDraftFailed,
+	MarkerRelated,
 }
 
 // markerSpec maps a marker header to the (stage, state) it represents.

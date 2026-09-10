@@ -24,17 +24,71 @@ type IssueDetailExtras struct {
 	ReviewFindings string // body of the newest [human:review-complete] comment, header line stripped
 	FailureReason  string // full diagnosis body of the newest *-failed marker (markdown, header stripped), via failureBody()
 	FixSummary     string // body of the newest [human:fix-summary] comment, header line stripped
+	// DraftState says which of three things an empty description is: "failed"
+	// (a background draft was attempted and died), "drafting" (one is running
+	// now), or "" (none was ever attempted, or one finished). Without it an
+	// empty pane covers all three (SC-4820).
+	DraftState string
+	// DraftFailureReason is the failed draft's diagnosis (markdown), empty
+	// unless DraftState is "failed".
+	DraftFailureReason string
 }
+
+// Draft state values. A closed set: the editor branches on exactly these.
+const (
+	DraftStateFailed   = "failed"
+	DraftStateDrafting = "drafting"
+)
 
 // BuildIssueDetailExtras parses the comment-sourced detail sections from a
 // ticket's comments. It never fails: absent sections yield empty strings, so a
 // comment-fetch failure that hands nil comments degrades to a zero-value struct
 // (AD-4) rather than blanking the panel.
 func BuildIssueDetailExtras(comments []tracker.Comment) IssueDetailExtras {
+	state, reason := draftState(comments)
 	return IssueDetailExtras{
-		ReviewFindings: reviewFindings(comments),
-		FailureReason:  latestFailureReason(comments),
-		FixSummary:     fixSummary(comments),
+		ReviewFindings:     reviewFindings(comments),
+		FailureReason:      latestFailureReason(comments),
+		FixSummary:         fixSummary(comments),
+		DraftState:         state,
+		DraftFailureReason: reason,
+	}
+}
+
+// draftState reads the newest of the drafter's three markers. Newest wins
+// because they bracket runs: a started marker after a failed one is a re-run in
+// flight, and a provenance record after either is a draft that landed.
+func draftState(comments []tracker.Comment) (state, reason string) {
+	var newest *tracker.Comment
+	var newestHeader string
+	for i := range comments {
+		trimmed := strings.TrimSpace(comments[i].Body)
+		var header string
+		switch {
+		case strings.HasPrefix(trimmed, IdeaDraftFailedHeader):
+			header = IdeaDraftFailedHeader
+		case strings.HasPrefix(trimmed, IdeaDraftStartedHeader):
+			header = IdeaDraftStartedHeader
+		case strings.HasPrefix(trimmed, IdeaDraftHeader):
+			header = IdeaDraftHeader
+		default:
+			continue
+		}
+		if newest == nil || commentNewer(comments[i], *newest) {
+			newest = &comments[i]
+			newestHeader = header
+		}
+	}
+	if newest == nil {
+		return "", ""
+	}
+	switch newestHeader {
+	case IdeaDraftFailedHeader:
+		return DraftStateFailed, failureBody(newest.Body)
+	case IdeaDraftStartedHeader:
+		return DraftStateDrafting, ""
+	default:
+		return "", ""
 	}
 }
 

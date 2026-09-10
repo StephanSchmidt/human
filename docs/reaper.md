@@ -377,13 +377,19 @@ The teardown choke point is `Manager.stopLocked` (`internal/agent/manager.go`):
    to lose (SC-731). The kept worktree has its HEAD **detached**, so it stops
    owning `refs/heads/<branch>` and cannot freeze the shared repo's local branch
    (SC-2322).
-4. **`outcome.json` records the classification** `DiagnoseFailure` keys off, so
-   the failed marker says what actually broke instead of a generic stage line.
+4. **`outcome.json` records TWO things with two owners** (SC-4820): how the
+   PROCESS ended (`process`, `exit_code`, `exit_known` — written only by the
+   tee at stream EOF, the only observer that ever holds the code) and how the
+   CONTAINER was disposed of (`disposition` — written only by teardown). The
+   `reason` field `DiagnoseFailure` keys off is derived from both on every
+   write, so the failed marker says what actually broke instead of a generic
+   stage line.
 5. **`output.log` always ends with an exit trailer** (`[human] claude exec exited
    with code …`), written by the tee when the exec stream EOFs — so an
    in-container run that dies while its warm container stays up still leaves a
-   diagnosable log rather than a 0-byte void (SC-1688). The tee never overwrites
-   an existing `outcome.json`, so it cannot clobber a `reaped` classification.
+   diagnosable log rather than a 0-byte void (SC-1688). The tee and teardown own
+   disjoint fields, so neither can clobber the other's half and the record no
+   longer depends on which ran first (SC-4820).
 6. **Execution directories are pruned after 90 days** (`execRetentionDays`,
    `PruneExecutions`).
 7. **A late-arriving result is reconciled, not left contradicting the reap.**
@@ -395,11 +401,16 @@ The teardown choke point is `Manager.stopLocked` (`internal/agent/manager.go`):
    silently disagree (SC-3853).
 
 One asymmetry worth knowing when reading artifacts: the zombie sweep marks the
-meta `StatusFailed` before teardown, so its runs record `reason: "reaped"`. The
-reconcile pass's hung-agent stop goes through `dockerAgentCleaner.DeleteAgent`,
-which does not, so a stage stopped by § 5 records `reason: "completed"` even
-though the machine killed it. The card's marker still says silence reap; the
-run's `outcome.json` does not.
+meta `StatusFailed` before teardown, so its runs record
+`disposition: "reaped"`. The reconcile pass's hung-agent stop goes through
+`dockerAgentCleaner.DeleteAgent`, which does not, so a stage stopped by § 5
+records `disposition: "stopped"` even though the machine killed it. `reason`
+now follows the process's own ending whenever one was observed, in both
+cases — so a run that was mid-write when it was killed still reads `"failed"`,
+and only a run whose process end could never be established falls back to the
+disposition-derived spelling. The card's marker still says silence reap; the
+run's `outcome.json`'s `disposition` does too — `reason` is no longer the only
+place that distinction lived.
 
 ## The daemon's own exit is not a reap, and ends work anyway
 

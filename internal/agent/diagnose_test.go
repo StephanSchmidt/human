@@ -34,7 +34,10 @@ func newRunFixture(t *testing.T, agentName, output string, outcome *OutcomeRecor
 		}
 	}
 	if outcome != nil {
-		if err := exe.RecordOutcome(*outcome); err != nil {
+		// Fixtures seed the record verbatim (a raw outcome.json, not one composed
+		// through RecordProcessEnd/RecordDisposition) so tests can set an exact
+		// Reason/Disposition combination independent of the derivation rule.
+		if err := writeJSONFile(filepath.Join(exe.Dir(), "outcome.json"), *outcome); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1533,9 +1533,11 @@ func TestServer_HandleTrackerIssue_ReturnsIssue(t *testing.T) {
 					Description: "As a product engineer I want the board to show builds.",
 				},
 				Extras: IssueDetailExtras{
-					ReviewFindings: "## Findings\nNil deref in foo",
-					FailureReason:  "boom",
-					FixSummary:     "## What happened\nfixed it",
+					ReviewFindings:     "## Findings\nNil deref in foo",
+					FailureReason:      "boom",
+					FixSummary:         "## What happened\nfixed it",
+					DraftState:         DraftStateFailed,
+					DraftFailureReason: "the run stopped before finishing this stage",
 				},
 			}, nil
 		}
@@ -1562,6 +1564,10 @@ func TestServer_HandleTrackerIssue_ReturnsIssue(t *testing.T) {
 	assert.Contains(t, result.ReviewFindingsHTML, "Nil deref in foo")
 	assert.Contains(t, result.FailureReasonHTML, "boom")
 	assert.Contains(t, result.FixSummaryHTML, "fixed it")
+	// SC-4820: the draft state and its (sanitized) failure detail cross the
+	// wire alongside the other comment-sourced extras.
+	assert.Equal(t, DraftStateFailed, result.DraftState)
+	assert.Contains(t, result.DraftFailureHTML, "the run stopped before finishing this stage")
 }
 
 // TestServer_HandleTrackerIssue_ExtrasAbsent covers the AD-4 degrade path: a
@@ -1585,6 +1591,8 @@ func TestServer_HandleTrackerIssue_ExtrasAbsent(t *testing.T) {
 	assert.Equal(t, "", result.ReviewFindingsHTML)
 	assert.Equal(t, "", result.FailureReasonHTML)
 	assert.Equal(t, "", result.FixSummaryHTML)
+	assert.Equal(t, "", result.DraftState)
+	assert.Equal(t, "", result.DraftFailureHTML)
 }
 
 func TestServer_HandleTrackerIssue_GetterError(t *testing.T) {

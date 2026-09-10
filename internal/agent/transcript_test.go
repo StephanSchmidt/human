@@ -264,12 +264,12 @@ func TestPreserveExecutionArtifacts_CopiesTranscriptAndOutcome(t *testing.T) {
 	}
 	meta := Meta{
 		Name: "d1", ContainerID: "cid", RemoteUser: "vscode",
-		CreatedAt: time.Now(), ExecutionID: exe.Launch.ID,
+		CreatedAt: time.Now(), ExecutionID: exe.Launch.ID, Status: StatusFailed,
 	}
 	docker := &copyMock{archive: func() io.ReadCloser {
 		return tarArchive(map[string]string{"projects/p/s.jsonl": "DECOM-DATA"})
 	}}
-	PreserveExecutionArtifacts(context.Background(), docker, meta, "reaped")
+	PreserveExecutionArtifacts(context.Background(), docker, meta)
 
 	data, err := os.ReadFile(filepath.Join(exe.TranscriptDir(), "projects", "p", "s.jsonl"))
 	if err != nil {
@@ -292,7 +292,7 @@ func TestPreserveExecutionArtifacts_NoExecutionIsNoop(t *testing.T) {
 
 	docker := &copyMock{archive: func() io.ReadCloser { return tarArchive(nil) }}
 	// No execution dir exists for this agent; preservation must be a silent no-op.
-	PreserveExecutionArtifacts(context.Background(), docker, Meta{Name: "ghost", ContainerID: "cid"}, "reaped")
+	PreserveExecutionArtifacts(context.Background(), docker, Meta{Name: "ghost", ContainerID: "cid", Status: StatusFailed})
 	if len(docker.calls) != 0 {
 		t.Fatalf("expected no docker calls, got %v", docker.calls)
 	}

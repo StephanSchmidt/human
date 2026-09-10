@@ -735,6 +735,30 @@ body {
   padding: 10px;
 }
 
+/* SC-4820: what an empty description pane means — a failed background draft,
+   one still being written, or one never attempted. --danger does not exist in
+   this file's palette; --failed is the board's existing failure accent. */
+.descedit-draft-notice {
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.descedit-draft-failed {
+  color: var(--failed);
+  border: 1px solid var(--failed);
+}
+.descedit-draft-drafting,
+.descedit-draft-none {
+  color: var(--muted);
+  border: 1px dashed var(--col-border);
+}
+.descedit-draft-detail {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
 .descedit-chat-pane {
   width: 360px;
   flex-shrink: 0;
