@@ -219,6 +219,11 @@ type IssueDetail struct {
 	ReviewFindingsHTML string `json:"reviewFindingsHTML,omitempty"`
 	FailureReasonHTML  string `json:"failureReasonHTML,omitempty"`
 	FixSummaryHTML     string `json:"fixSummaryHTML,omitempty"`
+	// DraftState/DraftFailureHTML tell the description editor apart three
+	// states an empty description can mean (SC-4820): "" (never drafted, or a
+	// draft landed), "drafting" (one is running now), "failed" (one died).
+	DraftState       string `json:"draftState,omitempty"`
+	DraftFailureHTML string `json:"draftFailureHTML,omitempty"`
 }
 
 // GetIssueDetail fetches one full ticket from the daemon. The detail panel
@@ -242,6 +247,8 @@ func (a *App) GetIssueDetail(trackerKind, trackerName, key string) (IssueDetail,
 		ReviewFindingsHTML: issue.ReviewFindingsHTML,
 		FailureReasonHTML:  issue.FailureReasonHTML,
 		FixSummaryHTML:     issue.FixSummaryHTML,
+		DraftState:         issue.DraftState,
+		DraftFailureHTML:   issue.DraftFailureHTML,
 	}, nil
 }
 

@@ -845,6 +845,8 @@ func (s *Server) handleTrackerIssue(conn net.Conn, args []string) {
 		ReviewFindingsHTML: RenderDescriptionHTML(detail.Extras.ReviewFindings),
 		FailureReasonHTML:  RenderDescriptionHTML(detail.Extras.FailureReason),
 		FixSummaryHTML:     RenderDescriptionHTML(detail.Extras.FixSummary),
+		DraftState:         detail.Extras.DraftState,
+		DraftFailureHTML:   RenderDescriptionHTML(detail.Extras.DraftFailureReason),
 	}
 	data, err := json.Marshal(result)
 	if err != nil {

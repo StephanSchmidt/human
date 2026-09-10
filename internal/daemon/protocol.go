@@ -58,6 +58,13 @@ type IssueDetailResult struct {
 	ReviewFindingsHTML string `json:"review_findings_html,omitempty"`
 	FailureReasonHTML  string `json:"failure_reason_html,omitempty"`
 	FixSummaryHTML     string `json:"fix_summary_html,omitempty"`
+	// DraftState is one of "" (no background draft attempted, or one landed),
+	// "drafting" (one is running now), or "failed" (one was attempted and
+	// died) — see IssueDetailExtras.DraftState (SC-4820).
+	DraftState string `json:"draft_state,omitempty"`
+	// DraftFailureHTML is the failed draft's diagnosis, sanitized HTML; empty
+	// unless DraftState is "failed".
+	DraftFailureHTML string `json:"draft_failure_html,omitempty"`
 }
 
 // IssueDetailFetch is what the daemon's issue getter returns: the full issue
