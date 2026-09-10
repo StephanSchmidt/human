@@ -210,6 +210,13 @@ var specs = map[string]spec{
 	// record that cannot say whose words those are cannot protect them.
 	"idea-draft-started": {},
 	"idea-draft":         {required: []string{"author"}, optional: []string{"description", "source"}},
+	// idea-draft-failed is posted by the DAEMON, not the drafter: a run that
+	// dies on its first API call never gets a turn in which to report, which is
+	// exactly the case that used to leave the ticket silent (SC-4820). Like the
+	// other two it records content — an idea does not enter the pipeline — so it
+	// moves nothing; `reason` is required for the same purpose as on every other
+	// *-failed marker, so the reader is never handed a bare header.
+	"idea-draft-failed": {required: []string{"reason"}},
 	// The durable "shipped-partial" trace (SC-2910, the deferred deliverable of
 	// SC-2848). Posted on the PM ticket when a deliberately-deferred acceptance
 	// criterion is sanctioned (the planner's ship-narrow-plus-follow-on fork):

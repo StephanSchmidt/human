@@ -874,6 +874,15 @@ func runDaemonForeground(cmd *cobra.Command, addr, chromeAddr, proxyAddr string,
 		DaemonID:         ds.daemonID,
 		Logger:           logger,
 	})
+	// An auxiliary per-ticket run (idea-draft, relate) is not a board stage, so
+	// its death is watched separately: it records on the ticket and spends no
+	// stage retry (SC-4820).
+	go daemon.RunAuxFailureWatch(ctx, ds.srv.HookEvents, daemon.AuxFailureDeps{
+		CommenterFor: boardPMCommenterFunc(ds.srv.Projects, ds.vaultResolver, ds.daemonID),
+		Lookup:       auxRunLookup,
+		Diagnose:     diagnoseFailure,
+		Logger:       logger,
+	})
 	// The live chain fires only on the one-shot exit hook; this pass re-scans
 	// comments to recover a handoff orphaned by a daemon restart or lost hook
 	// (SC-430).
@@ -4357,6 +4366,22 @@ func descEditEngine(reg *daemon.ProjectRegistry, resolver *vault.Resolver, daemo
 		ResolveCommenter: boardPMCommenterFunc(reg, resolver, daemonID),
 		Logger:           logger,
 	}
+}
+
+// auxRunLookup reads an aux run's own execution record — the daemon package
+// cannot import internal/agent (import cycle), so it arrives as a function like
+// every other agent collaborator.
+func auxRunLookup(agentName string) daemon.AuxRunRecord {
+	execs, err := agent.ListExecutions(agentName)
+	if err != nil || len(execs) == 0 {
+		return daemon.AuxRunRecord{}
+	}
+	rec := daemon.AuxRunRecord{StartedAt: execs[0].Launch.StartedAt}
+	if oc := execs[0].Outcome; oc != nil {
+		rec.Known = true
+		rec.ProcessFailed = oc.Reason != "completed"
+	}
+	return rec
 }
 
 // boardPMCommenterFunc resolves the PM commenter for the board failure watcher,

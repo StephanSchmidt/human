@@ -82,6 +82,12 @@ func TestDaemonPostedMarkersSatisfyTheirContract(t *testing.T) {
 		// applies a human's edit: the words are now the user's, and the record
 		// is what stops a redraft still in flight from writing over them.
 		{MarkerIdeaDraft, markerBody(ideadraft.HumanRecord("the applied description"), ideadraft.FieldOrder...)},
+		// SC-4820: the daemon's aux failure watcher posts these when a background
+		// idea-draft or relate run dies before it can report for itself.
+		{MarkerIdeaDraftFailed, markerBody(failureMarker(MarkerIdeaDraftFailed,
+			"the run stopped before finishing this stage — check the evidence below, then Retry\n\nlast output: [human] claude exec exited with code 1"))},
+		{MarkerRelated, markerBody(marker.Marker{Type: MarkerRelated, Head: "incomplete",
+			Body: "the run stopped before finishing this stage"})},
 	}
 
 	// A decision block only validates when its field order is the one the real
