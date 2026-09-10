@@ -78,6 +78,7 @@ import {
   descEditAllowedFor,
   buildDescriptionPreview,
   descEditShouldDiscardOnClose,
+  draftNotice,
 } from "./board-descedit.js";
 import { initProjectsView, showProjectsOverview, type RecentProject } from "./projectsview.js";
 import { runGuardedAction } from "./board-actions.js";
@@ -345,6 +346,11 @@ interface IssueDetailData {
   reviewFindingsHTML?: string;
   failureReasonHTML?: string;
   fixSummaryHTML?: string;
+  // draftState/draftFailureHTML: which of "failed"/"drafting"/"" the
+  // background idea drafter left this ticket in (SC-4820). The failure detail
+  // is daemon-sanitized HTML, safe to inject verbatim like the others above.
+  draftState?: string;
+  draftFailureHTML?: string;
 }
 
 interface DoctorCheck {
@@ -2972,6 +2978,11 @@ let descEdit: DescEditView = { state: "none", messages: [] };
 let descEditCard: Card | null = null;
 let descEditSavedDescription = "";
 let descEditSavedHTML: string | null = null;
+// descEditDraftState/descEditDraftFailureHTML: which of "failed"/"drafting"/""
+// the background idea drafter left this ticket in, and (when "failed") the
+// daemon-sanitized diagnosis (SC-4820).
+let descEditDraftState = "";
+let descEditDraftFailureHTML = "";
 let descEditTimer: number | null = null;
 const DESCEDIT_POLL_MS = 1000;
 
@@ -2995,6 +3006,8 @@ async function openDescEditModal(card: Card, opts: { promoted?: boolean } = {}):
   descEdit = { state: "none", messages: [] };
   descEditSavedDescription = card.description ?? "";
   descEditSavedHTML = null;
+  descEditDraftState = "";
+  descEditDraftFailureHTML = "";
 
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -3054,6 +3067,8 @@ async function openDescEditModal(card: Card, opts: { promoted?: boolean } = {}):
     if (descEditCard?.key !== card.key) return; // modal closed/reopened for a different ticket meanwhile
     descEditSavedDescription = detail.description || descEditSavedDescription;
     descEditSavedHTML = detail.descriptionHTML || null;
+    descEditDraftState = detail.draftState ?? "";
+    descEditDraftFailureHTML = detail.draftFailureHTML ?? "";
     renderDescEdit();
     const started = await go().StartDescEdit(card.key, descEditSavedDescription, false, opts.promoted ?? false);
     // The modal can be closed — or reopened on another ticket — while Start is
@@ -3101,18 +3116,27 @@ function renderDescEdit(): void {
   const descEl = document.getElementById("descedit-desc");
   if (descEl) {
     const preview = buildDescriptionPreview(descEditSavedDescription, descEdit.proposal, descEdit.state);
+    const notice = draftNotice(descEditDraftState, preview.text.trim() !== "");
+    const noticeHTML =
+      notice.kind === "none" && !notice.text
+        ? ""
+        : `<div class="descedit-draft-notice descedit-draft-${notice.kind}">${escapeHtml(notice.text)}</div>` +
+          (notice.kind === "failed" && descEditDraftFailureHTML
+            ? `<div class="descedit-draft-detail">${descEditDraftFailureHTML}</div>`
+            : "");
     descEl.classList.toggle("descedit-desc-preview", preview.isPreview);
     if (preview.isPreview) {
       descEl.classList.remove("rendered");
       descEl.innerHTML =
+        noticeHTML +
         `<div class="descedit-preview-badge">Proposed rewrite (unsaved)</div>` +
         `<div>${escapeHtml(preview.text).replaceAll("\n", "<br>")}</div>`;
     } else if (descEditSavedHTML && preview.text === descEditSavedDescription) {
       descEl.classList.add("rendered");
-      descEl.innerHTML = descEditSavedHTML;
+      descEl.innerHTML = noticeHTML + descEditSavedHTML;
     } else {
       descEl.classList.remove("rendered");
-      descEl.textContent = preview.text || "No description";
+      descEl.innerHTML = noticeHTML + (preview.text ? escapeHtml(preview.text).replaceAll("\n", "<br>") : "");
     }
   }
 

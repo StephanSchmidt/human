@@ -9,6 +9,7 @@ import {
   descEditAllowedFor,
   buildDescriptionPreview,
   descEditShouldDiscardOnClose,
+  draftNotice,
 } from "../build/board-descedit.js";
 
 // SC-2873: the Product-Backlog chat-assisted description editor. These pure
@@ -115,4 +116,31 @@ test("the descedit chat pane renders against chat rules style.css actually defin
     assert.match(css, new RegExp(`\\.${shared}\\s*\\{`), `style.css must define .${shared}`);
     assert.ok(!css.includes(`.${hook} {`), `.${hook} is a JS hook only — styling lives on .${shared}`);
   }
+});
+
+// SC-4820: an empty description pane used to cover three unrelated cases — no
+// draft attempted, one running now, one that died — indistinguishable to the
+// user. draftNotice resolves which of the three the pane is looking at.
+test("draftNotice reports a failed background draft", () => {
+  const n = draftNotice("failed", false);
+  assert.equal(n.kind, "failed");
+  assert.ok(n.text.length > 0);
+});
+
+test("draftNotice reports a draft still in flight", () => {
+  const n = draftNotice("drafting", false);
+  assert.equal(n.kind, "drafting");
+  assert.ok(n.text.length > 0);
+});
+
+test("draftNotice with no state and no description says none was ever attempted", () => {
+  const n = draftNotice(undefined, false);
+  assert.equal(n.kind, "none");
+  assert.ok(n.text.length > 0);
+});
+
+test("draftNotice with no state and a description says nothing — nothing to explain", () => {
+  const n = draftNotice(undefined, true);
+  assert.equal(n.kind, "none");
+  assert.equal(n.text, "");
 });

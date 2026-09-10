@@ -46,6 +46,32 @@ export function buildDescriptionPreview(saved: string, proposal: string | undefi
   return { text: saved, isPreview: false };
 }
 
+// draftNotice resolves what the description pane must SAY about the draft
+// behind it. An empty pane used to cover three different situations — no draft
+// was ever attempted, one is being written right now, and one was attempted and
+// died — and the user could only tell them apart by reading the container's log
+// by hand (SC-4820).
+export interface DescDraftNotice {
+  kind: "failed" | "drafting" | "none";
+  text: string;
+}
+
+export function draftNotice(state: string | undefined, hasDescription: boolean): DescDraftNotice {
+  if (state === "failed") {
+    return {
+      kind: "failed",
+      text: "The background draft failed — nothing was written. Ask for a rewrite below, or write the description yourself.",
+    };
+  }
+  if (state === "drafting") {
+    return { kind: "drafting", text: "A background draft is still being written…" };
+  }
+  if (!hasDescription) {
+    return { kind: "none", text: "No draft has been written for this ticket yet." };
+  }
+  return { kind: "none", text: "" };
+}
+
 // descEditAllowedFor is the description editor's lane gate. A click opens it
 // only on a Product-Backlog feature card; a promotion opens it on a card the
 // board is still rendering in Ideas, because the labels have come off the

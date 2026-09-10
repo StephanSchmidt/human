@@ -20,7 +20,7 @@ import { QUEUES, QUEUE_TRANSITION_TO, queueOf, isReworkable, reworkKind, isRevie
 import { linksWithin, arrowPath, plan, gapsBySide } from "./board-arrows.js";
 import { buildDeployControl } from "./board-deploy.js";
 import { buildCostSection, buildDetailSections, buildOptionsSection, buildShippedPartialSection, buildStopDecisionSection } from "./board-detail.js";
-import { descEditInputEnabled, descEditApplyEnabled, descEditAllowedFor, buildDescriptionPreview, descEditShouldDiscardOnClose, } from "./board-descedit.js";
+import { descEditInputEnabled, descEditApplyEnabled, descEditAllowedFor, buildDescriptionPreview, descEditShouldDiscardOnClose, draftNotice, } from "./board-descedit.js";
 import { initProjectsView, showProjectsOverview } from "./projectsview.js";
 import { runGuardedAction } from "./board-actions.js";
 import { reconcilePending, dropPending } from "./board-pending.js";
@@ -2387,6 +2387,11 @@ let descEdit = { state: "none", messages: [] };
 let descEditCard = null;
 let descEditSavedDescription = "";
 let descEditSavedHTML = null;
+// descEditDraftState/descEditDraftFailureHTML: which of "failed"/"drafting"/""
+// the background idea drafter left this ticket in, and (when "failed") the
+// daemon-sanitized diagnosis (SC-4820).
+let descEditDraftState = "";
+let descEditDraftFailureHTML = "";
 let descEditTimer = null;
 const DESCEDIT_POLL_MS = 1000;
 function stopDescEditPoll() {
@@ -2409,6 +2414,8 @@ async function openDescEditModal(card, opts = {}) {
     descEdit = { state: "none", messages: [] };
     descEditSavedDescription = card.description ?? "";
     descEditSavedHTML = null;
+    descEditDraftState = "";
+    descEditDraftFailureHTML = "";
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "descedit-overlay";
@@ -2468,6 +2475,8 @@ async function openDescEditModal(card, opts = {}) {
             return; // modal closed/reopened for a different ticket meanwhile
         descEditSavedDescription = detail.description || descEditSavedDescription;
         descEditSavedHTML = detail.descriptionHTML || null;
+        descEditDraftState = detail.draftState ?? "";
+        descEditDraftFailureHTML = detail.draftFailureHTML ?? "";
         renderDescEdit();
         const started = await go().StartDescEdit(card.key, descEditSavedDescription, false, opts.promoted ?? false);
         // The modal can be closed — or reopened on another ticket — while Start is
@@ -2517,20 +2526,28 @@ function renderDescEdit() {
     const descEl = document.getElementById("descedit-desc");
     if (descEl) {
         const preview = buildDescriptionPreview(descEditSavedDescription, descEdit.proposal, descEdit.state);
+        const notice = draftNotice(descEditDraftState, preview.text.trim() !== "");
+        const noticeHTML = notice.kind === "none" && !notice.text
+            ? ""
+            : `<div class="descedit-draft-notice descedit-draft-${notice.kind}">${escapeHtml(notice.text)}</div>` +
+                (notice.kind === "failed" && descEditDraftFailureHTML
+                    ? `<div class="descedit-draft-detail">${descEditDraftFailureHTML}</div>`
+                    : "");
         descEl.classList.toggle("descedit-desc-preview", preview.isPreview);
         if (preview.isPreview) {
             descEl.classList.remove("rendered");
             descEl.innerHTML =
-                `<div class="descedit-preview-badge">Proposed rewrite (unsaved)</div>` +
+                noticeHTML +
+                    `<div class="descedit-preview-badge">Proposed rewrite (unsaved)</div>` +
                     `<div>${escapeHtml(preview.text).replaceAll("\n", "<br>")}</div>`;
         }
         else if (descEditSavedHTML && preview.text === descEditSavedDescription) {
             descEl.classList.add("rendered");
-            descEl.innerHTML = descEditSavedHTML;
+            descEl.innerHTML = noticeHTML + descEditSavedHTML;
         }
         else {
             descEl.classList.remove("rendered");
-            descEl.textContent = preview.text || "No description";
+            descEl.innerHTML = noticeHTML + (preview.text ? escapeHtml(preview.text).replaceAll("\n", "<br>") : "");
         }
     }
     const transcript = document.getElementById("descedit-transcript");
