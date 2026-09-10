@@ -197,14 +197,14 @@ func TestTeeExecOutput_RecordsOutcomeOnExit(t *testing.T) {
 	}
 }
 
-// TestTeeExecOutput_DoesNotOverwriteExistingOutcome is the SC-1688 reap-path
-// regression test: stopLocked's PreserveExecutionArtifacts writes
-// outcome.json{reason:"reaped"} BEFORE ContainerStop/ContainerRemove, which
-// then EOFs the still-live tee. Pre-fix, the tee's own recordExecOutcome
-// unconditionally overwrote that record with {reason:"failed"}, clobbering
-// the classification DiagnoseFailure keys off. The write-only-if-absent guard
-// must let the teardown-authored "reaped" record survive.
-func TestTeeExecOutput_DoesNotOverwriteExistingOutcome(t *testing.T) {
+// TestTeeExecOutput_KeepsTheReapDispositionAndAddsTheExitCode is the SC-1688 /
+// SC-4820 reap-path regression test: stopLocked's PreserveExecutionArtifacts
+// writes outcome.json{disposition:"reaped"} BEFORE ContainerStop/ContainerRemove,
+// which then EOFs the still-live tee. The teardown's disposition must survive
+// the tee's later write (SC-1688) AND the tee's exit code must land in the same
+// record instead of being discarded by an order-dependent guard (SC-4820) — the
+// two writers now own disjoint fields, so both invariants hold from one record.
+func TestTeeExecOutput_KeepsTheReapDispositionAndAddsTheExitCode(t *testing.T) {
 	withLogRoot(t)
 	mgr := &Manager{Docker: &inspectTeeMock{}}
 	exe, err := NewExecution(LaunchRecord{ID: newExecID(), Agent: "tee", Prompt: "p", StartedAt: time.Now()})
@@ -214,7 +214,7 @@ func TestTeeExecOutput_DoesNotOverwriteExistingOutcome(t *testing.T) {
 	// Simulate PreserveExecutionArtifacts having already run on the reap path,
 	// before the container teardown that will EOF the tee below.
 	reapedAt := time.Now()
-	if err := exe.RecordOutcome(OutcomeRecord{Reason: "reaped", EndedAt: reapedAt}); err != nil {
+	if err := exe.RecordDisposition(DispositionReaped, reapedAt, time.Minute); err != nil {
 		t.Fatalf("seeding outcome.json: %v", err)
 	}
 
@@ -226,8 +226,11 @@ func TestTeeExecOutput_DoesNotOverwriteExistingOutcome(t *testing.T) {
 	if err := readJSONFile(filepath.Join(exe.Dir(), "outcome.json"), &oc); err != nil {
 		t.Fatalf("outcome.json must still exist: %v", err)
 	}
-	if oc.Reason != "reaped" {
-		t.Fatalf("outcome reason = %q, want reaped (teardown classification must survive the tee's EOF write)", oc.Reason)
+	if oc.Disposition != DispositionReaped {
+		t.Fatalf("outcome disposition = %q, want reaped (teardown classification must survive the tee's EOF write)", oc.Disposition)
+	}
+	if oc.ExitCode != 137 || oc.Reason != "failed" {
+		t.Fatalf("outcome exit_code/reason = %d/%q, want 137/failed (the tee's exit code must survive too)", oc.ExitCode, oc.Reason)
 	}
 }
 
@@ -237,7 +240,7 @@ func TestListExecutions_NewestFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := old.RecordOutcome(OutcomeRecord{Reason: "completed", EndedAt: time.Now()}); err != nil {
+	if err := old.RecordProcessEnd(0, true, time.Now(), 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := NewExecution(LaunchRecord{ID: "new", Agent: "a", StartedAt: time.Now()}); err != nil {
@@ -359,12 +362,12 @@ func TestPruneExecutions_KeepsRecentWorktree(t *testing.T) {
 	}
 }
 
-func TestStopReason(t *testing.T) {
-	if stopReason(Meta{Status: StatusFailed}) != "reaped" {
+func TestStopDisposition(t *testing.T) {
+	if stopDisposition(Meta{Status: StatusFailed}) != DispositionReaped {
 		t.Fatal("failed status should map to reaped")
 	}
-	if stopReason(Meta{Status: StatusRunning}) != "completed" {
-		t.Fatal("running/stop should map to completed")
+	if stopDisposition(Meta{Status: StatusRunning}) != DispositionStopped {
+		t.Fatal("running/stop should map to stopped")
 	}
 }
 

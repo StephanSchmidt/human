@@ -131,10 +131,9 @@ func (m *Manager) Start(ctx context.Context, opts StartOpts) (Meta, error) {
 			// The agent process never started; don't leave a container tracked
 			// as a running agent. Best-effort teardown, then surface the error.
 			if exe != nil {
-				_ = exe.RecordOutcome(OutcomeRecord{
-					Reason: "failed", EndedAt: time.Now(),
-					DurationMs: time.Since(exe.Launch.StartedAt).Milliseconds(),
-				})
+				// The process never started, so no exit code exists to record —
+				// haveExit false, which reads as "failed" without fabricating a 0.
+				_ = exe.RecordProcessEnd(0, false, time.Now(), time.Since(exe.Launch.StartedAt))
 			}
 			timeout := 10
 			_ = m.Docker.ContainerStop(ctx, dcMeta.ContainerID, &timeout)
@@ -338,32 +337,16 @@ func writeExecExitTrailer(w io.Writer, code int, haveExit bool) {
 	_, _ = fmt.Fprintf(w, "\n%sunknown\n", execExitTrailerPrefix)
 }
 
-// recordExecOutcome writes outcome.json from the tee, so the record exists the
-// moment the exec ends regardless of container teardown. A clean exit (code 0)
-// is "completed"; anything else — including an unknown code — is "failed".
-//
-// It never overwrites an outcome.json that already exists. stopLocked's
-// PreserveExecutionArtifacts writes outcome.json{reason:"reaped"} BEFORE
-// stopping/removing the container, which EOFs this same tee; without the
-// guard the tee's own write below would race in afterwards and clobber the
-// authoritative "reaped" classification DiagnoseFailure keys off, mislabeling
-// reaped agents as "failed" (SC-1688). The tee is the sole writer only when
-// no teardown ever runs (an in-container review dying while the warm
-// container stays up) — the case this recording exists to fix.
+// recordExecOutcome writes the tee's half of outcome.json at stream EOF: the
+// exit code, and whether the process completed or failed. It writes
+// unconditionally — the guard that used to make it skip an existing record
+// (SC-1688) protected teardown's classification by discarding the only
+// observation of the exit code, which made the ORDER of the two writers decide
+// the record instead of what each of them knew (SC-4820). The two now own
+// disjoint fields, so neither can clobber the other and precedence no longer
+// depends on who ran first.
 func recordExecOutcome(exe *Execution, code int, haveExit bool) {
-	if exe.HasOutcome() {
-		return
-	}
-	reason := "failed"
-	if haveExit && code == 0 {
-		reason = "completed"
-	}
-	_ = exe.RecordOutcome(OutcomeRecord{
-		Reason:     reason,
-		ExitCode:   code,
-		DurationMs: time.Since(exe.Launch.StartedAt).Milliseconds(),
-		EndedAt:    time.Now(),
-	})
+	_ = exe.RecordProcessEnd(code, haveExit, time.Now(), time.Since(exe.Launch.StartedAt))
 }
 
 // agentLocks serialises lifecycle operations per agent name. Stop/Delete can be
@@ -405,7 +388,7 @@ func (m *Manager) stopLocked(ctx context.Context, name string) error {
 		// Persist the transcript and outcome before the container (and its
 		// ~/.claude/projects transcript) are destroyed — the whole point of
 		// SC-216.
-		PreserveExecutionArtifacts(ctx, m.Docker, meta, stopReason(meta))
+		PreserveExecutionArtifacts(ctx, m.Docker, meta)
 		timeout := 10
 		_ = m.Docker.ContainerStop(ctx, meta.ContainerID, &timeout)
 		_ = m.Docker.ContainerRemove(ctx, meta.ContainerID, devcontainer.ContainerRemoveOptions{Force: true})

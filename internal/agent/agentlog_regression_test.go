@@ -74,7 +74,7 @@ func TestPreserveExecutionArtifacts_ScopesTranscriptToRun(t *testing.T) {
 		"/home/vscode/.claude/projects/-w-run-b/b.jsonl": "RUN-B-DATA",
 	}}
 
-	PreserveExecutionArtifacts(context.Background(), docker, meta, "reaped")
+	PreserveExecutionArtifacts(context.Background(), docker, meta)
 
 	got := readTree(t, exe.TranscriptDir())
 	if !strings.Contains(got, "RUN-A-DATA") {
@@ -133,7 +133,7 @@ func TestPreserveExecutionArtifacts_CostScopedToRun(t *testing.T) {
 		"/home/vscode/.claude/projects/-w-run-b/b.jsonl": makeUsageLine("claude-opus-4-8", now, 111, 222, 333, 444),
 	}}
 
-	PreserveExecutionArtifacts(context.Background(), docker, meta, "reaped")
+	PreserveExecutionArtifacts(context.Background(), docker, meta)
 
 	summary, err := claude.CalculateUsage(claude.OSDirWalker{}, exe.TranscriptDir(), now)
 	if err != nil {

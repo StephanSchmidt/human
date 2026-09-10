@@ -2579,7 +2579,7 @@ func (c *dockerAgentCleaner) DecommissionAgent(name string) (string, error) {
 	if containerID != "" {
 		if docker, dErr := devcontainer.NewDockerClient(); dErr == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			agent.PreserveExecutionArtifacts(ctx, docker, meta, "reaped")
+			agent.PreserveExecutionArtifacts(ctx, docker, meta)
 			cancel()
 			_ = docker.Close()
 		}
@@ -4522,10 +4522,11 @@ func (s *dockerAgentSweeper) DeleteAgent(ctx context.Context, name string) error
 	defer func() { _ = docker.Close() }()
 
 	// The zombie sweep reaps a run that is gone/unresponsive: mark it StatusFailed
-	// before teardown so stopReason records outcome.json Reason:"reaped" (correct
-	// diagnosis) — never a spurious "completed". No handoff was posted, so the
-	// worktree is preserved for forensics regardless (SC-731). Best-effort: a
-	// missing meta just means it was already torn down.
+	// before teardown so stopDisposition records outcome.json
+	// disposition:"reaped" — the container's fate. How the PROCESS ended is the
+	// tee's to record and is no longer inferred from this status (SC-4820). No
+	// handoff was posted, so the worktree is preserved for forensics regardless
+	// (SC-731). Best-effort: a missing meta just means it was already torn down.
 	if meta, readErr := agent.ReadMeta(name); readErr == nil && meta.Status != agent.StatusFailed {
 		meta.Status = agent.StatusFailed
 		_ = agent.WriteMeta(meta)
